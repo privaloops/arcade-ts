@@ -599,16 +599,13 @@ export class CPS1Video {
 
             if (planeBase + 3 >= gfxRomLen) continue;
 
-            const b0 = gfxRom[planeBase]!;
-            const b1 = gfxRom[planeBase + 1]!;
-            const b2 = gfxRom[planeBase + 2]!;
-            const b3 = gfxRom[planeBase + 3]!;
+            // MAME planeoffset: byte[3]=plane0(bit0), byte[0]=plane3(bit3)
+            // decodeRow expects: b0=bit0, b1=bit1, b2=bit2, b3=bit3
+            const b0 = gfxRom[planeBase + 3]!; // plane 0 = bit 0
+            const b1 = gfxRom[planeBase + 2]!; // plane 1 = bit 1
+            const b2 = gfxRom[planeBase + 1]!; // plane 2 = bit 2
+            const b3 = gfxRom[planeBase]!;     // plane 3 = bit 3
 
-            // Skip fully transparent row (all pixels = 15 means all planes set)
-            // Quick zero check: if all 4 bytes are 0xFF, all pixels are 15
-            // No quick skip otherwise — decode
-
-            // Decode 8 pixels at once
             decodeRow(b0, b1, b2, b3, rowBuf, 0);
 
             // Blit the 8 pixels
@@ -766,12 +763,14 @@ export class CPS1Video {
       const fbRowBase = drawY * SCREEN_WIDTH;
 
       // Decode left half (pixels 0-7)
+      // decodeRow args: b0=bit0, b1=bit1, b2=bit2, b3=bit3
+      // MAME planeoffset: byte[3]=plane0(bit0), byte[2]=plane1, byte[1]=plane2, byte[0]=plane3(bit3)
       if (rowBase + 3 < gfxRomLen) {
-        decodeRow(gfxRom[rowBase]!, gfxRom[rowBase + 1]!, gfxRom[rowBase + 2]!, gfxRom[rowBase + 3]!, rowBuf, 0);
+        decodeRow(gfxRom[rowBase + 3]!, gfxRom[rowBase + 2]!, gfxRom[rowBase + 1]!, gfxRom[rowBase]!, rowBuf, 0);
       }
       // Decode right half (pixels 8-15)
       if (rowBase + 7 < gfxRomLen) {
-        decodeRow(gfxRom[rowBase + 4]!, gfxRom[rowBase + 5]!, gfxRom[rowBase + 6]!, gfxRom[rowBase + 7]!, rowBuf, 8);
+        decodeRow(gfxRom[rowBase + 7]!, gfxRom[rowBase + 6]!, gfxRom[rowBase + 5]!, gfxRom[rowBase + 4]!, rowBuf, 8);
       }
 
       // Blit 16 pixels
