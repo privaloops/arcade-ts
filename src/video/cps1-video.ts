@@ -506,10 +506,10 @@ export class CPS1Video {
           if (planeBase + 3 >= gfxRomLen) continue;
 
           const colorIdx =
-            ((gfxRom[planeBase + 3]! >> bit) & 1) |
-            (((gfxRom[planeBase + 2]! >> bit) & 1) << 1) |
-            (((gfxRom[planeBase + 1]! >> bit) & 1) << 2) |
-            (((gfxRom[planeBase]! >> bit) & 1) << 3);
+            ((gfxRom[planeBase]! >> bit) & 1) |
+            (((gfxRom[planeBase + 1]! >> bit) & 1) << 1) |
+            (((gfxRom[planeBase + 2]! >> bit) & 1) << 2) |
+            (((gfxRom[planeBase + 3]! >> bit) & 1) << 3);
 
           if (colorIdx === 15) continue;
           fb32[screenY * SCREEN_WIDTH + screenX] = palCache[palette * 16 + colorIdx]!;
@@ -599,12 +599,10 @@ export class CPS1Video {
 
             if (planeBase + 3 >= gfxRomLen) continue;
 
-            // MAME planeoffset: byte[3]=plane0(bit0), byte[0]=plane3(bit3)
-            // decodeRow expects: b0=bit0, b1=bit1, b2=bit2, b3=bit3
-            const b0 = gfxRom[planeBase + 3]!; // plane 0 = bit 0
-            const b1 = gfxRom[planeBase + 2]!; // plane 1 = bit 1
-            const b2 = gfxRom[planeBase + 1]!; // plane 2 = bit 2
-            const b3 = gfxRom[planeBase]!;     // plane 3 = bit 3
+            const b0 = gfxRom[planeBase]!;
+            const b1 = gfxRom[planeBase + 1]!;
+            const b2 = gfxRom[planeBase + 2]!;
+            const b3 = gfxRom[planeBase + 3]!;
 
             decodeRow(b0, b1, b2, b3, rowBuf, 0);
 
@@ -678,9 +676,15 @@ export class CPS1Video {
       const flipX = (colour >> 5) & 1;
       const flipY = (colour >> 6) & 1;
 
+      // MAME bank-maps the base code ONCE, then computes sub-tiles from the mapped code.
+      const mappedBaseCode = gfxromBankMapper(GFXTYPE_SPRITES, code);
+      if (mappedBaseCode === -1) continue;
+
       if (colour & 0xFF00) {
         // Multi-tile (blocked) sprite
-        // MAME does tile arithmetic on RAW code, then bank-maps each sub-tile
+        // MAME: code = gfxrom_bank_mapper(GFXTYPE_SPRITES, code); then
+        //   (code & ~0xf) + ((code + nxs) & 0xf) + 0x10 * nys
+        // Sub-tile arithmetic is on the ALREADY MAPPED code.
         const nx = ((colour >> 8) & 0x0F) + 1;
         const ny = ((colour >> 12) & 0x0F) + 1;
 
@@ -692,25 +696,21 @@ export class CPS1Video {
             if (sx >= SCREEN_WIDTH || sx + 15 < 0) continue;
             if (sy >= SCREEN_HEIGHT || sy + 15 < 0) continue;
 
-            // Calculate sub-tile from RAW code (before bank mapping)
-            let rawTile: number;
+            // Sub-tile offset computed from the mapped base code (matches MAME)
+            let tileCode: number;
             if (flipY) {
               if (flipX) {
-                rawTile = (code & ~0x0F) + ((code + (nx - 1) - nxs) & 0x0F) + 0x10 * (ny - 1 - nys);
+                tileCode = (mappedBaseCode & ~0x0F) + ((mappedBaseCode + (nx - 1) - nxs) & 0x0F) + 0x10 * (ny - 1 - nys);
               } else {
-                rawTile = (code & ~0x0F) + ((code + nxs) & 0x0F) + 0x10 * (ny - 1 - nys);
+                tileCode = (mappedBaseCode & ~0x0F) + ((mappedBaseCode + nxs) & 0x0F) + 0x10 * (ny - 1 - nys);
               }
             } else {
               if (flipX) {
-                rawTile = (code & ~0x0F) + ((code + (nx - 1) - nxs) & 0x0F) + 0x10 * nys;
+                tileCode = (mappedBaseCode & ~0x0F) + ((mappedBaseCode + (nx - 1) - nxs) & 0x0F) + 0x10 * nys;
               } else {
-                rawTile = (code & ~0x0F) + ((code + nxs) & 0x0F) + 0x10 * nys;
+                tileCode = (mappedBaseCode & ~0x0F) + ((mappedBaseCode + nxs) & 0x0F) + 0x10 * nys;
               }
             }
-
-            // Bank-map each sub-tile individually
-            const tileCode = gfxromBankMapper(GFXTYPE_SPRITES, rawTile);
-            if (tileCode === -1) continue;
 
             this.drawSpriteTileFast(
               fb32, palCache, gfxRom, gfxRomLen, rowBuf,
@@ -721,11 +721,9 @@ export class CPS1Video {
         }
       } else {
         // Single 16x16 sprite tile
-        const mappedCode = gfxromBankMapper(GFXTYPE_SPRITES, code);
-        if (mappedCode === -1) continue;
         this.drawSpriteTileFast(
           fb32, palCache, gfxRom, gfxRomLen, rowBuf,
-          mappedCode, col, flipX, flipY,
+          mappedBaseCode, col, flipX, flipY,
           (x & 0x1FF) - CPS_HBEND, (y & 0x1FF) - CPS_VBEND,
         );
       }
@@ -763,14 +761,12 @@ export class CPS1Video {
       const fbRowBase = drawY * SCREEN_WIDTH;
 
       // Decode left half (pixels 0-7)
-      // decodeRow args: b0=bit0, b1=bit1, b2=bit2, b3=bit3
-      // MAME planeoffset: byte[3]=plane0(bit0), byte[2]=plane1, byte[1]=plane2, byte[0]=plane3(bit3)
       if (rowBase + 3 < gfxRomLen) {
-        decodeRow(gfxRom[rowBase + 3]!, gfxRom[rowBase + 2]!, gfxRom[rowBase + 1]!, gfxRom[rowBase]!, rowBuf, 0);
+        decodeRow(gfxRom[rowBase]!, gfxRom[rowBase + 1]!, gfxRom[rowBase + 2]!, gfxRom[rowBase + 3]!, rowBuf, 0);
       }
       // Decode right half (pixels 8-15)
       if (rowBase + 7 < gfxRomLen) {
-        decodeRow(gfxRom[rowBase + 7]!, gfxRom[rowBase + 6]!, gfxRom[rowBase + 5]!, gfxRom[rowBase + 4]!, rowBuf, 8);
+        decodeRow(gfxRom[rowBase + 4]!, gfxRom[rowBase + 5]!, gfxRom[rowBase + 6]!, gfxRom[rowBase + 7]!, rowBuf, 8);
       }
 
       // Blit 16 pixels
