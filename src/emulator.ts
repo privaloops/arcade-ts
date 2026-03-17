@@ -20,6 +20,9 @@ import { Renderer, FRAMEBUFFER_SIZE } from "./video/renderer";
 import { CPS1Video } from "./video/cps1-video";
 import { InputManager } from "./input/input";
 import { loadRomFromZip, RomSet } from "./memory/rom-loader";
+import { YM2151 } from "./audio/ym2151";
+import { OKI6295 } from "./audio/oki6295";
+import { AudioOutput } from "./audio/audio-output";
 
 // ── Timing constants (from MAME cps1.h) ─────────────────────────────────────
 //
@@ -72,6 +75,16 @@ export class Emulator {
   private readonly input: InputManager;
   private video: CPS1Video | null = null;
 
+  // Audio chips
+  private ym2151: YM2151;
+  private oki6295: OKI6295 | null = null;
+  private audioOutput: AudioOutput;
+
+  // Audio scratch buffers (allocated once, reused per frame)
+  private ymBufferL: Float32Array;
+  private ymBufferR: Float32Array;
+  private okiBuffer: Float32Array;
+
   // Framebuffer produced by video layer (384x224 RGBA).
   private readonly framebuffer: Uint8Array;
 
@@ -88,6 +101,38 @@ export class Emulator {
     this.renderer = new Renderer(canvas);
     this.input = new InputManager();
     this.framebuffer = new Uint8Array(FRAMEBUFFER_SIZE);
+
+    // Audio chips
+    this.ym2151 = new YM2151();
+    this.audioOutput = new AudioOutput();
+
+    // Pre-allocate audio scratch buffers for one frame
+    // YM2151: 55930 Hz / ~59.637 fps ≈ 938 samples/frame (round up)
+    // OKI6295: 7575 Hz / ~59.637 fps ≈ 127 samples/frame (round up)
+    this.ymBufferL = new Float32Array(1024);
+    this.ymBufferR = new Float32Array(1024);
+    this.okiBuffer = new Float32Array(256);
+
+    // Wire YM2151 timer overflow → Z80 IRQ (IM1: jump to 0x0038)
+    this.ym2151.setTimerCallback(() => {
+      this.z80.irq();
+    });
+
+    // Wire Z80 bus → YM2151 chip
+    this.z80Bus.setYm2151AddressWriteCallback((value: number) => {
+      this.ym2151.writeAddress(value);
+    });
+    this.z80Bus.setYm2151WriteCallback((_register: number, data: number) => {
+      this.ym2151.writeData(data);
+    });
+    this.z80Bus.setYm2151ReadStatusCallback(() => {
+      return this.ym2151.readStatus();
+    });
+
+    // Wire Z80 bus → OKI6295 chip (connected in loadRom when ROM is available)
+    this.z80Bus.setOkiReadStatusCallback(() => {
+      return this.oki6295 !== null ? this.oki6295.read() : 0;
+    });
 
     // Wire up IRQ acknowledge: when the 68000 processes an interrupt,
     // it performs an IACK cycle that clears all interrupt lines.
@@ -112,6 +157,12 @@ export class Emulator {
       this.bus.getCpsaRegisters(),
       this.bus.getCpsbRegisters(),
     );
+
+    // Create OKI6295 with its ROM data and wire to Z80 bus
+    this.oki6295 = new OKI6295(romSet.okiRom);
+    this.z80Bus.setOkiWriteCallback((value: number) => {
+      this.oki6295!.write(value);
+    });
 
     this.romLoaded = true;
 
@@ -195,11 +246,26 @@ export class Emulator {
     this.bus.getIoPorts().set(state.ioPorts);
   }
 
+  // ── Audio ────────────────────────────────────────────────────────────────
+
+  /**
+   * Initialize audio output. Must be called from a user gesture (click/keydown).
+   * Safe to call multiple times — subsequent calls are no-ops.
+   */
+  async initAudio(): Promise<void> {
+    try {
+      await this.audioOutput.init();
+    } catch (e) {
+      console.warn('Audio initialization failed (game will run without sound):', e);
+    }
+  }
+
   // ── Cleanup ───────────────────────────────────────────────────────────────
 
   destroy(): void {
     this.stop();
     this.input.destroy();
+    this.audioOutput.suspend();
   }
 
   // ── Private: main loop ────────────────────────────────────────────────────
@@ -264,7 +330,26 @@ export class Emulator {
       }
     }
 
-    // 5. Debug: log state periodically
+    // 5. Generate audio samples for this frame and push to output
+    if (this.audioOutput.isInitialized()) {
+      // YM2151: 55930 Hz / ~59.637 fps ≈ 938 samples per frame
+      const ymSamplesPerFrame = Math.ceil(this.ym2151.getSampleRate() / FRAME_RATE);
+      this.ym2151.generateSamples(this.ymBufferL, this.ymBufferR, ymSamplesPerFrame);
+
+      // OKI6295: 7575 Hz / ~59.637 fps ≈ 127 samples per frame
+      let okiSamplesPerFrame = 0;
+      if (this.oki6295 !== null) {
+        okiSamplesPerFrame = Math.ceil(this.oki6295.getSampleRate() / FRAME_RATE);
+        this.oki6295.generateSamples(this.okiBuffer, okiSamplesPerFrame);
+      }
+
+      this.audioOutput.pushEmulatorSamples(
+        this.ymBufferL, this.ymBufferR, ymSamplesPerFrame,
+        this.okiBuffer, okiSamplesPerFrame,
+      );
+    }
+
+    // 6. Debug: log state periodically
     if (this.frameCount < 3 || this.frameCount === 60 || this.frameCount === 300 || this.frameCount === 600 || this.frameCount % 300 === 0) {
       const vram = this.bus.getVram();
       let vramNonZero = 0;
@@ -290,7 +375,7 @@ export class Emulator {
     }
     this.frameCount++;
 
-    // 6. Render the frame
+    // 7. Render the frame
     this.renderFrame();
   }
 

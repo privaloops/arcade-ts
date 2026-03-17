@@ -41,7 +41,10 @@ export class Z80Bus implements Z80BusInterface {
 
   // Callbacks for chip communication
   private onYm2151Write: ((register: number, data: number) => void) | null;
+  private onYm2151AddressWrite: ((value: number) => void) | null;
+  private onYm2151ReadStatus: (() => number) | null;
   private onOkiWrite: ((value: number) => void) | null;
+  private onOkiReadStatus: (() => number) | null;
 
   constructor() {
     this.audioRom = new Uint8Array(0);
@@ -53,7 +56,10 @@ export class Z80Bus implements Z80BusInterface {
     this.okiCommand = 0;
     this.okiStatus = 0;
     this.onYm2151Write = null;
+    this.onYm2151AddressWrite = null;
+    this.onYm2151ReadStatus = null;
     this.onOkiWrite = null;
+    this.onOkiReadStatus = null;
   }
 
   loadAudioRom(data: Uint8Array): void {
@@ -78,6 +84,18 @@ export class Z80Bus implements Z80BusInterface {
 
   setOkiStatus(status: number): void {
     this.okiStatus = status & 0xFF;
+  }
+
+  setYm2151AddressWriteCallback(callback: (value: number) => void): void {
+    this.onYm2151AddressWrite = callback;
+  }
+
+  setYm2151ReadStatusCallback(callback: () => number): void {
+    this.onYm2151ReadStatus = callback;
+  }
+
+  setOkiReadStatusCallback(callback: () => number): void {
+    this.onOkiReadStatus = callback;
   }
 
   read(address: number): number {
@@ -119,6 +137,9 @@ export class Z80Bus implements Z80BusInterface {
 
     if (address === 0xF002) {
       // OKI6295 status
+      if (this.onOkiReadStatus !== null) {
+        return this.onOkiReadStatus();
+      }
       return this.okiStatus;
     }
 
@@ -127,14 +148,12 @@ export class Z80Bus implements Z80BusInterface {
       return this.soundLatchValue;
     }
 
-    if (address === 0xF006) {
-      // YM2151 register select (read returns status on real hardware)
-      // YM2151 status: bit 7 = busy, bit 0-1 = timer flags
-      return 0x00; // not busy, no timer flags
-    }
-
-    if (address === 0xF008) {
-      // YM2151 data (read returns status)
+    if (address === 0xF006 || address === 0xF008) {
+      // YM2151 status register (readable from both addresses)
+      // Bit 7 = busy, bit 1 = timer B overflow, bit 0 = timer A overflow
+      if (this.onYm2151ReadStatus !== null) {
+        return this.onYm2151ReadStatus();
+      }
       return 0x00;
     }
 
@@ -190,6 +209,9 @@ export class Z80Bus implements Z80BusInterface {
     // YM2151 register select
     if (address === 0xF006) {
       this.ym2151Register = value;
+      if (this.onYm2151AddressWrite !== null) {
+        this.onYm2151AddressWrite(value);
+      }
       return;
     }
 

@@ -30,6 +30,16 @@ ctx.fillRect(0, 0, canvas.width, canvas.height);
 
 const emulator = new Emulator(canvas);
 
+// ── Audio init (requires user gesture) ──────────────────────────────────────
+
+const initAudio = (): void => {
+  void emulator.initAudio();
+  window.removeEventListener("click", initAudio);
+  window.removeEventListener("keydown", initAudio);
+};
+window.addEventListener("click", initAudio);
+window.addEventListener("keydown", initAudio);
+
 // ── ROM drag & drop ──────────────────────────────────────────────────────────
 
 function setStatus(message: string): void {
