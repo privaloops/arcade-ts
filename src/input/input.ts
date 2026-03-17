@@ -177,17 +177,24 @@ export class InputManager {
    * Call this once per frame before the 68000 runs.
    */
   updateBusPorts(ioPorts: Uint8Array): void {
-    // IN0 at offset 0x00-0x01 (relative to 0x800140)
-    ioPorts[0] = this.readPort(0);
-    ioPorts[1] = this.readPort(1);
+    // Bus layout (matching MAME cps1.cpp):
+    //   0x800000-0x800007 = IN1 → ioPorts[0..7]
+    //     byte 0: P1 directions + buttons 1-3
+    //     byte 1: P1 buttons 4-6
+    //     byte 2: P2 directions + buttons 1-3
+    //     byte 3: P2 buttons 4-6
+    //   0x800018-0x80001F = system/DIP → ioPorts[8..15]
+    //     byte 8: coins, starts, service
 
-    // IN1 at offset 0x02-0x03
-    ioPorts[2] = this.readPort(2);
-    ioPorts[3] = this.readPort(3);
+    // IN1: Player inputs at offsets 0-3 (read at 0x800000+)
+    ioPorts[0] = this.readPort(0);  // P1 low
+    ioPorts[1] = this.readPort(1);  // P1 high
+    ioPorts[2] = this.readPort(2);  // P2 low
+    ioPorts[3] = this.readPort(3);  // P2 high
 
-    // IN2 at offset 0x04-0x05
-    ioPorts[4] = this.readPort(4);
-    ioPorts[5] = 0xFF; // unused high byte
+    // IN2: Coins/starts at offset 8 (read at 0x800018+)
+    ioPorts[8] = this.readPort(4);  // coins, starts, service
+    ioPorts[9] = 0xFF;              // unused
   }
 
   /**
@@ -344,15 +351,16 @@ export class InputManager {
     if (this.keyState.has(m2.coin) || this.isGamepadButton(gp2, GP_SELECT)) {
       value &= ~(1 << 1);
     }
-    // Bit 2: Start 1
+    // Bit 2: Service — not mapped
+    // Bit 3: Unknown
+    // Bit 4: Start 1
     if (this.keyState.has(m1.start) || this.isGamepadButton(gp1, GP_START)) {
-      value &= ~(1 << 2);
+      value &= ~(1 << 4);
     }
-    // Bit 3: Start 2
+    // Bit 5: Start 2
     if (this.keyState.has(m2.start) || this.isGamepadButton(gp2, GP_START)) {
-      value &= ~(1 << 3);
+      value &= ~(1 << 5);
     }
-    // Bits 4-5: Service / Test — not mapped by default (keyboard only via future config)
     // Bits 6-7: unused — stay 1
 
     return value;

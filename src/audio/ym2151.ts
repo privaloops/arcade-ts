@@ -851,7 +851,27 @@ export class YM2151 {
    * @param bufferR Right channel output buffer
    * @param numSamples Number of samples to generate
    */
+  private _debugSampleCount = 0;
+
   generateSamples(bufferL: Float32Array, bufferR: Float32Array, numSamples: number): void {
+    this._debugSampleCount++;
+    if (this._debugSampleCount === 400 || this._debugSampleCount === 800) {
+      // Check if any channel has key-on operators
+      let anyKeyOn = false;
+      for (let ch = 0; ch < NUM_CHANNELS; ch++) {
+        const c = this.channels[ch]!;
+        for (let op = 0; op < 4; op++) {
+          if (c.ops[op]!.keyOn) anyKeyOn = true;
+        }
+      }
+      console.log('YM2151 generateSamples: numSamples=' + numSamples + ' anyKeyOn=' + anyKeyOn +
+        ' ch0.lr=' + this.channels[0]!.leftEnable + '/' + this.channels[0]!.rightEnable +
+        ' ch0.algo=' + this.channels[0]!.algorithm +
+        ' ch0.op0.tl=' + this.channels[0]!.ops[0]!.totalLevel +
+        ' ch0.op0.ar=' + this.channels[0]!.ops[0]!.ar +
+        ' ch0.op0.envPhase=' + this.channels[0]!.ops[0]!.envPhase +
+        ' ch0.kc=' + this.channels[0]!.keyCode);
+    }
     for (let s = 0; s < numSamples; s++) {
       // Advance LFO
       const [lfoPM, lfoAM] = this.lfo.advance();

@@ -33,7 +33,11 @@ const emulator = new Emulator(canvas);
 // ── Audio init (requires user gesture) ──────────────────────────────────────
 
 const initAudio = (): void => {
-  void emulator.initAudio();
+  emulator.initAudio().then(() => {
+    console.log("Audio initialized successfully");
+  }).catch((e) => {
+    console.error("Audio init failed:", e);
+  });
   window.removeEventListener("click", initAudio);
   window.removeEventListener("keydown", initAudio);
 };
