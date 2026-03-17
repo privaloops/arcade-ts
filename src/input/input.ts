@@ -106,6 +106,7 @@ const AXIS_THRESHOLD = 0.5;
 export class InputManager {
   private keyState: Set<string> = new Set();
   private mappings: [KeyMapping, KeyMapping];
+  private _debugInputCount = 0;
   private gamepadIndices: [number | null, number | null] = [null, null];
 
   private boundKeyDown: (e: KeyboardEvent) => void;
@@ -186,15 +187,28 @@ export class InputManager {
     //   0x800018-0x80001F = system/DIP → ioPorts[8..15]
     //     byte 8: coins, starts, service
 
-    // IN1: Player inputs at offsets 0-3 (read at 0x800000+)
-    ioPorts[0] = this.readPort(0);  // P1 low
-    ioPorts[1] = this.readPort(1);  // P1 high
-    ioPorts[2] = this.readPort(2);  // P2 low
-    ioPorts[3] = this.readPort(3);  // P2 high
+    // IN1 at 0x800000-0x800003 (big-endian 68000):
+    //   read16(0x800000) = P1 directions/buttons (IN1 in MAME)
+    //   read16(0x800002) = P2 directions/buttons
+    // In big-endian: byte at even address = high byte, odd address = low byte
+    // MAME returns player data as full 16-bit: (P1_low_byte << 8) | P1_high_byte
+    // But the 68000 does byte reads too, so:
+    //   0x800000 = P1 directions + btn1-3
+    //   0x800001 = P1 btn4-6
+    //   0x800002 = P2 directions + btn1-3
+    //   0x800003 = P2 btn4-6
+    // 68000 big-endian: read16(0x800000) = (byte0 << 8) | byte1
+    // MAME "IN1" port: P1 = bits 0-7 (low byte), P2 = bits 8-15 (high byte)
+    // So byte at 0x800000 (even) = P2, byte at 0x800001 (odd) = P1
+    ioPorts[0] = this.readPort(2);  // P2 directions + buttons 1-3 (high byte)
+    ioPorts[1] = this.readPort(0);  // P1 directions + buttons 1-3 (low byte)
+    ioPorts[2] = this.readPort(3);  // P2 buttons 4-6
+    ioPorts[3] = this.readPort(1);  // P1 buttons 4-6
 
-    // IN2: Coins/starts at offset 8 (read at 0x800018+)
-    ioPorts[8] = this.readPort(4);  // coins, starts, service
-    ioPorts[9] = 0xFF;              // unused
+    // System inputs at 0x800018 (via cps1_dsw_r):
+    // Returns (IN0 << 8) | 0xFF — IN0 at even address (high byte)
+    ioPorts[8] = this.readPort(4);  // coins, starts, service (high byte)
+    ioPorts[9] = 0xFF;              // low byte = 0xFF
   }
 
   /**
