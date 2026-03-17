@@ -238,6 +238,10 @@ export class CPS1Video {
   // Tile row decode buffer (reused across calls)
   private readonly tileRowBuf: Uint8Array;
 
+  // Sprite double-buffer: MAME renders sprites from a buffered copy
+  // updated at VBlank, not from live VRAM. This prevents tearing.
+  private readonly objBuffer: Uint8Array;
+
   constructor(
     vram: Uint8Array,
     graphicsRom: Uint8Array,
@@ -249,6 +253,7 @@ export class CPS1Video {
     this.cpsaRegs = cpsaRegs;
     this.cpsbRegs = cpsbRegs;
     this.priorityBuf = new Uint8Array(SCREEN_WIDTH * SCREEN_HEIGHT);
+    this.objBuffer = new Uint8Array(OBJ_SIZE);
     this.paletteCache = new Uint32Array(256 * 16); // 256 palettes * 16 colors
     this.tileRowBuf = new Uint8Array(32); // max tile width = 32 pixels
   }
@@ -632,7 +637,6 @@ export class CPS1Video {
    * Render all objects (sprites) from the object table in VRAM.
    */
   renderObjects(framebuffer: Uint8Array): void {
-    const objBase = this.vramBaseOffset(CPSA_OBJ_BASE, OBJ_SIZE);
     const paletteBase = this.vramBaseOffset(CPSA_PALETTE_BASE, PALETTE_ALIGN);
 
     // Build palette cache if not done yet this frame
@@ -640,17 +644,17 @@ export class CPS1Video {
       this.buildPaletteCache(paletteBase);
     }
 
-    const OBJ_WORD_SIZE = OBJ_SIZE / 2;
-    const MAX_ENTRIES = OBJ_WORD_SIZE / 4; // 256 sprites
+    const MAX_ENTRIES = OBJ_SIZE / 8; // 256 sprites
 
-    const vram = this.vram;
+    // Read from the buffered sprite table (copied at start of frame)
+    const objData = this.objBuffer;
 
     // Find last sprite (end-of-table marker)
     let lastSpriteIdx = MAX_ENTRIES - 1;
     for (let i = 0; i < MAX_ENTRIES; i++) {
-      const entryOffset = objBase + i * 8;
-      if (entryOffset + 7 >= VRAM_SIZE) break;
-      const colour = (vram[entryOffset + 6]! << 8) | vram[entryOffset + 7]!;
+      const entryOffset = i * 8;
+      if (entryOffset + 7 >= OBJ_SIZE) break;
+      const colour = (objData[entryOffset + 6]! << 8) | objData[entryOffset + 7]!;
       if ((colour & 0xFF00) === 0xFF00) {
         lastSpriteIdx = i - 1;
         break;
@@ -665,13 +669,13 @@ export class CPS1Video {
 
     // Render from last to first (lower index = draws on top)
     for (let i = lastSpriteIdx; i >= 0; i--) {
-      const entryOffset = objBase + i * 8;
-      if (entryOffset + 7 >= VRAM_SIZE) continue;
+      const entryOffset = i * 8;
+      if (entryOffset + 7 >= OBJ_SIZE) continue;
 
-      const x = (vram[entryOffset]! << 8) | vram[entryOffset + 1]!;
-      const y = (vram[entryOffset + 2]! << 8) | vram[entryOffset + 3]!;
-      const code = (vram[entryOffset + 4]! << 8) | vram[entryOffset + 5]!;
-      const colour = (vram[entryOffset + 6]! << 8) | vram[entryOffset + 7]!;
+      const x = (objData[entryOffset]! << 8) | objData[entryOffset + 1]!;
+      const y = (objData[entryOffset + 2]! << 8) | objData[entryOffset + 3]!;
+      const code = (objData[entryOffset + 4]! << 8) | objData[entryOffset + 5]!;
+      const colour = (objData[entryOffset + 6]! << 8) | objData[entryOffset + 7]!;
 
       const mappedBaseCode = gfxromBankMapper(GFXTYPE_SPRITES, code);
       if (mappedBaseCode === -1) continue;
@@ -834,6 +838,13 @@ export class CPS1Video {
 
     // Invalidate palette cache for new frame
     this.paletteCacheValid = false;
+
+    // Buffer sprites: copy obj table from VRAM to internal buffer (like MAME's m_buffered_obj)
+    const objBase = this.vramBaseOffset(CPSA_OBJ_BASE, OBJ_SIZE);
+    const copyLen = Math.min(OBJ_SIZE, VRAM_SIZE - objBase);
+    if (copyLen > 0) {
+      this.objBuffer.set(this.vram.subarray(objBase, objBase + copyLen));
+    }
 
     // 1. Clear framebuffer to black (RGBA = 0, 0, 0, 255)
     // Use Uint32Array for fast fill: 0xFF000000 = ABGR(255, 0, 0, 0) = opaque black
