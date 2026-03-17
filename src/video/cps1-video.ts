@@ -180,21 +180,29 @@ const ROW_STRIDE_32 = 16;  // 16 bytes per row for 32x32
  * Decode an entire row of 8 pixels from a 4-byte plane group.
  * Writes 8 palette indices into `out` starting at `outOffset`.
  * MSB-first: bit 7 = leftmost pixel (x=0).
+ *
+ * MAME planeoffset = {24, 16, 8, 0}:
+ *   byte 0 → planeoffset  0 → bit 0 of color index
+ *   byte 1 → planeoffset  8 → bit 1
+ *   byte 2 → planeoffset 16 → bit 2
+ *   byte 3 → planeoffset 24 → bit 3
+ *
+ * MAME readbit() uses (0x80 >> (bitnum % 8)) = MSB-first within each byte.
  */
 function decodeRow(
   b0: number, b1: number, b2: number, b3: number,
   out: Uint8Array, outOffset: number,
 ): void {
-  // b3 = plane 0 (bit 0), b2 = plane 1 (bit 1), b1 = plane 2 (bit 2), b0 = plane 3 (bit 3)
-  // Unrolled for all 8 pixels (MSB-first)
-  out[outOffset]     = ((b3 >> 7) & 1) | (((b2 >> 7) & 1) << 1) | (((b1 >> 7) & 1) << 2) | (((b0 >> 7) & 1) << 3);
-  out[outOffset + 1] = ((b3 >> 6) & 1) | (((b2 >> 6) & 1) << 1) | (((b1 >> 6) & 1) << 2) | (((b0 >> 6) & 1) << 3);
-  out[outOffset + 2] = ((b3 >> 5) & 1) | (((b2 >> 5) & 1) << 1) | (((b1 >> 5) & 1) << 2) | (((b0 >> 5) & 1) << 3);
-  out[outOffset + 3] = ((b3 >> 4) & 1) | (((b2 >> 4) & 1) << 1) | (((b1 >> 4) & 1) << 2) | (((b0 >> 4) & 1) << 3);
-  out[outOffset + 4] = ((b3 >> 3) & 1) | (((b2 >> 3) & 1) << 1) | (((b1 >> 3) & 1) << 2) | (((b0 >> 3) & 1) << 3);
-  out[outOffset + 5] = ((b3 >> 2) & 1) | (((b2 >> 2) & 1) << 1) | (((b1 >> 2) & 1) << 2) | (((b0 >> 2) & 1) << 3);
-  out[outOffset + 6] = ((b3 >> 1) & 1) | (((b2 >> 1) & 1) << 1) | (((b1 >> 1) & 1) << 2) | (((b0 >> 1) & 1) << 3);
-  out[outOffset + 7] = (b3 & 1) | ((b2 & 1) << 1) | ((b1 & 1) << 2) | ((b0 & 1) << 3);
+  // b0 = bit 0, b1 = bit 1, b2 = bit 2, b3 = bit 3
+  // Unrolled for all 8 pixels (MSB-first: bit 7 = pixel 0)
+  out[outOffset]     = ((b0 >> 7) & 1) | (((b1 >> 7) & 1) << 1) | (((b2 >> 7) & 1) << 2) | (((b3 >> 7) & 1) << 3);
+  out[outOffset + 1] = ((b0 >> 6) & 1) | (((b1 >> 6) & 1) << 1) | (((b2 >> 6) & 1) << 2) | (((b3 >> 6) & 1) << 3);
+  out[outOffset + 2] = ((b0 >> 5) & 1) | (((b1 >> 5) & 1) << 1) | (((b2 >> 5) & 1) << 2) | (((b3 >> 5) & 1) << 3);
+  out[outOffset + 3] = ((b0 >> 4) & 1) | (((b1 >> 4) & 1) << 1) | (((b2 >> 4) & 1) << 2) | (((b3 >> 4) & 1) << 3);
+  out[outOffset + 4] = ((b0 >> 3) & 1) | (((b1 >> 3) & 1) << 1) | (((b2 >> 3) & 1) << 2) | (((b3 >> 3) & 1) << 3);
+  out[outOffset + 5] = ((b0 >> 2) & 1) | (((b1 >> 2) & 1) << 1) | (((b2 >> 2) & 1) << 2) | (((b3 >> 2) & 1) << 3);
+  out[outOffset + 6] = ((b0 >> 1) & 1) | (((b1 >> 1) & 1) << 1) | (((b2 >> 1) & 1) << 2) | (((b3 >> 1) & 1) << 3);
+  out[outOffset + 7] = (b0 & 1) | ((b1 & 1) << 1) | ((b2 & 1) << 2) | ((b3 & 1) << 3);
 }
 
 
