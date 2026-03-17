@@ -20,6 +20,13 @@ const SCREEN_WIDTH = 384;
 const SCREEN_HEIGHT = 224;
 const FRAMEBUFFER_SIZE = SCREEN_WIDTH * SCREEN_HEIGHT * 4;
 
+// Visible area offsets (from MAME cps1.h)
+// The CPS1 generates a 512x262 raster; the visible window is 64..447 x 16..239.
+// Tile scroll values and sprite coordinates are in the full raster space,
+// so we must compensate when mapping to our 384x224 framebuffer.
+const CPS_HBEND = 64;  // first visible horizontal pixel
+const CPS_VBEND = 16;  // first visible vertical line
+
 // VRAM is 192KB (0x30000 bytes). All VRAM offsets are relative to 0x900000.
 const VRAM_SIZE = 0x30000;
 
@@ -406,8 +413,12 @@ export class CPS1Video {
         return;
     }
 
-    const scrollX = this.readCpsaReg(scrollXReg);
-    const scrollY = this.readCpsaReg(scrollYReg);
+    // In MAME, scroll values are applied to the tilemap, then the visible
+    // cliprect (starting at CPS_HBEND, CPS_VBEND) selects which portion is
+    // drawn. Since our framebuffer starts at (0,0) = visible pixel (64,16),
+    // we must add the visible area offset to the scroll values.
+    const scrollX = (this.readCpsaReg(scrollXReg) + CPS_HBEND) & 0xFFFF;
+    const scrollY = (this.readCpsaReg(scrollYReg) + CPS_VBEND) & 0xFFFF;
     const tilemapBase = this.vramBaseOffset(baseReg, SCROLL_SIZE);
     const paletteBase = this.vramBaseOffset(CPSA_PALETTE_BASE, PALETTE_ALIGN);
 
@@ -602,12 +613,13 @@ export class CPS1Video {
 
         for (let nys = 0; nys < ny; nys++) {
           for (let nxs = 0; nxs < nx; nxs++) {
-            const sx = (x + nxs * 16) & 0x1FF;
-            const sy = (y + nys * 16) & 0x1FF;
+            // Sprite coords are in full raster space; convert to screen
+            const sx = ((x + nxs * 16) & 0x1FF) - CPS_HBEND;
+            const sy = ((y + nys * 16) & 0x1FF) - CPS_VBEND;
 
             // Early skip: if entirely off screen
-            if (sx >= SCREEN_WIDTH && sx + 15 < 512) continue;
-            if (sy >= SCREEN_HEIGHT && sy + 15 < 512) continue;
+            if (sx >= SCREEN_WIDTH || sx + 15 < 0) continue;
+            if (sy >= SCREEN_HEIGHT || sy + 15 < 0) continue;
 
             let tileCode: number;
             if (flipY) {
@@ -632,11 +644,11 @@ export class CPS1Video {
           }
         }
       } else {
-        // Single 16x16 sprite tile
+        // Single 16x16 sprite tile — convert to screen coords
         this.drawSpriteTileFast(
           fb32, palCache, gfxRom, gfxRomLen, rowBuf,
           mappedBaseCode, col, flipX, flipY,
-          x & 0x1FF, y & 0x1FF,
+          (x & 0x1FF) - CPS_HBEND, (y & 0x1FF) - CPS_VBEND,
         );
       }
     }
@@ -662,8 +674,10 @@ export class CPS1Video {
     const charBase = tileCode * CHAR_SIZE_16;
     const palCacheBase = palette * 16;
 
+    // sx, sy are now signed screen coordinates (can be negative for partial sprites)
     for (let py = 0; py < TILE16; py++) {
-      const drawY = (sy + py) & 0x1FF;
+      const drawY = sy + py;
+      if (drawY < 0) continue;
       if (drawY >= SCREEN_HEIGHT) continue;
 
       const localY = flipY ? (TILE16 - 1 - py) : py;
@@ -681,7 +695,8 @@ export class CPS1Video {
 
       // Blit 16 pixels
       for (let px = 0; px < TILE16; px++) {
-        const drawX = (sx + px) & 0x1FF;
+        const drawX = sx + px;
+        if (drawX < 0) continue;
         if (drawX >= SCREEN_WIDTH) continue;
 
         const gfxPx = flipX ? (TILE16 - 1 - px) : px;
