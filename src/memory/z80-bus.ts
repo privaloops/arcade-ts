@@ -1,17 +1,18 @@
 /**
  * CPS1 Z80 Audio CPU Memory Bus
  *
- * Memory map:
+ * Memory map (from MAME cps1.cpp):
  *   0x0000-0x7FFF : Audio ROM fixed (32KB)
  *   0x8000-0xBFFF : Audio ROM banked (16KB window)
  *   0xC000-0xC7FF : Work RAM (2KB)
  *   0xD000-0xD7FF : Work RAM mirror
- *   0xF000        : OKI6295 command/data
- *   0xF002        : OKI6295 status
- *   0xF004        : Sound latch (from 68000)
- *   0xF006        : YM2151 register select
- *   0xF008        : YM2151 data write
- *   0xF00A        : Bank switch
+ *   0xF000        : YM2151 register select (write) / status (read)
+ *   0xF001        : YM2151 data write / status (read)
+ *   0xF002        : OKI6295 command (write) / status (read)
+ *   0xF004        : Bank switch (write)
+ *   0xF006        : OKI pin 7 (write, unused in basic setup)
+ *   0xF008        : Sound latch (read, from 68000)
+ *   0xF00A        : Sound latch 2 (read)
  *
  * The Z80 is little-endian but this bus deals with byte-level access only.
  */

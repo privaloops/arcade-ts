@@ -113,10 +113,24 @@ export class Emulator {
     this.ymBufferR = new Float32Array(1024);
     this.okiBuffer = new Float32Array(256);
 
-    // Wire YM2151 timer overflow → Z80 IRQ (IM1: jump to 0x0038)
+    // Wire YM2151 timer overflow → Z80 IRQ line (level-triggered).
+    // In real CPS1 hardware, the YM2151 IRQ output is directly connected
+    // to the Z80 INT pin. The line stays asserted until the Z80 reads
+    // the YM2151 status register (which clears the overflow flag).
     this.ym2151.setTimerCallback(() => {
-      this.z80.irq();
+      this.z80.setIrqLine(true);
     });
+
+    // Wire YM2151 IRQ clear → Z80 IRQ line de-assertion.
+    // When the Z80 handler writes to YM2151 reg 0x14 to acknowledge the
+    // timer overflow, the IRQ line is de-asserted.
+    this.ym2151.setIrqClearCallback(() => {
+      this.z80.setIrqLine(false);
+    });
+
+    // Enable external timer mode: timers are ticked during Z80 execution,
+    // not inside generateSamples(). This ensures proper interleaving.
+    this.ym2151.setExternalTimerMode(true);
 
     // Wire Z80 bus → YM2151 chip
     let ym2151WriteCount = 0;
@@ -358,11 +372,25 @@ export class Emulator {
       }
     }
 
-    // 4. Run Z80 proportionally for ~60040 cycles
+    // 4. Run Z80 with interleaved YM2151 timer ticks.
+    //
+    // The YM2151 runs at 55930 Hz (3.579545 MHz / 64). The Z80 runs at
+    // 3.579545 MHz. So the YM2151 ticks once every 64 Z80 T-states.
+    // We advance the YM2151 timers proportionally as the Z80 executes.
+    const YM_TICK_INTERVAL = 64; // Z80 T-states between YM2151 timer ticks
     let z80Cycles = 0;
+    let ymTickAccum = 0; // accumulator for YM2151 timer ticks
     try {
       while (z80Cycles < Z80_CYCLES_PER_FRAME) {
-        z80Cycles += this.z80.step();
+        const cyc = this.z80.step();
+        z80Cycles += cyc;
+        ymTickAccum += cyc;
+
+        // Advance YM2151 timers proportionally
+        while (ymTickAccum >= YM_TICK_INTERVAL) {
+          ymTickAccum -= YM_TICK_INTERVAL;
+          this.ym2151.tickTimers();
+        }
       }
     } catch (e) {
       if (this.frameCount < 5) {
@@ -370,9 +398,10 @@ export class Emulator {
       }
     }
 
-    // 5. Generate audio samples for this frame and push to output
+    // 5. Generate audio samples for this frame and push to output.
+    //    Timers are already advanced above, so generateSamples only
+    //    produces audio waveforms (no timer advancement).
     {
-      // YM2151: always generate samples (timers must advance for Z80 IRQs)
       const ymSamplesPerFrame = Math.ceil(this.ym2151.getSampleRate() / FRAME_RATE);
       this.ym2151.generateSamples(this.ymBufferL, this.ymBufferR, ymSamplesPerFrame);
 

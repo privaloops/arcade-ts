@@ -761,8 +761,11 @@ export class YM2151 {
   private timerALow: number;  // bottom 2 bits
   private timerBValue: number;
 
-  // Timer callback (for Z80 IRQ)
+  // Timer callback (for Z80 IRQ assert)
   private timerCallback: ((timerIndex: number) => void) | null;
+
+  // IRQ line clear callback (called when all overflow flags are cleared)
+  private irqClearCallback: (() => void) | null;
 
   // Busy flag (simulated: set briefly after writes)
   private busyCycles: number;
@@ -770,6 +773,10 @@ export class YM2151 {
   // CT1/CT2 output pins
   private ct1: boolean;
   private ct2: boolean;
+
+  // When true, generateSamples() skips timer advancement
+  // (timers are ticked externally via tickTimers())
+  private _externalTimerMode: boolean;
 
   constructor() {
     this.channels = [];
@@ -787,9 +794,11 @@ export class YM2151 {
     this.timerALow = 0;
     this.timerBValue = 0;
     this.timerCallback = null;
+    this.irqClearCallback = null;
     this.busyCycles = 0;
     this.ct1 = false;
     this.ct2 = false;
+    this._externalTimerMode = false;
   }
 
   // ── Public interface ─────────────────────────────────────────────────────
@@ -828,6 +837,15 @@ export class YM2151 {
   }
 
   /**
+   * Enable or disable external timer mode.
+   * When enabled, generateSamples() will NOT advance timers or busy counter
+   * (the caller is responsible for calling tickTimers() at the correct rate).
+   */
+  setExternalTimerMode(enabled: boolean): void {
+    this._externalTimerMode = enabled;
+  }
+
+  /**
    * Generate stereo audio samples.
    * @param bufferL Left channel output buffer
    * @param bufferR Right channel output buffer
@@ -838,18 +856,19 @@ export class YM2151 {
       // Advance LFO
       const [lfoPM, lfoAM] = this.lfo.advance();
 
-      // Decrease busy counter
-      if (this.busyCycles > 0) this.busyCycles--;
+      // Advance timers and busy counter only if NOT in external timer mode
+      if (!this._externalTimerMode) {
+        if (this.busyCycles > 0) this.busyCycles--;
 
-      // Advance timers
-      if (this.timerA.advance()) {
-        if (this.timerA.irqEnable && this.timerCallback !== null) {
-          this.timerCallback(0);
+        if (this.timerA.advance()) {
+          if (this.timerA.irqEnable && this.timerCallback !== null) {
+            this.timerCallback(0);
+          }
         }
-      }
-      if (this.timerB.advance()) {
-        if (this.timerB.irqEnable && this.timerCallback !== null) {
-          this.timerCallback(1);
+        if (this.timerB.advance()) {
+          if (this.timerB.irqEnable && this.timerCallback !== null) {
+            this.timerCallback(1);
+          }
         }
       }
 
@@ -893,6 +912,48 @@ export class YM2151 {
    */
   setTimerCallback(cb: (timerIndex: number) => void): void {
     this.timerCallback = cb;
+  }
+
+  /**
+   * Set IRQ line clear callback.
+   * Called when timer overflow flags are cleared (via register 0x14 write),
+   * which should de-assert the Z80 IRQ line.
+   */
+  setIrqClearCallback(cb: () => void): void {
+    this.irqClearCallback = cb;
+  }
+
+  /**
+   * Advance only the timers by one sample tick.
+   * This is used for interleaving timer IRQs with Z80 execution,
+   * separate from audio sample generation.
+   *
+   * @returns true if any timer overflowed and should trigger an IRQ.
+   */
+  tickTimers(): boolean {
+    let irq = false;
+
+    if (this.timerA.advance()) {
+      if (this.timerA.irqEnable) {
+        irq = true;
+        if (this.timerCallback !== null) {
+          this.timerCallback(0);
+        }
+      }
+    }
+    if (this.timerB.advance()) {
+      if (this.timerB.irqEnable) {
+        irq = true;
+        if (this.timerCallback !== null) {
+          this.timerCallback(1);
+        }
+      }
+    }
+
+    // Decrease busy counter
+    if (this.busyCycles > 0) this.busyCycles--;
+
+    return irq;
   }
 
   /**
@@ -1073,6 +1134,13 @@ export class YM2151 {
       }
       if (value & 0x02) {
         this.timerB.overflow = false;
+      }
+
+      // If no overflow flags remain asserted, de-assert IRQ line
+      if (!this.timerA.overflow && !this.timerB.overflow) {
+        if (this.irqClearCallback !== null) {
+          this.irqClearCallback();
+        }
       }
       return;
     }

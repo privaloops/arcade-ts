@@ -133,6 +133,10 @@ export class Z80 {
   private halted = false;
   private enableInterruptsNext = false; // EI delays by one instruction
 
+  // Level-triggered IRQ line: when true, IRQ is asserted continuously.
+  // The Z80 will accept the IRQ as soon as iff1 becomes true (after EI).
+  private irqLineAsserted = false;
+
   private readonly bus: Z80BusInterface;
 
   constructor(bus: Z80BusInterface) {
@@ -154,6 +158,7 @@ export class Z80 {
     this.iff1 = false; this.iff2 = false; this.im = 0;
     this.halted = false;
     this.enableInterruptsNext = false;
+    this.irqLineAsserted = false;
   }
 
   /** Execute one instruction. Returns T-states consumed. */
@@ -162,6 +167,12 @@ export class Z80 {
       this.iff1 = true;
       this.iff2 = true;
       this.enableInterruptsNext = false;
+    }
+
+    // Check level-triggered IRQ line: if asserted and interrupts enabled,
+    // accept the interrupt (same as calling irq() but driven by the line state).
+    if (this.irqLineAsserted && this.iff1) {
+      this.irq();
     }
 
     if (this.halted) {
@@ -173,6 +184,15 @@ export class Z80 {
     const opcode = this.fetchByte();
     this.incR();
     return this.execMain(opcode);
+  }
+
+  /**
+   * Assert or de-assert the maskable IRQ line (level-triggered).
+   * When asserted, the Z80 will accept the interrupt as soon as iff1 is true.
+   * Call with false to de-assert (e.g. when YM2151 overflow is cleared).
+   */
+  setIrqLine(asserted: boolean): void {
+    this.irqLineAsserted = asserted;
   }
 
   /** Non-maskable interrupt */
