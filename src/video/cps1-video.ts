@@ -51,6 +51,8 @@ const CPSA_SCROLL2_XSCR  = 0x10; // Scroll 2 X scroll
 const CPSA_SCROLL2_YSCR  = 0x12; // Scroll 2 Y scroll
 const CPSA_SCROLL3_XSCR  = 0x14; // Scroll 3 X scroll
 const CPSA_SCROLL3_YSCR  = 0x16; // Scroll 3 Y scroll
+const CPSA_OTHER_BASE    = 0x08; // Row scroll data base in VRAM
+const CPSA_ROWSCROLL_OFFS = 0x20; // Row scroll offset register
 
 // CPS-A register 0x22: video control (flip screen, rowscroll enable)
 const CPSA_VIDEOCONTROL   = 0x22;
@@ -417,8 +419,21 @@ export class CPS1Video {
     // cliprect (starting at CPS_HBEND, CPS_VBEND) selects which portion is
     // drawn. Since our framebuffer starts at (0,0) = visible pixel (64,16),
     // we must add the visible area offset to the scroll values.
-    const scrollX = (this.readCpsaReg(scrollXReg) + CPS_HBEND) & 0xFFFF;
+    const baseScrollX = (this.readCpsaReg(scrollXReg) + CPS_HBEND) & 0xFFFF;
     const scrollY = (this.readCpsaReg(scrollYReg) + CPS_VBEND) & 0xFFFF;
+
+    // Row scroll for scroll2: when videocontrol bit 0 is set, each row of
+    // scroll2 has an independent X scroll offset from the "other" VRAM region.
+    // From MAME: m_scroll2x + m_other[(i + otheroffs) & 0x3ff]
+    const videocontrol = this.readCpsaReg(CPSA_VIDEOCONTROL);
+    const useRowScroll = layerIndex === LAYER_SCROLL2 && (videocontrol & 0x01) !== 0;
+    let otherBase = 0;
+    let otherOffs = 0;
+    if (useRowScroll) {
+      otherBase = this.vramBaseOffset(CPSA_OTHER_BASE, 0x0800);
+      otherOffs = this.readCpsaReg(CPSA_ROWSCROLL_OFFS);
+    }
+    const scrollX = baseScrollX; // default; overridden per-row if rowscroll
     const tilemapBase = this.vramBaseOffset(baseReg, SCROLL_SIZE);
     const paletteBase = this.vramBaseOffset(CPSA_PALETTE_BASE, PALETTE_ALIGN);
 
@@ -438,6 +453,63 @@ export class CPS1Video {
 
     // Use Uint32Array view for 4-byte writes
     const fb32 = new Uint32Array(framebuffer.buffer, framebuffer.byteOffset, framebuffer.byteLength / 4);
+
+    // Row scroll mode for scroll2: render per-scanline with per-row X offset
+    if (useRowScroll) {
+      const scrly = (-scrollY) & 0xFFFF;
+      for (let screenY = 0; screenY < SCREEN_HEIGHT; screenY++) {
+        const vy = ((screenY + scrollY) & 0xFFFF) % virtualH;
+        // Read per-row scroll offset from "other" VRAM region
+        // MAME: m_scroll2x + m_other[(i + otheroffs) & 0x3ff]
+        // i = screen row, otheroffs = CPS_A register 0x20
+        const rowIdx = (screenY + ((scrly + CPS_VBEND) & 0xFFFF)) & 0x3FF;
+        const otherAddr = otherBase + ((rowIdx + otherOffs) & 0x3FF) * 2;
+        const rowOffset = otherAddr + 1 < VRAM_SIZE
+          ? (this.vram[otherAddr]! << 8) | this.vram[otherAddr + 1]!
+          : 0;
+        const rowScrollX = (baseScrollX + rowOffset) & 0xFFFF;
+
+        for (let screenX = 0; screenX < SCREEN_WIDTH; screenX++) {
+          const vx = ((screenX + rowScrollX) & 0xFFFF) % virtualW;
+          const tileCol = (vx / tileW) | 0;
+          const tileRow = (vy / tileH) | 0;
+          const tileIndex = scanFn(tileCol, tileRow);
+          const entryOffset = tilemapBase + tileIndex * 4;
+          if (entryOffset + 3 >= VRAM_SIZE) continue;
+
+          const rawCode = ((vram[entryOffset]! << 8) | vram[entryOffset + 1]!) & codeMask;
+          const tileCode = gfxromBankMapper(gfxType, rawCode);
+          if (tileCode === -1) continue;
+
+          const attribs = (vram[entryOffset + 2]! << 8) | vram[entryOffset + 3]!;
+          const palette = (attribs & 0x1F) + paletteGroupOffset;
+          const flipXb = (attribs >> 5) & 1;
+          const flipYb = (attribs >> 6) & 1;
+
+          let localX = vx % tileW;
+          let localY = vy % tileH;
+          if (flipXb) localX = tileW - 1 - localX;
+          if (flipYb) localY = tileH - 1 - localY;
+
+          // Decode pixel inline (16x16 tile)
+          const charBase = tileCode * charSize;
+          const halfOff = localX >= 8 ? 4 : 0;
+          const planeBase = charBase + localY * rowStride + halfOff;
+          const bit = 7 - (localX & 7);
+          if (planeBase + 3 >= gfxRomLen) continue;
+
+          const colorIdx =
+            ((gfxRom[planeBase + 3]! >> bit) & 1) |
+            (((gfxRom[planeBase + 2]! >> bit) & 1) << 1) |
+            (((gfxRom[planeBase + 1]! >> bit) & 1) << 2) |
+            (((gfxRom[planeBase]! >> bit) & 1) << 3);
+
+          if (colorIdx === 15) continue;
+          fb32[screenY * SCREEN_WIDTH + screenX] = palCache[palette * 16 + colorIdx]!;
+        }
+      }
+      return; // done with row scroll path
+    }
 
     // Calculate which tiles are visible on screen (with partial tiles at edges)
     // First visible virtual pixel
