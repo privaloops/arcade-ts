@@ -131,6 +131,83 @@ function tilemap2Scan(col: number, row: number): number {
 
 
 // ---------------------------------------------------------------------------
+// GFX ROM bank mapper (from MAME gfxrom_bank_mapper)
+//
+// The CPS1 uses a PAL to map tile codes to physical GFX ROM addresses.
+// Different layer types (sprites, scroll1/2/3) use different code ranges
+// within the same ROM data. The mapper shifts the code based on tile size
+// and then looks up which ROM bank contains that code.
+//
+// For SF2 (mapper_STF29):
+//   bank_sizes = [0x8000, 0x8000, 0x8000, 0]
+//   Sprites:  0x00000-0x07fff -> bank 0
+//   Sprites:  0x08000-0x0ffff -> bank 1
+//   Sprites:  0x10000-0x11fff -> bank 2
+//   Scroll3:  0x02000-0x03fff -> bank 2
+//   Scroll1:  0x04000-0x04fff -> bank 2
+//   Scroll2:  0x05000-0x07fff -> bank 2
+// ---------------------------------------------------------------------------
+
+const GFXTYPE_SPRITES = 1;
+const GFXTYPE_SCROLL1 = 2;
+const GFXTYPE_SCROLL2 = 4;
+const GFXTYPE_SCROLL3 = 8;
+
+interface GfxRange {
+  type: number;
+  start: number;
+  end: number;
+  bank: number;
+}
+
+const SF2_BANK_SIZES = [0x8000, 0x8000, 0x8000, 0];
+
+const SF2_MAPPER_TABLE: GfxRange[] = [
+  { type: GFXTYPE_SPRITES, start: 0x00000, end: 0x07fff, bank: 0 },
+  { type: GFXTYPE_SPRITES, start: 0x08000, end: 0x0ffff, bank: 1 },
+  { type: GFXTYPE_SPRITES, start: 0x10000, end: 0x11fff, bank: 2 },
+  { type: GFXTYPE_SCROLL3, start: 0x02000, end: 0x03fff, bank: 2 },
+  { type: GFXTYPE_SCROLL1, start: 0x04000, end: 0x04fff, bank: 2 },
+  { type: GFXTYPE_SCROLL2, start: 0x05000, end: 0x07fff, bank: 2 },
+];
+
+/**
+ * Map a tile code to a physical GFX ROM tile index.
+ *
+ * From MAME cps_state::gfxrom_bank_mapper:
+ *   1. Shift the code left by a type-dependent amount (8x8=0, 16x16=1, 32x32=3)
+ *   2. Find the matching range in the mapper table
+ *   3. Calculate: (bank_base + (shifted_code & (bank_size - 1))) >> shift
+ *
+ * Returns -1 if the code is out of range (tile should be transparent).
+ */
+function gfxromBankMapper(type: number, code: number): number {
+  let shift = 0;
+  switch (type) {
+    case GFXTYPE_SPRITES: shift = 1; break;
+    case GFXTYPE_SCROLL1: shift = 0; break;
+    case GFXTYPE_SCROLL2: shift = 1; break;
+    case GFXTYPE_SCROLL3: shift = 3; break;
+  }
+
+  const shiftedCode = code << shift;
+
+  for (const range of SF2_MAPPER_TABLE) {
+    if (shiftedCode >= range.start && shiftedCode <= range.end) {
+      if (range.type & type) {
+        let base = 0;
+        for (let i = 0; i < range.bank; i++) {
+          base += SF2_BANK_SIZES[i]!;
+        }
+        return (base + (shiftedCode & (SF2_BANK_SIZES[range.bank]! - 1))) >> shift;
+      }
+    }
+  }
+
+  return -1; // Out of range
+}
+
+// ---------------------------------------------------------------------------
 // GFX pixel decoding from interleaved graphics ROM.
 //
 // For all layouts, the plane offsets are {24,16,8,0} in bits, meaning:
@@ -166,7 +243,7 @@ function getGfxPixel8(
 
   if (rowBase + 3 >= graphicsRom.length) return 0;
 
-  const bit = 7 - localX;
+  const bit = 7 - localX;  // MSB-first: bit 7 = leftmost pixel
   return ((graphicsRom[rowBase + 3]! >> bit) & 1) |
          (((graphicsRom[rowBase + 2]! >> bit) & 1) << 1) |
          (((graphicsRom[rowBase + 1]! >> bit) & 1) << 2) |
@@ -188,7 +265,7 @@ function getGfxPixel16(
   const rowBase = charBase + localY * ROW_STRIDE_8;
   const halfOff = localX >= 8 ? 4 : 0;
   const planeBase = rowBase + halfOff;
-  const bit = 7 - (localX & 7);
+  const bit = 7 - (localX & 7);  // MSB-first: bit 7 = leftmost pixel
 
   if (planeBase + 3 >= graphicsRom.length) return 0;
 
@@ -213,7 +290,7 @@ function getGfxPixel32(
   const rowBase = charBase + localY * ROW_STRIDE_32;
   const groupOff = (localX >> 3) * 4;
   const planeBase = rowBase + groupOff;
-  const bit = 7 - (localX & 7);
+  const bit = 7 - (localX & 7);  // MSB-first: bit 7 = leftmost pixel
 
   if (planeBase + 3 >= graphicsRom.length) return 0;
 
@@ -364,6 +441,7 @@ export class CPS1Video {
     let scanFn: (col: number, row: number) => number;
     let paletteGroupOffset: number;
     let codeMask: number;
+    let gfxType: number;
     let getPixel: (rom: Uint8Array, code: number, x: number, y: number) => number;
 
     switch (layerIndex) {
@@ -376,6 +454,7 @@ export class CPS1Video {
         scanFn = tilemap0Scan;
         paletteGroupOffset = 0x20;
         codeMask = 0xFFFF;
+        gfxType = GFXTYPE_SCROLL1;
         getPixel = getGfxPixel8;
         break;
       case LAYER_SCROLL2:
@@ -387,6 +466,7 @@ export class CPS1Video {
         scanFn = tilemap1Scan;
         paletteGroupOffset = 0x40;
         codeMask = 0xFFFF;
+        gfxType = GFXTYPE_SCROLL2;
         getPixel = getGfxPixel16;
         break;
       case LAYER_SCROLL3:
@@ -398,6 +478,7 @@ export class CPS1Video {
         scanFn = tilemap2Scan;
         paletteGroupOffset = 0x60;
         codeMask = 0x3FFF; // MAME: m_scroll3[2*tile_index] & 0x3fff
+        gfxType = GFXTYPE_SCROLL3;
         getPixel = getGfxPixel32;
         break;
       default:
@@ -434,7 +515,9 @@ export class CPS1Video {
         if (entryOffset + 3 >= VRAM_SIZE) continue;
 
         // Word 0: tile code, Word 1: attributes
-        const tileCode = readWord(this.vram, entryOffset) & codeMask;
+        const rawCode = readWord(this.vram, entryOffset) & codeMask;
+        const tileCode = gfxromBankMapper(gfxType, rawCode);
+        if (tileCode === -1) continue; // out of range -> transparent
         const attribs = readWord(this.vram, entryOffset + 2);
 
         // From MAME: color = (attr & 0x1f) + group_offset
@@ -465,8 +548,7 @@ export class CPS1Video {
 
         // Color index 15 (0xf) is transparent for tilemaps in MAME
         // (prio_transpen uses pen 15 as transparent for scroll layers)
-        // Color index 0 is also commonly transparent.
-        if (colorIdx === 0 || colorIdx === 15) continue;
+        if (colorIdx === 15) continue;
 
         const fbIdx = (screenY * SCREEN_WIDTH + screenX) * 4;
         const prioIdx = screenY * SCREEN_WIDTH + screenX;
@@ -540,14 +622,18 @@ export class CPS1Video {
       const code = readWord(this.vram, entryOffset + 4);
       const colour = readWord(this.vram, entryOffset + 6);
 
+      // Map the base tile code through the bank mapper first
+      const mappedBaseCode = gfxromBankMapper(GFXTYPE_SPRITES, code);
+      if (mappedBaseCode === -1) continue; // out of range
+
       const col = colour & 0x1F;
       const flipX = (colour >> 5) & 1;
       const flipY = (colour >> 6) & 1;
 
       if (colour & 0xFF00) {
         // Multi-tile (blocked) sprite
-        let nx = ((colour >> 8) & 0x0F) + 1;
-        let ny = ((colour >> 12) & 0x0F) + 1;
+        const nx = ((colour >> 8) & 0x0F) + 1;
+        const ny = ((colour >> 12) & 0x0F) + 1;
 
         for (let nys = 0; nys < ny; nys++) {
           for (let nxs = 0; nxs < nx; nxs++) {
@@ -555,18 +641,19 @@ export class CPS1Video {
             const sy = (y + nys * 16) & 0x1FF;
 
             // Tile code calculation from MAME (handles flip variants)
+            // Applied to the MAPPED base code, same arithmetic
             let tileCode: number;
             if (flipY) {
               if (flipX) {
-                tileCode = (code & ~0x0F) + ((code + (nx - 1) - nxs) & 0x0F) + 0x10 * (ny - 1 - nys);
+                tileCode = (mappedBaseCode & ~0x0F) + ((mappedBaseCode + (nx - 1) - nxs) & 0x0F) + 0x10 * (ny - 1 - nys);
               } else {
-                tileCode = (code & ~0x0F) + ((code + nxs) & 0x0F) + 0x10 * (ny - 1 - nys);
+                tileCode = (mappedBaseCode & ~0x0F) + ((mappedBaseCode + nxs) & 0x0F) + 0x10 * (ny - 1 - nys);
               }
             } else {
               if (flipX) {
-                tileCode = (code & ~0x0F) + ((code + (nx - 1) - nxs) & 0x0F) + 0x10 * nys;
+                tileCode = (mappedBaseCode & ~0x0F) + ((mappedBaseCode + (nx - 1) - nxs) & 0x0F) + 0x10 * nys;
               } else {
-                tileCode = (code & ~0x0F) + ((code + nxs) & 0x0F) + 0x10 * nys;
+                tileCode = (mappedBaseCode & ~0x0F) + ((mappedBaseCode + nxs) & 0x0F) + 0x10 * nys;
               }
             }
 
@@ -581,7 +668,7 @@ export class CPS1Video {
         // Simple case: single 16x16 sprite tile
         this.drawSpriteTile(
           framebuffer, paletteBase,
-          code, col, flipX, flipY,
+          mappedBaseCode, col, flipX, flipY,
           x & 0x1FF, y & 0x1FF,
         );
       }
