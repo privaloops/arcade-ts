@@ -97,7 +97,6 @@ async function handleRomFile(file: File): Promise<void> {
 
   try {
     await emulator.loadRom(file);
-    await emulator.initAudio();
     emulator.resumeAudio();
     dropZone.classList.add("hidden");
     canvas.style.visibility = "visible";
@@ -130,6 +129,9 @@ gameSelect.addEventListener("change", () => {
 loadBtn.addEventListener("click", () => {
   const gameName = gameSelect.value;
   if (!gameName) return;
+
+  // Init audio NOW (in the user gesture call stack) — browsers require this
+  void emulator.initAudio();
 
   loadBtn.disabled = true;
   gameSelect.disabled = true;
