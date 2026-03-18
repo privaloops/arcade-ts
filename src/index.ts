@@ -62,11 +62,15 @@ window.addEventListener("keydown", (e) => {
       setStatus("Running");
     }
   } else if (e.code === "Escape") {
-    // Escape = Stop game, show UI
+    // Escape = Stop game, show game selector
+    if (document.fullscreenElement) {
+      void document.exitFullscreen();
+    }
     emulator.stop();
     emulator.suspendAudio();
     dropZone.classList.remove("hidden");
-    setStatus("Ready.");
+    canvas.style.visibility = "hidden";
+    setStatus("Ready. P=Pause F=Fullscreen Esc=Quit");
   } else if (e.code === "KeyF") {
     // F = Toggle fullscreen on canvas itself
     if (document.fullscreenElement) {
@@ -93,8 +97,10 @@ async function handleRomFile(file: File): Promise<void> {
 
   try {
     await emulator.loadRom(file);
-    setStatus(`ROM loaded: ${file.name}. Starting emulation…`);
+    await emulator.initAudio();
+    emulator.resumeAudio();
     dropZone.classList.add("hidden");
+    canvas.style.visibility = "visible";
     emulator.start();
     setStatus(`Running: ${file.name}`);
   } catch (err) {
