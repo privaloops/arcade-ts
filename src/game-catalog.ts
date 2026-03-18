@@ -2,7 +2,7 @@
  * CPS1 Game Catalog — extracted from MAME 0.286
  * Source: mamedev/mame src/mame/capcom/cps1.cpp
  * https://github.com/mamedev/mame/blob/master/src/mame/capcom/cps1.cpp
- * 52 parent games, 193 clones, 245 total
+ * 39 parent games, 193 clones, 232 total
  */
 
 export interface CPS1GameEntry {
@@ -25,8 +25,6 @@ export const CPS1_GAME_CATALOG: CPS1GameEntry[] = [
   { name: '3wondersh', description: 'Three Wonders (hack)', parent: '3wonders' },
   { name: '3wondersr1', description: 'Three Wonders (World 910513)', parent: '3wonders' },
   { name: '3wondersu', description: 'Three Wonders (USA 910520)', parent: '3wonders' },
-  { name: '93c46_16', description: 'Serial EEPROM 93C46 (64x16)', parent: '' },
-  { name: '93c46_8', description: 'Serial EEPROM 93C46 (128x8)', parent: '' },
   { name: 'area88', description: 'Area 88 (Japan)', parent: 'unsquad' },
   { name: 'area88r', description: 'Area 88 (Japan Resale Ver.)', parent: 'unsquad' },
   { name: 'captcomm', description: 'Captain Commando (World 911202)', parent: '' },
@@ -79,8 +77,6 @@ export const CPS1_GAME_CATALOG: CPS1GameEntry[] = [
   { name: 'forgottnuc', description: 'Forgotten Worlds (USA, B-Board 88618B-2, Rev. C)', parent: 'forgottn' },
   { name: 'forgottnue', description: 'Forgotten Worlds (USA, B-Board 88618B-2, Rev. E)', parent: 'forgottn' },
   { name: 'ganbare', description: 'Ganbare! Marine Kun (Japan 2K0411)', parent: '' },
-  { name: 'generic_latch_8', description: 'Generic 8-bit latch', parent: '' },
-  { name: 'gfxdecode', description: 'gfxdecode', parent: '' },
   { name: 'ghouls', description: 'Ghouls\'n Ghosts (World)', parent: '' },
   { name: 'ghoulsu', description: 'Ghouls\'n Ghosts (USA)', parent: 'ghouls' },
   { name: 'gulunpa', description: 'Gulun.Pa! (Japan 931220 L) (prototype)', parent: '' },
@@ -97,8 +93,6 @@ export const CPS1_GAME_CATALOG: CPS1GameEntry[] = [
   { name: 'kodu', description: 'The King of Dragons (USA 910910)', parent: 'kod' },
   { name: 'lostwrld', description: 'Lost Worlds (Japan)', parent: 'forgottn' },
   { name: 'lostwrldo', description: 'Lost Worlds (Japan Old Ver.)', parent: 'forgottn' },
-  { name: 'm48t35', description: 'M48T35 Timekeeper', parent: '' },
-  { name: 'm68000', description: 'Motorola MC68000', parent: '' },
   { name: 'mbomberj', description: 'Muscle Bomber: The Body Explosion (Japan 930713)', parent: 'slammast' },
   { name: 'mbombrd', description: 'Muscle Bomber Duo: Ultimate Team Battle (World 931206)', parent: '' },
   { name: 'mbombrdj', description: 'Muscle Bomber Duo: Heat Up Warriors (Japan 931206)', parent: 'mbombrd' },
@@ -118,8 +112,6 @@ export const CPS1_GAME_CATALOG: CPS1GameEntry[] = [
   { name: 'nemoj', description: 'Nemo (Japan 901120, 88622B-3 ROM board)', parent: 'nemo' },
   { name: 'nemoja', description: 'Nemo (Japan 901120, 89625B-1 ROM board)', parent: 'nemo' },
   { name: 'nemor1', description: 'Nemo (World 901109)', parent: 'nemo' },
-  { name: 'okim6295', description: 'OKI MSM6295 ADPCM', parent: '' },
-  { name: 'palette', description: 'palette', parent: '' },
   { name: 'pang3', description: 'Pang! 3 (Europe 950601)', parent: '' },
   { name: 'pang3b', description: 'Pang! 3 (bootleg, set 1)', parent: 'pang3' },
   { name: 'pang3b2', description: 'Pang! 3 (bootleg, set 2)', parent: 'pang3' },
@@ -138,10 +130,8 @@ export const CPS1_GAME_CATALOG: CPS1GameEntry[] = [
   { name: 'punisheru', description: 'The Punisher (USA 930422)', parent: 'punisher' },
   { name: 'qad', description: 'Quiz & Dragons: Capcom Quiz Game (USA 920701)', parent: '' },
   { name: 'qadjr', description: 'Quiz & Dragons: Capcom Quiz Game (Japan Resale Ver. 940921)', parent: 'qad' },
-  { name: 'qsound_hle', description: 'QSound (HLE)', parent: '' },
   { name: 'qtono2j', description: 'Quiz Tonosama no Yabou 2: Zenkoku-ban (Japan 950123)', parent: '' },
   { name: 'rockmanj', description: 'Rockman: The Power Battle (CPS1, Japan 950922)', parent: 'megaman' },
-  { name: 'screen', description: 'Video Screen', parent: '' },
   { name: 'sf2', description: 'Street Fighter II: The World Warrior (World 910522)', parent: '' },
   { name: 'sf2acc', description: 'Street Fighter II\': Champion Edition (Accelerator!, bootleg, set 1)', parent: 'sf2ce' },
   { name: 'sf2acca', description: 'Street Fighter II\': Champion Edition (Accelerator!, bootleg, set 2)', parent: 'sf2ce' },
@@ -232,15 +222,12 @@ export const CPS1_GAME_CATALOG: CPS1GameEntry[] = [
   { name: 'sfzch', description: 'Street Fighter Zero (CPS Changer, Japan 951020)', parent: '' },
   { name: 'slammast', description: 'Saturday Night Slam Masters (World 930713)', parent: '' },
   { name: 'slammastu', description: 'Saturday Night Slam Masters (USA 930713)', parent: 'slammast' },
-  { name: 'speaker', description: 'Speaker', parent: '' },
   { name: 'strider', description: 'Strider (USA, B-Board 89624B-2)', parent: '' },
   { name: 'striderj', description: 'Strider Hiryu (Japan)', parent: 'strider' },
   { name: 'striderjr', description: 'Strider Hiryu (Japan Resale Ver.)', parent: 'strider' },
   { name: 'striderua', description: 'Strider (USA, B-Board 89624B-3)', parent: 'strider' },
   { name: 'strideruc', description: 'Strider (USA, B-Board 90629B-3, buggy Street Fighter II conversion)', parent: 'strider' },
-  { name: 'timer', description: 'Timer', parent: '' },
   { name: 'unsquad', description: 'U.N. Squadron (USA)', parent: '' },
-  { name: 'upd4701a', description: 'uPD4701A Incremental Encoder', parent: '' },
   { name: 'varth', description: 'Varth: Operation Thunderstorm (World 920714)', parent: '' },
   { name: 'varthb2', description: 'Varth: Operation Thunderstorm (bootleg, set 2)', parent: 'varth' },
   { name: 'varthb3', description: 'Varth: Operation Thunderstorm (bootleg, set 3)', parent: 'varth' },
