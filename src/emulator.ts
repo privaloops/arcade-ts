@@ -21,7 +21,7 @@ import { WebGLRenderer } from "./video/renderer-webgl";
 import { CPS1Video } from "./video/cps1-video";
 import { InputManager } from "./input/input";
 import { loadRomFromZip, RomSet } from "./memory/rom-loader";
-import { NukedOPM as YM2151 } from "./audio/nuked-opm";
+import { NukedOPMWasm, initOPMWasm } from "./audio/nuked-opm-wasm";
 import { OKI6295 } from "./audio/oki6295";
 import { AudioOutput } from "./audio/audio-output";
 
@@ -77,7 +77,7 @@ export class Emulator {
   private video: CPS1Video | null = null;
 
   // Audio chips
-  private ym2151: YM2151;
+  private ym2151!: NukedOPMWasm;
   private oki6295: OKI6295 | null = null;
   private audioOutput: AudioOutput;
 
@@ -110,47 +110,23 @@ export class Emulator {
     this.input = new InputManager();
     this.framebuffer = new Uint8Array(FRAMEBUFFER_SIZE);
 
-    // Audio chips
-    this.ym2151 = new YM2151();
+    // Audio output
     this.audioOutput = new AudioOutput();
 
     // Pre-allocate audio scratch buffers for one frame
-    // YM2151: 55930 Hz / ~59.637 fps ≈ 938 samples/frame (round up)
-    // OKI6295: 7575 Hz / ~59.637 fps ≈ 127 samples/frame (round up)
     this.ymBufferL = new Float32Array(1024);
     this.ymBufferR = new Float32Array(1024);
     this.okiBuffer = new Float32Array(256);
 
-    // Wire YM2151 timer overflow → Z80 IRQ line (level-triggered).
-    // In real CPS1 hardware (confirmed via MAME cps1.cpp line 3968),
-    // ONLY the YM2151 drives the Z80 INT pin:
-    //   ym2151.irq_handler().set_inputline(m_audiocpu, 0);
-    // The sound latch does NOT generate an IRQ — it is polled by the
-    // Z80 during the Timer A ISR.
-    this.ym2151.setTimerCallback(() => {
-      this.z80.setIrqLine(true);
-    });
-
-    // Wire YM2151 IRQ clear → Z80 IRQ line de-assertion.
-    // When the Z80 handler reads the YM2151 status register or writes
-    // to reg 0x14 to acknowledge the timer overflow, the IRQ clears.
-    this.ym2151.setIrqClearCallback(() => {
-      this.z80.setIrqLine(false);
-    });
-
-    // Enable external timer mode: timers are ticked during Z80 execution,
-    // not inside generateSamples(). This ensures proper interleaving.
-    this.ym2151.setExternalTimerMode(true);
-
-    // Wire Z80 bus → YM2151 chip
+    // Wire Z80 bus → YM2151 chip (uses late binding since ym2151 is initialized async)
     this.z80Bus.setYm2151AddressWriteCallback((value: number) => {
-      this.ym2151.writeAddress(value);
+      this.ym2151?.writeAddress(value);
     });
     this.z80Bus.setYm2151WriteCallback((_register: number, data: number) => {
-      this.ym2151.writeData(data);
+      this.ym2151?.writeData(data);
     });
     this.z80Bus.setYm2151ReadStatusCallback(() => {
-      return this.ym2151.readStatus();
+      return this.ym2151?.readStatus() ?? 0;
     });
 
     // Wire Z80 bus → OKI6295 chip (connected in loadRom when ROM is available)
@@ -187,7 +163,14 @@ export class Emulator {
 
     const romSet: RomSet = await loadRomFromZip(file);
 
-    // Reset all hardware (CPUs + audio chips)
+    // Initialize Nuked OPM WASM (first call loads the module, subsequent calls are no-ops)
+    await initOPMWasm();
+    if (!this.ym2151) {
+      this.ym2151 = new NukedOPMWasm();
+      this.ym2151.setTimerCallback(() => { this.z80.setIrqLine(true); });
+      this.ym2151.setIrqClearCallback(() => { this.z80.setIrqLine(false); });
+      this.ym2151.setExternalTimerMode(true);
+    }
     this.ym2151.reset();
     this.bus.loadProgramRom(romSet.programRom);
     this.z80Bus.loadAudioRom(romSet.audioRom);
@@ -310,7 +293,7 @@ export class Emulator {
   }
 
   /** Debug: expose YM2151 for audio testing */
-  getYm2151(): YM2151 { return this.ym2151; }
+  getYm2151(): NukedOPMWasm { return this.ym2151; }
 
   /** Suspend audio (e.g. when paused). */
   suspendAudio(): void { this.audioOutput.suspend(); }
@@ -399,9 +382,8 @@ export class Emulator {
 
     // 4. Run Z80 with interleaved YM2151 clocking.
     //
-    // The YM2151 has an internal prescale of 2 (YMFM: DEFAULT_PRESCALE=2).
-    // Its internal clock = master / 2. We clock the OPM once per 2 Z80 T-states.
-    // This gives Timer A the correct ~250 Hz rate and audio at 55930 Hz.
+    // Nuked OPM WASM: clockCycles() clocks the chip and collects samples.
+    // Prescale of 2: one OPM_Clock = 2 Z80 T-states.
     let z80Cycles = 0;
     let opmAccum = 0;
     try {
@@ -409,8 +391,8 @@ export class Emulator {
         const cyc = this.z80.step();
         z80Cycles += cyc;
         opmAccum += cyc;
-        const opmClocks = opmAccum >> 1; // divide by 2 (prescale)
-        opmAccum &= 1; // keep remainder
+        const opmClocks = opmAccum >> 1;
+        opmAccum &= 1;
         if (opmClocks > 0) {
           this.ym2151.clockCycles(opmClocks);
         }
