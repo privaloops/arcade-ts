@@ -179,6 +179,8 @@ export class Emulator {
 
     const romSet: RomSet = await loadRomFromZip(file);
 
+    // Reset all hardware (CPUs + audio chips)
+    this.ym2151.reset();
     this.bus.loadProgramRom(romSet.programRom);
     this.z80Bus.loadAudioRom(romSet.audioRom);
 
