@@ -52,22 +52,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   - CPS1 I/O port mapping (active LOW)
   - Default P1/P2 key mappings
   - Gamepad polling via Gamepad API
-- **Audio YM2151** — 4-operator FM synthesizer (1227 lines)
-  - 8 channels, 8 connection algorithms
-  - ADSR envelopes per operator
-  - Timer A (10-bit) + Timer B (8-bit) with IRQ callbacks
-  - LFO with 4 waveforms
-  - Stereo output (L/R per channel)
-- **Audio OKI MSM6295** — ADPCM decoder (274 lines)
-  - 4 simultaneous voices
-  - Phrase table ROM parsing
-  - Standard OKI ADPCM algorithm with step table
-  - Volume attenuation (16 levels)
-- **Audio Output** — Browser audio pipeline (514 lines)
+- **Audio Nuked OPM (YM2151)** — Cycle-accurate FM synthesizer from die-shot
+  - Port of Nuked OPM (Nuke.YKT) from C to TypeScript (2300+ lines)
+  - Transistor-level accurate: based on YM2151 chip decap
+  - 8 channels, 4 operators, 8 algorithms, LFO, noise
+  - YM3012 DAC emulation (10.3 mantissa/exponent format)
+  - Timer A/B with IRQ, clocked at master/2 (prescale=2, confirmed via Furnace)
+  - LGPL 2.1 licensed
+- **Audio OKI MSM6295** — MAME-exact ADPCM decoder
+  - 4 simultaneous voices with phrase table ROM parsing
+  - ADPCM decode via MAME's precomputed DIFF_LOOKUP table (49×16 entries)
+  - Step values: `floor(16 * (11/10)^step)`, bit-decomposition delta formula
+  - Float volume table matching MAME's `s_volume_table` (sample_t division)
+  - Normalization: `/2048` matching MAME's `stream.add_int(..., 2048)`
+  - Command protocol: bit 7 set = phrase select, clear = stop (MAME-verified)
+  - Phrase table byte addresses masked to 18 bits
+  - Status register: `0xF0 | playing_bits` (MAME convention)
+- **Audio Output** — Browser audio pipeline
   - AudioWorklet with SharedArrayBuffer ring buffer
   - ScriptProcessorNode fallback
   - Linear resampling (55930/7575 Hz -> 48000 Hz)
-  - Stereo mixing (YM2151 + OKI6295)
+  - CPS1 mono mix matching MAME: `ymL*0.35 + ymR*0.35 + oki*0.30`
+  - Soft limiter (tanh knee) to prevent digital saturation
+  - FPS overlay on canvas
 - **Emulator Loop** — Scanline-accurate frame timing
   - 262 scanlines, VBlank IRQ at scanline 240
   - Frame rate limiter (59.637 Hz)
@@ -87,9 +94,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Tilemap scan functions matching MAME (non-trivial row/col mapping)
 - Tilemap attribute format (palette bits 0-4, flip bits 5-6)
 - Transparent pen = 15 only (pen 0 is opaque)
+- **YM2151 busy flag** was 64x too long (4096 vs 64 Z80 cycles), starving the Z80 sequencer → music tempo drastically too slow
+- **Z80 EI timing** — `enableInterruptsNext` now processed after instruction execution (correct Z80 behavior)
+- **Sound latch** — removed spurious Z80 IRQ (MAME: only YM2151 drives Z80 INT, latch is polled by Timer A ISR)
+- **Nuked OPM envelope attack** — signed NOT was masked to uint16, causing channels to stick at max attenuation (silent)
+- **Nuked OPM prescale** — chip clocked at master/2 (32 OPM_Clock = 1 sample, rate = clock/64)
+- **OKI6295 command protocol** — bit 7 semantics were inverted (phrase select vs stop)
+- **OKI6295 phrase table** — addresses were treated as nibble offsets instead of byte offsets (reading wrong ROM locations)
+- **OKI6295 normalization** — was /8192, corrected to /2048 with float volumes (matching MAME's add_int divisor)
 
 ### Known Issues
 - Scroll1 text has slight column alternation artifacts
 - Sprites have minor tile-level garbling in 16x16 tiles
-- Audio: YM2151 timer IRQs not triggering (Z80 sound driver can't sequence music)
-- No audio output yet (key-on events detected but registers not fully programmed)
+- Audio: music slows down when game framerate drops (Z80 coupled to frame loop instead of independent clock)
+- Audio: OKI samples have slight crackling (linear resampler 7575→48000 Hz, no anti-aliasing filter)
