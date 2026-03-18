@@ -52,11 +52,11 @@
         margin-top: 4px;
       }
 
-      /* Canvas wrapper — maintains 4:3 ratio */
+      /* Canvas wrapper — CPS1 native 384x224, displayed at 2x */
       #canvas-wrapper {
         position: relative;
-        width: 100%;
-        aspect-ratio: 4 / 3;
+        width: 768px;
+        height: 448px;
         background: #0a0a0a;
         border: 1px solid #1a1a1a;
       }
@@ -133,9 +133,7 @@
         <canvas id="screen" width="384" height="224"></canvas>
 
         <div id="drop-zone">
-          <span class="icon">🎮</span>
-          <span class="label">Drop ROM here</span>
-          <span class="sublabel">ZIP file (MAME format)</span>
+          <span class="label" style="font-size:0.65rem;color:#444;letter-spacing:0.1em;">Select a game below</span>
         </div>
       </div>
 
@@ -146,12 +144,7 @@
         <button id="load-btn" style="padding:6px 16px;background:#1a1a1a;color:#e8003c;border:1px solid #333;cursor:pointer;font-family:inherit;font-size:0.8rem;letter-spacing:0.1em;" disabled>LOAD</button>
       </div>
 
-      <div id="rom-buttons" style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;">
-      </div>
-
-      <p id="status">Ready.</p>
-
-      <input type="file" id="file-input" accept=".zip" />
+      <p id="status">Ready. P=Pause F=Fullscreen Esc=Quit</p>
     </div>
 
     <script type="module" src="/src/index.ts"></script>

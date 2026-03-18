@@ -168,6 +168,15 @@ export class Emulator {
   // ── ROM loading ───────────────────────────────────────────────────────────
 
   async loadRom(file: File): Promise<void> {
+    // Stop any running emulation and reset state
+    this.stop();
+    this.audioOutput.suspend();
+    this.frameCount = 0;
+    this.m68kErrorCount = 0;
+    this.z80ErrorCount = 0;
+    this.prevRafTime = 0;
+    this.frameDebt = 0;
+
     const romSet: RomSet = await loadRomFromZip(file);
 
     this.bus.loadProgramRom(romSet.programRom);

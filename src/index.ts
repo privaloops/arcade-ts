@@ -15,7 +15,6 @@ function getElement<T extends HTMLElement>(id: string): T {
 
 const canvas = getElement<HTMLCanvasElement>("screen");
 const dropZone = getElement<HTMLDivElement>("drop-zone");
-const fileInput = getElement<HTMLInputElement>("file-input");
 const statusEl = getElement<HTMLParagraphElement>("status");
 
 // ── Canvas init ──────────────────────────────────────────────────────────────
@@ -48,10 +47,11 @@ const initAudio = (): void => {
 window.addEventListener("click", initAudio);
 window.addEventListener("keydown", initAudio);
 
-// ── Pause toggle (P key) ─────────────────────────────────────────────────────
+// ── Keyboard shortcuts ──────────────────────────────────────────────────────
 
 window.addEventListener("keydown", (e) => {
   if (e.code === "KeyP") {
+    // P = Pause / Resume
     if (emulator.isRunning()) {
       emulator.pause();
       emulator.suspendAudio();
@@ -60,6 +60,21 @@ window.addEventListener("keydown", (e) => {
       emulator.resume();
       emulator.resumeAudio();
       setStatus("Running");
+    }
+  } else if (e.code === "Escape") {
+    // Escape = Stop game, show UI
+    emulator.stop();
+    emulator.suspendAudio();
+    dropZone.classList.remove("hidden");
+    setStatus("Ready.");
+  } else if (e.code === "KeyF") {
+    // F = Toggle fullscreen
+    const wrapper = document.getElementById("canvas-wrapper");
+    if (!wrapper) return;
+    if (document.fullscreenElement) {
+      void document.exitFullscreen();
+    } else {
+      void wrapper.requestFullscreen();
     }
   }
 });
@@ -90,33 +105,6 @@ async function handleRomFile(file: File): Promise<void> {
     console.error("ROM load error:", err);
   }
 }
-
-// Drag & drop events
-dropZone.addEventListener("dragover", (e) => {
-  e.preventDefault();
-  dropZone.classList.add("drag-over");
-});
-
-dropZone.addEventListener("dragleave", () => {
-  dropZone.classList.remove("drag-over");
-});
-
-dropZone.addEventListener("drop", (e) => {
-  e.preventDefault();
-  dropZone.classList.remove("drag-over");
-  const file = e.dataTransfer?.files[0];
-  if (file) void handleRomFile(file);
-});
-
-// Click to browse
-dropZone.addEventListener("click", () => {
-  fileInput.click();
-});
-
-fileInput.addEventListener("change", () => {
-  const file = fileInput.files?.[0];
-  if (file) void handleRomFile(file);
-});
 
 // ── Game selector (dropdown + archive.org download) ──────────────────────────
 
@@ -166,26 +154,3 @@ loadBtn.addEventListener("click", () => {
     });
 });
 
-// Also detect local ROMs in public/ and add quick-load buttons
-const romButtons = getElement<HTMLDivElement>("rom-buttons");
-const LOCAL_ROMS = ["sf2.zip", "ffight.zip"];
-
-for (const romName of LOCAL_ROMS) {
-  fetch(`/${romName}`, { method: "HEAD" })
-    .then((res) => {
-      if (!res.ok) return;
-      const btn = document.createElement("button");
-      btn.textContent = romName.replace(".zip", "").toUpperCase();
-      btn.style.cssText = "padding:6px 16px;background:#1a1a1a;color:#e8003c;border:1px solid #333;cursor:pointer;font-family:inherit;font-size:0.8rem;letter-spacing:0.1em;";
-      btn.addEventListener("click", () => {
-        fetch(`/${romName}`)
-          .then(r => r.blob())
-          .then(blob => {
-            const file = new File([blob], romName, { type: "application/zip" });
-            void handleRomFile(file);
-          });
-      });
-      romButtons.appendChild(btn);
-    })
-    .catch(() => {});
-}
