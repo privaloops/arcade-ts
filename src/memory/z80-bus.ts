@@ -17,12 +17,8 @@
  * The Z80 is little-endian but this bus deals with byte-level access only.
  */
 
-export interface Z80BusInterface {
-  read(address: number): number;
-  write(address: number, value: number): void;
-  ioRead(port: number): number;
-  ioWrite(port: number, value: number): void;
-}
+import type { Z80BusInterface } from '../types';
+export type { Z80BusInterface };
 
 export class Z80Bus implements Z80BusInterface {
   private audioRom: Uint8Array;

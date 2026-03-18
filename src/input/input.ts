@@ -106,7 +106,6 @@ const AXIS_THRESHOLD = 0.5;
 export class InputManager {
   private keyState: Set<string> = new Set();
   private mappings: [KeyMapping, KeyMapping];
-  private _debugInputCount = 0;
   private gamepadIndices: [number | null, number | null] = [null, null];
 
   private boundKeyDown: (e: KeyboardEvent) => void;

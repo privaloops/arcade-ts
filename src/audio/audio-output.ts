@@ -313,7 +313,6 @@ export class AudioOutput {
   private okiResampler: LinearResampler | null = null;
 
   /** Scratch buffers (allocated once, reused every frame — zero GC pressure) */
-  private _debugPushCount = 0;
   private ymResampledL: Float32Array = new Float32Array(8192);
   private ymResampledR: Float32Array = new Float32Array(8192);
   private okiResampledM: Float32Array = new Float32Array(8192);
@@ -397,13 +396,20 @@ export class AudioOutput {
     if (!this._initialized) return;
 
     // Resample YM2151
-    const ymOutL = this._ensureScratch(this.ymResampledL, ymCount * 4);
-    const ymOutR = this._ensureScratch(this.ymResampledR, ymCount * 4);
+    if (this.ymResampledL.length < ymCount * 4) {
+      this.ymResampledL = new Float32Array(ymCount * 8);
+      this.ymResampledR = new Float32Array(ymCount * 8);
+    }
+    const ymOutL = this.ymResampledL;
+    const ymOutR = this.ymResampledR;
     const nYmL = this.ymResamplerL!.resample(ymLeft, ymCount, ymOutL);
     const nYmR = this.ymResamplerR!.resample(ymRight, ymCount, ymOutR);
 
     // Resample OKI6295
-    const okiOut = this._ensureScratch(this.okiResampledM, okiCount * 16);
+    if (this.okiResampledM.length < okiCount * 16) {
+      this.okiResampledM = new Float32Array(okiCount * 32);
+    }
+    const okiOut = this.okiResampledM;
     const nOki = this.okiResampler!.resample(okiMono, okiCount, okiOut);
 
     // Mix: use the output count from YM (dominant), pad OKI if needed
@@ -526,14 +532,6 @@ export class AudioOutput {
     return s;
   }
 
-  /**
-   * Return the existing scratch buffer if it is large enough,
-   * otherwise allocate a new one and update the field.
-   */
-  private _ensureScratch(buf: Float32Array, minLength: number): Float32Array {
-    if (buf.length >= minLength) return buf;
-    return new Float32Array(minLength * 2);
-  }
 }
 
 // ---------------------------------------------------------------------------

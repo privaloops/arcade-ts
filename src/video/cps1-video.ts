@@ -1,33 +1,6 @@
 import type { CpsBConfig, GfxMapperConfig } from '../memory/rom-loader';
 
 /**
- * Apply CPS-B configuration (called once per game load).
- */
-export function applyCpsBConfig(config: CpsBConfig): void {
-  CPSB_LAYER_CTRL = config.layerControl;
-  CPSB_PALETTE_CTRL = config.paletteControl;
-  LAYER_ENABLE_SCROLL1 = config.layerEnableMask[0];
-  LAYER_ENABLE_SCROLL2 = config.layerEnableMask[1];
-  LAYER_ENABLE_SCROLL3 = config.layerEnableMask[2];
-}
-
-/**
- * Apply GFX ROM bank mapper configuration (called once per game load).
- */
-export function applyGfxMapper(config: GfxMapperConfig): void {
-  activeMapperTable = config.ranges.map(r => ({
-    type: r.type, start: r.start, end: r.end, bank: r.bank,
-  }));
-  activeBankSizes = [...config.bankSizes];
-  activeBankBases = [];
-  let base = 0;
-  for (let i = 0; i < config.bankSizes.length; i++) {
-    activeBankBases.push(base);
-    base += config.bankSizes[i]!;
-  }
-}
-
-/**
  * CPS1 Video — CPS-A / CPS-B Graphics Decoder
  *
  * Renders all 4 graphic layers of the CPS1 system:
@@ -90,9 +63,9 @@ const CPSA_VIDEOCONTROL   = 0x22;
 // CPS-B register offsets (byte offsets into cpsbRegs)
 // ---------------------------------------------------------------------------
 
-// Default CPS-B offsets (overridden per-game via CpsBConfig)
-let CPSB_LAYER_CTRL     = 0x26;
-let CPSB_PALETTE_CTRL   = 0x30;
+// CPS-B default offsets (used as fallback if no config provided)
+const DEFAULT_LAYER_CTRL = 0x26;
+const DEFAULT_PALETTE_CTRL = 0x30;
 
 // ---------------------------------------------------------------------------
 // Layer identifiers (matching MAME convention)
@@ -103,10 +76,9 @@ const LAYER_SCROLL1 = 1; // MAME layer 1 = scroll1
 const LAYER_SCROLL2 = 2; // MAME layer 2 = scroll2
 const LAYER_SCROLL3 = 3; // MAME layer 3 = scroll3
 
-// Layer enable masks (overridden per-game via CpsBConfig)
-let LAYER_ENABLE_SCROLL1 = 0x08;
-let LAYER_ENABLE_SCROLL2 = 0x10;
-let LAYER_ENABLE_SCROLL3 = 0x20;
+const DEFAULT_ENABLE_SCROLL1 = 0x08;
+const DEFAULT_ENABLE_SCROLL2 = 0x10;
+const DEFAULT_ENABLE_SCROLL3 = 0x20;
 
 // VRAM base alignment boundaries (from MAME video_start)
 const SCROLL_SIZE    = 0x4000;
@@ -158,12 +130,7 @@ interface GfxRange {
   bank: number;
 }
 
-// Active GFX mapper (set per-game via applyGfxMapper)
-let activeMapperTable: GfxRange[] = [];
-let activeBankSizes: number[] = [0, 0, 0, 0];
-let activeBankBases: number[] = [0, 0, 0, 0];
-
-function gfxromBankMapper(type: number, code: number): number {
+function gfxromBankMapper(type: number, code: number, mapperTable: GfxRange[], bankSizes: number[], bankBases: number[]): number {
   let shift = 0;
   switch (type) {
     case GFXTYPE_SPRITES: shift = 1; break;
@@ -174,12 +141,12 @@ function gfxromBankMapper(type: number, code: number): number {
 
   const shiftedCode = code << shift;
 
-  for (let i = 0; i < activeMapperTable.length; i++) {
-    const range = activeMapperTable[i]!;
+  for (let i = 0; i < mapperTable.length; i++) {
+    const range = mapperTable[i]!;
     if (shiftedCode >= range.start && shiftedCode <= range.end) {
       if (range.type & type) {
-        const bankSize = activeBankSizes[range.bank]!;
-        return (activeBankBases[range.bank]! + (shiftedCode & (bankSize - 1))) >> shift;
+        const bankSize = bankSizes[range.bank]!;
+        return (bankBases[range.bank]! + (shiftedCode & (bankSize - 1))) >> shift;
       }
     }
   }
@@ -240,6 +207,16 @@ export class CPS1Video {
   private readonly cpsaRegs: Uint8Array;
   private readonly cpsbRegs: Uint8Array;
 
+  // Per-game CPS-B config (instance state, not module globals)
+  private layerCtrlOffset: number;
+  private paletteCtrlOffset: number;
+  private enableScroll1: number;
+  private enableScroll2: number;
+  private enableScroll3: number;
+  private mapperTable: GfxRange[];
+  private bankSizes: number[];
+  private bankBases: number[];
+
   // Internal priority buffer
   private readonly priorityBuf: Uint8Array;
 
@@ -262,6 +239,8 @@ export class CPS1Video {
     graphicsRom: Uint8Array,
     cpsaRegs: Uint8Array,
     cpsbRegs: Uint8Array,
+    cpsBConfig?: CpsBConfig,
+    gfxMapper?: GfxMapperConfig,
   ) {
     this.vram = vram;
     this.graphicsRom = graphicsRom;
@@ -271,6 +250,25 @@ export class CPS1Video {
     this.objBuffer = new Uint8Array(OBJ_SIZE);
     this.paletteCache = new Uint32Array(256 * 16); // 256 palettes * 16 colors
     this.tileRowBuf = new Uint8Array(32); // max tile width = 32 pixels
+
+    // CPS-B config
+    this.layerCtrlOffset = cpsBConfig?.layerControl ?? DEFAULT_LAYER_CTRL;
+    this.paletteCtrlOffset = cpsBConfig?.paletteControl ?? DEFAULT_PALETTE_CTRL;
+    this.enableScroll1 = cpsBConfig?.layerEnableMask[0] ?? DEFAULT_ENABLE_SCROLL1;
+    this.enableScroll2 = cpsBConfig?.layerEnableMask[1] ?? DEFAULT_ENABLE_SCROLL2;
+    this.enableScroll3 = cpsBConfig?.layerEnableMask[2] ?? DEFAULT_ENABLE_SCROLL3;
+
+    // GFX mapper
+    this.mapperTable = gfxMapper?.ranges.map(r => ({
+      type: r.type, start: r.start, end: r.end, bank: r.bank,
+    })) ?? [];
+    this.bankSizes = gfxMapper ? [...gfxMapper.bankSizes] : [0, 0, 0, 0];
+    this.bankBases = [];
+    let bankBase = 0;
+    for (const size of this.bankSizes) {
+      this.bankBases.push(bankBase);
+      bankBase += size;
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -500,7 +498,7 @@ export class CPS1Video {
           if (entryOffset + 3 >= VRAM_SIZE) continue;
 
           const rawCode = ((vram[entryOffset]! << 8) | vram[entryOffset + 1]!) & codeMask;
-          const tileCode = gfxromBankMapper(gfxType, rawCode);
+          const tileCode = gfxromBankMapper(gfxType, rawCode, this.mapperTable, this.bankSizes, this.bankBases);
           if (tileCode === -1) continue;
 
           const attribs = (vram[entryOffset + 2]! << 8) | vram[entryOffset + 3]!;
@@ -576,7 +574,7 @@ export class CPS1Video {
         if (entryOffset + 3 >= VRAM_SIZE) continue;
 
         const rawCode = ((vram[entryOffset]! << 8) | vram[entryOffset + 1]!) & codeMask;
-        const tileCode = gfxromBankMapper(gfxType, rawCode);
+        const tileCode = gfxromBankMapper(gfxType, rawCode, this.mapperTable, this.bankSizes, this.bankBases);
         if (tileCode === -1) continue;
 
         const attribs = (vram[entryOffset + 2]! << 8) | vram[entryOffset + 3]!;
@@ -692,7 +690,7 @@ export class CPS1Video {
       const flipY = (colour >> 6) & 1;
 
       // MAME bank-maps the base code ONCE, then computes sub-tiles from the mapped code.
-      const mappedBaseCode = gfxromBankMapper(GFXTYPE_SPRITES, code);
+      const mappedBaseCode = gfxromBankMapper(GFXTYPE_SPRITES, code, this.mapperTable, this.bankSizes, this.bankBases);
       if (mappedBaseCode === -1) continue;
 
       if (colour & 0xFF00) {
@@ -804,7 +802,7 @@ export class CPS1Video {
   // -------------------------------------------------------------------------
 
   private getLayerOrder(): number[] {
-    const ctrl = this.readCpsbReg(CPSB_LAYER_CTRL);
+    const ctrl = this.readCpsbReg(this.layerCtrlOffset);
 
     const l0 = (ctrl >> 0x06) & 0x03;
     const l1 = (ctrl >> 0x08) & 0x03;
@@ -819,19 +817,19 @@ export class CPS1Video {
   // -------------------------------------------------------------------------
 
   private isLayerEnabled(layerId: number): boolean {
-    const layercontrol = this.readCpsbReg(CPSB_LAYER_CTRL);
+    const layercontrol = this.readCpsbReg(this.layerCtrlOffset);
     const videocontrol = this.readCpsaReg(CPSA_VIDEOCONTROL);
 
     switch (layerId) {
       case LAYER_OBJ:
         return true;
       case LAYER_SCROLL1:
-        return (layercontrol & LAYER_ENABLE_SCROLL1) !== 0;
+        return (layercontrol & this.enableScroll1) !== 0;
       case LAYER_SCROLL2:
-        return (layercontrol & LAYER_ENABLE_SCROLL2) !== 0 &&
+        return (layercontrol & this.enableScroll2) !== 0 &&
                (videocontrol & 0x04) !== 0;
       case LAYER_SCROLL3:
-        return (layercontrol & LAYER_ENABLE_SCROLL3) !== 0 &&
+        return (layercontrol & this.enableScroll3) !== 0 &&
                (videocontrol & 0x08) !== 0;
       default:
         return false;

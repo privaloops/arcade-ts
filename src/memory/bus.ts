@@ -16,14 +16,8 @@
  * The 68000 is big-endian: MSB at lower address.
  */
 
-export interface BusInterface {
-  read8(address: number): number;
-  read16(address: number): number;
-  read32(address: number): number;
-  write8(address: number, value: number): void;
-  write16(address: number, value: number): void;
-  write32(address: number, value: number): void;
-}
+import type { BusInterface } from '../types';
+export type { BusInterface };
 
 export class Bus implements BusInterface {
   private programRom: Uint8Array;
@@ -34,7 +28,6 @@ export class Bus implements BusInterface {
   private coinCtrl: Uint8Array;      // 0x800030-0x800037 (8 bytes)
   private vram: Uint8Array;          // 0x900000-0x92FFFF (192KB)
   private workRam: Uint8Array;       // 0xFF0000-0xFFFFFF (64KB)
-  private _soundLatchDebugCount: number = 0;
   private _soundLatchCallback: ((value: number) => void) | null = null;
 
   // Callback for IRQ acknowledge — set by the emulator to clear interrupt lines
@@ -54,7 +47,6 @@ export class Bus implements BusInterface {
 
     // I/O ports default to 0xFF (active LOW = all buttons released)
     this.ioPorts.fill(0xFF);
-    this._soundLatchDebugCount = 0;
 
   }
 

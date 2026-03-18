@@ -3,18 +3,8 @@
 // CPS1-Web project — TypeScript strict
 // =============================================================================
 
-// ---------------------------------------------------------------------------
-// Public interfaces
-// ---------------------------------------------------------------------------
-
-export interface BusInterface {
-  read8(address: number): number;
-  read16(address: number): number;
-  read32(address: number): number;
-  write8(address: number, value: number): void;
-  write16(address: number, value: number): void;
-  write32(address: number, value: number): void;
-}
+import type { BusInterface } from '../types';
+export type { BusInterface };
 
 export interface CpuState {
   d: Int32Array;       // D0-D7

@@ -7,12 +7,8 @@
 // Public interfaces
 // ---------------------------------------------------------------------------
 
-export interface Z80BusInterface {
-  read(address: number): number;
-  write(address: number, value: number): void;
-  ioRead(port: number): number;
-  ioWrite(port: number, value: number): void;
-}
+import type { Z80BusInterface } from '../types';
+export type { Z80BusInterface };
 
 export interface Z80State {
   // Main register set

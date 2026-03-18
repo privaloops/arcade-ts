@@ -17,7 +17,7 @@ import { Z80, Z80State } from "./cpu/z80";
 import { Bus } from "./memory/bus";
 import { Z80Bus } from "./memory/z80-bus";
 import { Renderer, FRAMEBUFFER_SIZE } from "./video/renderer";
-import { CPS1Video, applyCpsBConfig, applyGfxMapper } from "./video/cps1-video";
+import { CPS1Video } from "./video/cps1-video";
 import { InputManager } from "./input/input";
 import { loadRomFromZip, RomSet } from "./memory/rom-loader";
 import { NukedOPM as YM2151 } from "./audio/nuked-opm";
@@ -173,20 +173,19 @@ export class Emulator {
     this.bus.loadProgramRom(romSet.programRom);
     this.z80Bus.loadAudioRom(romSet.audioRom);
 
-    // Apply CPS-B configuration for this game
-    const cpsBConfig = romSet.cpsBConfig;
-    if (cpsBConfig.idOffset >= 0) {
-      this.bus.setCpsBId(cpsBConfig.idOffset, cpsBConfig.idValue);
+    // Apply CPS-B ID for this game
+    if (romSet.cpsBConfig.idOffset >= 0) {
+      this.bus.setCpsBId(romSet.cpsBConfig.idOffset, romSet.cpsBConfig.idValue);
     }
-    applyCpsBConfig(cpsBConfig);
-    applyGfxMapper(romSet.gfxMapper);
 
-    // Wire up CPS1 video with VRAM and graphics ROM
+    // Wire up CPS1 video with VRAM, graphics ROM, and per-game config
     this.video = new CPS1Video(
       this.bus.getVram(),
       romSet.graphicsRom,
       this.bus.getCpsaRegisters(),
       this.bus.getCpsbRegisters(),
+      romSet.cpsBConfig,
+      romSet.gfxMapper,
     );
 
     // Create OKI6295 with its ROM data and wire to Z80 bus
@@ -336,6 +335,8 @@ export class Emulator {
   }
 
   private frameCount = 0;
+  private m68kErrorCount = 0;
+  private z80ErrorCount = 0;
   private fpsFrames = 0;
   private fpsLastTime = 0;
   private fpsDisplay = 0;
@@ -371,8 +372,9 @@ export class Emulator {
         }
       }
     } catch (e) {
-      if (this.frameCount < 5) {
-        console.error('M68000 error at frame', this.frameCount, ':', e);
+      this.m68kErrorCount++;
+      if (this.m68kErrorCount <= 5 || this.m68kErrorCount % 600 === 0) {
+        console.error(`M68000 error #${this.m68kErrorCount} at frame ${this.frameCount}:`, e);
       }
     }
 
@@ -395,8 +397,9 @@ export class Emulator {
         }
       }
     } catch (e) {
-      if (this.frameCount < 5) {
-        console.error('Z80 error at frame', this.frameCount, ':', e);
+      this.z80ErrorCount++;
+      if (this.z80ErrorCount <= 5 || this.z80ErrorCount % 600 === 0) {
+        console.error(`Z80 error #${this.z80ErrorCount} at frame ${this.frameCount}:`, e);
       }
     }
 
@@ -411,25 +414,6 @@ export class Emulator {
       if (this.oki6295 !== null) {
         okiSamplesPerFrame = Math.ceil(this.oki6295.getSampleRate() / FRAME_RATE);
         this.oki6295.generateSamples(this.okiBuffer, okiSamplesPerFrame);
-      }
-
-      // Audio level monitoring (every 2 seconds)
-      if (this.frameCount > 0 && this.frameCount % 120 === 0) {
-        let ymPeakL = 0, ymPeakR = 0;
-        for (let i = 0; i < ymSamplesPerFrame; i++) {
-          const al = Math.abs(this.ymBufferL[i]!);
-          const ar = Math.abs(this.ymBufferR[i]!);
-          if (al > ymPeakL) ymPeakL = al;
-          if (ar > ymPeakR) ymPeakR = ar;
-        }
-        let okiPeak = 0;
-        for (let i = 0; i < okiSamplesPerFrame; i++) {
-          const a = Math.abs(this.okiBuffer[i]!);
-          if (a > okiPeak) okiPeak = a;
-        }
-        const ymMono = ymPeakL * 0.35 + ymPeakR * 0.35;
-        const mixPeak = ymMono + okiPeak * 0.30;
-        console.log(`[AUDIO] YM: L=${ymPeakL.toFixed(3)} R=${ymPeakR.toFixed(3)} mono=${ymMono.toFixed(3)} | OKI: ${okiPeak.toFixed(3)} mix*0.30=${(okiPeak*0.30).toFixed(3)} | Total: ${mixPeak.toFixed(3)}${mixPeak > 1.0 ? ' CLIP!' : ''}`);
       }
 
       // Push to audio output if initialized
