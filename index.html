@@ -70,9 +70,20 @@
 
       /* Fullscreen: stretch to fill screen */
       #canvas-wrapper:fullscreen {
-        width: 100vw;
-        height: 100vh;
+        width: 100vw !important;
+        height: 100vh !important;
+        max-width: none !important;
+        max-height: none !important;
         border: none;
+        background: #000;
+      }
+      #canvas-wrapper:-webkit-full-screen {
+        width: 100vw !important;
+        height: 100vh !important;
+        max-width: none !important;
+        max-height: none !important;
+        border: none;
+        background: #000;
       }
 
       /* Drop zone — overlays canvas when no ROM is loaded */
