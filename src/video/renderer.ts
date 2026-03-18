@@ -55,6 +55,15 @@ export class Renderer {
     this.ctx.putImageData(this.imageData, 0, 0);
   }
 
+  /** Draw text overlay on the canvas (called after render) */
+  drawText(text: string, x: number, y: number): void {
+    this.ctx.font = '10px monospace';
+    this.ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    this.ctx.fillRect(x - 2, y - 10, text.length * 7, 13);
+    this.ctx.fillStyle = '#0f0';
+    this.ctx.fillText(text, x, y);
+  }
+
   /**
    * Recalculate CSS dimensions so the canvas fills its parent while keeping
    * the native 384:224 aspect ratio (letterboxed / pillarboxed as needed).

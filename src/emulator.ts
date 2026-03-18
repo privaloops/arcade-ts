@@ -322,6 +322,9 @@ export class Emulator {
   }
 
   private frameCount = 0;
+  private fpsFrames = 0;
+  private fpsLastTime = 0;
+  private fpsDisplay = 0;
 
   private runOneFrame(): void {
     // 1. Update input ports on the bus
@@ -390,8 +393,14 @@ export class Emulator {
       const ymSamplesPerFrame = Math.ceil(this.ym2151.getSampleRate() / FRAME_RATE);
       this.ym2151.generateSamples(this.ymBufferL, this.ymBufferR, ymSamplesPerFrame);
 
-      // Audio level debug: measure peak YM and OKI levels
-      if (this.frameCount >= 300 && this.frameCount <= 480 && this.frameCount % 60 === 0) {
+      let okiSamplesPerFrame = 0;
+      if (this.oki6295 !== null) {
+        okiSamplesPerFrame = Math.ceil(this.oki6295.getSampleRate() / FRAME_RATE);
+        this.oki6295.generateSamples(this.okiBuffer, okiSamplesPerFrame);
+      }
+
+      // Audio level monitoring (every 2 seconds)
+      if (this.frameCount > 0 && this.frameCount % 120 === 0) {
         let ymPeakL = 0, ymPeakR = 0;
         for (let i = 0; i < ymSamplesPerFrame; i++) {
           const al = Math.abs(this.ymBufferL[i]!);
@@ -399,13 +408,14 @@ export class Emulator {
           if (al > ymPeakL) ymPeakL = al;
           if (ar > ymPeakR) ymPeakR = ar;
         }
-        console.log(`Frame ${this.frameCount}: YM peak L=${ymPeakL.toFixed(4)} R=${ymPeakR.toFixed(4)} mono=${(ymPeakL*0.35+ymPeakR*0.35).toFixed(4)} samples=${ymSamplesPerFrame}`);
-      }
-
-      let okiSamplesPerFrame = 0;
-      if (this.oki6295 !== null) {
-        okiSamplesPerFrame = Math.ceil(this.oki6295.getSampleRate() / FRAME_RATE);
-        this.oki6295.generateSamples(this.okiBuffer, okiSamplesPerFrame);
+        let okiPeak = 0;
+        for (let i = 0; i < okiSamplesPerFrame; i++) {
+          const a = Math.abs(this.okiBuffer[i]!);
+          if (a > okiPeak) okiPeak = a;
+        }
+        const ymMono = ymPeakL * 0.35 + ymPeakR * 0.35;
+        const mixPeak = ymMono + okiPeak * 0.30;
+        console.log(`[AUDIO] YM: L=${ymPeakL.toFixed(3)} R=${ymPeakR.toFixed(3)} mono=${ymMono.toFixed(3)} | OKI: ${okiPeak.toFixed(3)} mix*0.30=${(okiPeak*0.30).toFixed(3)} | Total: ${mixPeak.toFixed(3)}${mixPeak > 1.0 ? ' CLIP!' : ''}`);
       }
 
       // Push to audio output if initialized
@@ -417,60 +427,31 @@ export class Emulator {
       }
     }
 
-    // 6. Debug: log state periodically
-    if (this.frameCount < 3 || this.frameCount === 60 || this.frameCount === 300 || this.frameCount === 600 || this.frameCount % 300 === 0) {
-      const vram = this.bus.getVram();
-      let vramNonZero = 0;
-      for (let i = 0; i < vram.length; i++) {
-        if (vram[i] !== 0) vramNonZero++;
-      }
-      const cpsa = this.bus.getCpsaRegisters();
-      const state = this.m68000.getState();
-      console.log(`Frame ${this.frameCount}: VRAM non-zero: ${vramNonZero}, M68K cycles: ${m68kCycles}`);
-      console.log('CPS-A regs:', Array.from(cpsa.slice(0, 24)).map(b => b.toString(16).padStart(2, '0')).join(' '));
-      console.log('M68K PC:', state.pc.toString(16).padStart(6, '0'),
-        'SR:', state.sr.toString(16).padStart(4, '0'),
-        'stopped:', state.stopped,
-        'D0:', (state.d[0]! >>> 0).toString(16).padStart(8, '0'));
-
-      // Check work RAM usage
-      const wram = this.bus.getWorkRam();
-      let wramNonZero = 0;
-      for (let i = 0; i < wram.length; i++) {
-        if (wram[i] !== 0) wramNonZero++;
-      }
-      console.log('Work RAM non-zero:', wramNonZero);
-    }
     this.frameCount++;
 
     const tCpu1 = performance.now();
 
-    // 7. Render the frame
+    // 7. FPS counter
+    const now = performance.now();
+    this.fpsFrames++;
+    if (now - this.fpsLastTime >= 1000) {
+      this.fpsDisplay = this.fpsFrames;
+      this.fpsFrames = 0;
+      this.fpsLastTime = now;
+    }
+
+    // 8. Render the frame
     const t0 = performance.now();
     this.renderFrame();
     const t1 = performance.now();
-    if (this.frameCount % 120 === 0 && this.frameCount > 0) {
-      const cpuMs = tCpu1 - tCpu0;
-      const audioMs = t0 - tCpu1; // audio gen happens between CPU and render
-      const renderMs = t1 - t0;
-      console.log('F' + this.frameCount + ' CPU: ' + cpuMs.toFixed(1) + 'ms, Audio: ' + audioMs.toFixed(1) + 'ms, Render: ' + renderMs.toFixed(1) + 'ms, Total: ' + (cpuMs + audioMs + renderMs).toFixed(1) + 'ms');
-    }
   }
 
   private renderFrame(): void {
     if (this.video) {
       this.video.renderFrame(this.framebuffer);
     }
-    // Debug: count non-zero pixels in framebuffer
-    if (this.frameCount < 5 || this.frameCount === 60 || this.frameCount === 300 || this.frameCount === 600 || this.frameCount === 650 || this.frameCount === 700 || this.frameCount % 300 === 0) {
-      let nonBlack = 0;
-      for (let i = 0; i < this.framebuffer.length; i += 4) {
-        if (this.framebuffer[i]! !== 0 || this.framebuffer[i+1]! !== 0 || this.framebuffer[i+2]! !== 0) {
-          nonBlack++;
-        }
-      }
-      console.log(`Frame ${this.frameCount}: framebuffer non-black pixels: ${nonBlack}/${384*224}`);
-    }
     this.renderer.render(this.framebuffer);
+    // FPS overlay on canvas
+    this.renderer.drawText(`${this.fpsDisplay} FPS`, 384 - 60, 12);
   }
 }

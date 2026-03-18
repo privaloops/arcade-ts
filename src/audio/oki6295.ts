@@ -29,20 +29,19 @@ const STEP_TABLE: readonly number[] = [
 const INDEX_ADJUST: readonly number[] = [-1, -1, -1, -1, 2, 4, 6, 8];
 
 /**
- * Volume attenuation table matching MAME's okim6295.cpp s_volume_table.
- * Integer multiplier divided by 0x20 (32) to get 0.0-1.0 range.
- * Attenuation 9-15 = silent (0).
+ * Volume table: MAME's s_volume_table — float values (int / 0x20).
+ * MAME: sound_stream::sample_t(0xNN) / sound_stream::sample_t(0x20)
  */
 const VOLUME_TABLE: readonly number[] = [
-  0x20 / 0x20, // 0:  0 dB
-  0x16 / 0x20, // 1: -3.2 dB
-  0x10 / 0x20, // 2: -6.0 dB
-  0x0B / 0x20, // 3: -9.2 dB
-  0x08 / 0x20, // 4: -12.0 dB
-  0x06 / 0x20, // 5: -14.5 dB
-  0x04 / 0x20, // 6: -18.0 dB
-  0x03 / 0x20, // 7: -20.5 dB
-  0x02 / 0x20, // 8: -24.0 dB
+  0x20 / 0x20, // 0:  0 dB    → 1.000
+  0x16 / 0x20, // 1: -3.2 dB  → 0.688
+  0x10 / 0x20, // 2: -6.0 dB  → 0.500
+  0x0B / 0x20, // 3: -9.2 dB  → 0.344
+  0x08 / 0x20, // 4: -12.0 dB → 0.250
+  0x06 / 0x20, // 5: -14.5 dB → 0.188
+  0x04 / 0x20, // 6: -18.0 dB → 0.125
+  0x03 / 0x20, // 7: -20.5 dB → 0.094
+  0x02 / 0x20, // 8: -24.0 dB → 0.063
   0,            // 9-15: silence
   0, 0, 0, 0, 0, 0,
 ];
@@ -269,15 +268,14 @@ export class OKI6295 {
         }
 
         const sample = this.decodeNibble(channel);
-        // Apply per-channel volume and accumulate
+        // MAME: sample * volume_int (integer multiply, no float)
         mix += sample * channel.volume;
       }
 
-      // MAME normalization: signal * volume_int / 32768 (put_clamp divisor).
-      // Our volume is volume_int/32 (float), so: signal * (vol_int/32) / X
-      // must equal signal * vol_int / 32768 → X = 32768/32 = 1024.
-      // 4 voices sum → divide by 1024 per voice, clamp combined result.
-      buffer[i] = Math.max(-1, Math.min(1, mix / 1024));
+      // MAME: stream.add_int(0, sampindex, signal * volume, 2048)
+      // Divisor is 2048, not 32768. No clamp — the route gain ×0.30
+      // in the final mixer controls the level.
+      buffer[i] = mix / 2048;
     }
   }
 

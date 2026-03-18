@@ -415,10 +415,6 @@ export class AudioOutput {
       mixedR[i] = mono;
     }
 
-    if (this._debugPushCount !== undefined) this._debugPushCount++;
-    if (this._debugPushCount === 300) {
-      console.log('Audio push: ymIn=' + ymCount + ' ymOut=' + nYmL + ' okiIn=' + okiCount + ' okiOut=' + nOki + ' mixed=' + nOut);
-    }
 
     if (this.ringBuffer) {
       this.ringBuffer.write(mixedL, mixedR, nOut);

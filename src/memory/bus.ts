@@ -198,10 +198,6 @@ export class Bus implements BusInterface {
       // Immediately forward to Z80 bus (real-time, not frame-synced)
       if (value !== 0 && this._soundLatchCallback !== null) {
         this._soundLatchCallback(value);
-        if (this._soundLatchDebugCount < 20) {
-          this._soundLatchDebugCount++;
-          console.log('Sound cmd: 0x' + value.toString(16));
-        }
       }
       return;
     }
