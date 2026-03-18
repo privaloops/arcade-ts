@@ -886,7 +886,9 @@ function OPM_EnvelopePhase5(chip: opm_t): void {
       step |= 1 << (chip.eg_inc - 1);
     }
     if (chip.eg_incattack) {
-      step |= ((~chip.eg_level[slot] & 0xffff) << chip.eg_inc) >> 5;
+      // C: step |= ((~(int32_t)chip->eg_level[slot]) << chip->eg_inc) >> 5;
+      // Must use signed 32-bit NOT (not masked to 16 bits) for correct attack curve.
+      step |= ((~chip.eg_level[slot]) << chip.eg_inc) >> 5;
     }
   }
   level += step;
