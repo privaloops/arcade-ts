@@ -163,12 +163,6 @@ export class Z80 {
 
   /** Execute one instruction. Returns T-states consumed. */
   step(): number {
-    if (this.enableInterruptsNext) {
-      this.iff1 = true;
-      this.iff2 = true;
-      this.enableInterruptsNext = false;
-    }
-
     // Check level-triggered IRQ line: if asserted and interrupts enabled,
     // accept the interrupt (same as calling irq() but driven by the line state).
     if (this.irqLineAsserted && this.iff1) {
@@ -178,12 +172,29 @@ export class Z80 {
     if (this.halted) {
       // Execute NOP while halted
       this.incR();
+      // Process deferred EI after the instruction (correct Z80 behavior:
+      // EI delays interrupt acceptance by one instruction)
+      if (this.enableInterruptsNext) {
+        this.iff1 = true;
+        this.iff2 = true;
+        this.enableInterruptsNext = false;
+      }
       return 4;
     }
 
     const opcode = this.fetchByte();
     this.incR();
-    return this.execMain(opcode);
+    const cycles = this.execMain(opcode);
+
+    // Process deferred EI after the instruction (correct Z80 behavior:
+    // EI delays interrupt acceptance by one instruction)
+    if (this.enableInterruptsNext) {
+      this.iff1 = true;
+      this.iff2 = true;
+      this.enableInterruptsNext = false;
+    }
+
+    return cycles;
   }
 
   /**

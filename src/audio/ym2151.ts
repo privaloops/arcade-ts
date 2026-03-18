@@ -820,7 +820,10 @@ export class YM2151 {
     value = value & 0xFF;
     const reg = this.selectedRegister;
     this.registers[reg] = value;
-    this.busyCycles = 64;
+    // Real YM2151 busy period is 64 master clocks ≈ 1 timer tick.
+    // tickTimers() runs once per 64 clocks, so busyCycles=1 clears
+    // after exactly one tick — matching real hardware behavior.
+    this.busyCycles = 1;
 
     this.writeRegister(reg, value);
   }

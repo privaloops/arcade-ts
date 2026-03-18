@@ -114,16 +114,18 @@ export class Emulator {
     this.okiBuffer = new Float32Array(256);
 
     // Wire YM2151 timer overflow → Z80 IRQ line (level-triggered).
-    // In real CPS1 hardware, the YM2151 IRQ output is directly connected
-    // to the Z80 INT pin. The line stays asserted until the Z80 reads
-    // the YM2151 status register (which clears the overflow flag).
+    // In real CPS1 hardware (confirmed via MAME cps1.cpp line 3968),
+    // ONLY the YM2151 drives the Z80 INT pin:
+    //   ym2151.irq_handler().set_inputline(m_audiocpu, 0);
+    // The sound latch does NOT generate an IRQ — it is polled by the
+    // Z80 during the Timer A ISR.
     this.ym2151.setTimerCallback(() => {
       this.z80.setIrqLine(true);
     });
 
     // Wire YM2151 IRQ clear → Z80 IRQ line de-assertion.
-    // When the Z80 handler writes to YM2151 reg 0x14 to acknowledge the
-    // timer overflow, the IRQ line is de-asserted.
+    // When the Z80 handler reads the YM2151 status register or writes
+    // to reg 0x14 to acknowledge the timer overflow, the IRQ clears.
     this.ym2151.setIrqClearCallback(() => {
       this.z80.setIrqLine(false);
     });
@@ -149,12 +151,10 @@ export class Emulator {
     });
 
     // Wire sound latch: immediate forwarding from 68000 bus to Z80 bus.
-    // In real CPS1 hardware, the sound latch write triggers a Z80 IRQ
-    // (generic_latch_8_device callback). The Z80 IM1 handler at 0x0038
-    // reads the latch and updates the command queue in RAM.
+    // The latch does NOT trigger a Z80 IRQ (confirmed via MAME).
+    // The Z80 polls the latch at 0xF008 during the YM2151 Timer A ISR.
     this.bus.setSoundLatchCallback((value: number) => {
       this.z80Bus.setSoundLatch(value);
-      this.z80.irq(); // trigger Z80 IRQ on sound latch write
     });
 
     // Wire up IRQ acknowledge: when the 68000 processes an interrupt,
@@ -326,22 +326,6 @@ export class Emulator {
   private runOneFrame(): void {
     // 1. Update input ports on the bus
     this.input.updateBusPorts(this.bus.getIoPorts());
-
-    // 2. Sync sound latch — the 68000 writes to 0x800180-0x800187.
-    // MAME uses a generic_latch_8, any write in the range sets the latch.
-    // The 68000 typically writes a byte to the odd address (0x800181).
-    // Check all bytes and use the first non-zero one, or byte 1 (odd).
-    const latchBuf = this.bus.getSoundLatch();
-    const latchVal = latchBuf[1] !== 0 ? latchBuf[1]! : latchBuf[0]!;
-    if (latchVal !== 0) {
-      this.z80Bus.setSoundLatch(latchVal);
-      // Clear latch after read (one-shot)
-      latchBuf[0] = 0;
-      latchBuf[1] = 0;
-      if (this.frameCount < 1000 && this.frameCount % 100 === 0) {
-        console.log(`Frame ${this.frameCount}: Sound latch = 0x${latchVal.toString(16)}`);
-      }
-    }
 
     const tCpu0 = performance.now();
     // 3. Run M68000 with scanline-accurate VBlank timing.
