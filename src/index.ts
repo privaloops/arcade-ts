@@ -68,13 +68,11 @@ window.addEventListener("keydown", (e) => {
     dropZone.classList.remove("hidden");
     setStatus("Ready.");
   } else if (e.code === "KeyF") {
-    // F = Toggle fullscreen
-    const wrapper = document.getElementById("canvas-wrapper");
-    if (!wrapper) return;
+    // F = Toggle fullscreen on canvas itself
     if (document.fullscreenElement) {
       void document.exitFullscreen();
     } else {
-      void wrapper.requestFullscreen();
+      void canvas.requestFullscreen();
     }
   }
 });

@@ -68,21 +68,11 @@
         image-rendering: pixelated;
       }
 
-      /* Fullscreen: stretch to fill screen */
-      #canvas-wrapper:fullscreen {
-        width: 100vw !important;
-        height: 100vh !important;
-        max-width: none !important;
-        max-height: none !important;
-        border: none;
-        background: #000;
-      }
-      #canvas-wrapper:-webkit-full-screen {
-        width: 100vw !important;
-        height: 100vh !important;
-        max-width: none !important;
-        max-height: none !important;
-        border: none;
+      /* Fullscreen: canvas fills entire screen */
+      #screen:fullscreen {
+        width: 100vw;
+        height: 100vh;
+        object-fit: contain;
         background: #000;
       }
 
