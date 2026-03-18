@@ -2255,36 +2255,43 @@ export class NukedOPM {
    * Collects audio output and checks for IRQ transitions.
    */
   clockCycles(numCycles: number): void {
+    const chip = this.chip;
     const output = this._output;
     const sh1 = this._sh1;
     const sh2 = this._sh2;
+    const sampleBufL = this.sampleBufL;
+    const sampleBufR = this.sampleBufR;
+    let counter = this._clockCounter;
+    let writePos = this.sampleBufWritePos;
+    const bufLen = sampleBufL.length;
+    const irqBefore = chip.timer_irq;
 
     for (let c = 0; c < numCycles; c++) {
-      const irqBefore = this.chip.timer_irq;
-      OPM_Clock(this.chip, output, sh1, sh2, null);
+      OPM_Clock(chip, output, sh1, sh2, null);
 
-      // Collect one stereo sample every 64 master clocks (= clock/64 rate).
-      // DAC outputs are continuously updated on sh1/sh2 falling edges.
-      this._clockCounter++;
-      if (this._clockCounter >= OPM_CLOCKS_PER_SAMPLE) {
-        this._clockCounter = 0;
-        if (this.sampleBufWritePos < this.sampleBufL.length) {
-          this.sampleBufL[this.sampleBufWritePos] = this.chip.dac_output[0]! / 32768;
-          this.sampleBufR[this.sampleBufWritePos] = this.chip.dac_output[1]! / 32768;
-          this.sampleBufWritePos++;
+      // Collect one stereo sample every 32 OPM clocks (= clock/64 rate).
+      if (++counter >= OPM_CLOCKS_PER_SAMPLE) {
+        counter = 0;
+        if (writePos < bufLen) {
+          sampleBufL[writePos] = chip.dac_output[0]! / 32768;
+          sampleBufR[writePos] = chip.dac_output[1]! / 32768;
+          writePos++;
         }
       }
+    }
 
-      // Check IRQ transitions
-      const irqAfter = this.chip.timer_irq;
-      if (!irqBefore && irqAfter) {
-        if (this.timerCallback) {
-          if (this.chip.timer_a_status) this.timerCallback(0);
-          if (this.chip.timer_b_status) this.timerCallback(1);
-        }
-      } else if (irqBefore && !irqAfter) {
-        if (this.irqClearCallback) this.irqClearCallback();
+    this._clockCounter = counter;
+    this.sampleBufWritePos = writePos;
+
+    // Check IRQ transitions only once after the batch (not per-clock)
+    const irqAfter = chip.timer_irq;
+    if (!irqBefore && irqAfter) {
+      if (this.timerCallback) {
+        if (chip.timer_a_status) this.timerCallback(0);
+        if (chip.timer_b_status) this.timerCallback(1);
       }
+    } else if (irqBefore && !irqAfter) {
+      if (this.irqClearCallback) this.irqClearCallback();
     }
   }
 
