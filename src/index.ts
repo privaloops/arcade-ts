@@ -5,6 +5,7 @@
  */
 
 import { Emulator } from "./emulator";
+import { CPS1_PARENT_GAMES, getArchiveOrgUrl } from "./game-catalog";
 
 function getElement<T extends HTMLElement>(id: string): T {
   const el = document.getElementById(id);
@@ -117,11 +118,67 @@ fileInput.addEventListener("change", () => {
   if (file) void handleRomFile(file);
 });
 
-// Detect available ROMs in public/ and create load buttons
-const romButtons = getElement<HTMLDivElement>("rom-buttons");
-const ROM_LIST = ["sf2.zip", "ffight.zip"];
+// ── Game selector (dropdown + archive.org download) ──────────────────────────
 
-for (const romName of ROM_LIST) {
+const gameSelect = getElement<HTMLSelectElement>("game-select");
+const loadBtn = getElement<HTMLButtonElement>("load-btn");
+
+// Populate dropdown with all parent CPS1 games
+for (const game of CPS1_PARENT_GAMES) {
+  const opt = document.createElement("option");
+  opt.value = game.name;
+  opt.textContent = game.description;
+  gameSelect.appendChild(opt);
+}
+
+gameSelect.addEventListener("change", () => {
+  loadBtn.disabled = !gameSelect.value;
+});
+
+loadBtn.addEventListener("click", () => {
+  const gameName = gameSelect.value;
+  if (!gameName) return;
+
+  loadBtn.disabled = true;
+  gameSelect.disabled = true;
+
+  // Try local public/ first, then archive.org
+  const localUrl = `/${gameName}.zip`;
+  const archiveUrl = getArchiveOrgUrl(gameName);
+
+  setStatus(`Loading ${gameName}… (checking local)…`);
+
+  fetch(localUrl, { method: "HEAD" })
+    .then((res) => {
+      if (res.ok) {
+        setStatus(`Loading ${gameName} (local)…`);
+        return fetch(localUrl).then((r) => r.blob());
+      }
+      setStatus(`Downloading ${gameName} from archive.org…`);
+      return fetch(archiveUrl).then((r) => {
+        if (!r.ok) throw new Error(`Download failed (${r.status})`);
+        return r.blob();
+      });
+    })
+    .then((blob) => {
+      const file = new File([blob], `${gameName}.zip`, { type: "application/zip" });
+      return handleRomFile(file);
+    })
+    .catch((err) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      setStatus(`Error: ${msg}`);
+    })
+    .finally(() => {
+      loadBtn.disabled = false;
+      gameSelect.disabled = false;
+    });
+});
+
+// Also detect local ROMs in public/ and add quick-load buttons
+const romButtons = getElement<HTMLDivElement>("rom-buttons");
+const LOCAL_ROMS = ["sf2.zip", "ffight.zip"];
+
+for (const romName of LOCAL_ROMS) {
   fetch(`/${romName}`, { method: "HEAD" })
     .then((res) => {
       if (!res.ok) return;
