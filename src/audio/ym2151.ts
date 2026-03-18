@@ -562,55 +562,56 @@ class Channel {
 
     let output = 0;
 
-    // YMFM: modulation inputs are direct (no >> 1), carriers are summed directly
+    // YMFM: modulation inputs are shifted >> 1 before being passed
+    // as phase input (ymfm_fm.ipp line 1042: opmod = opout[...] >> 1)
     switch (this.algorithm) {
       case 0: {
         // O1→O2→O3→O4, output O4
-        const c1Out = c1.calcOutput(m1Out, amValue);
-        const m2Out = m2.calcOutput(c1Out, amValue);
-        output = c2.calcOutput(m2Out, amValue);
+        const c1Out = c1.calcOutput(m1Out >> 1, amValue);
+        const m2Out = m2.calcOutput(c1Out >> 1, amValue);
+        output = c2.calcOutput(m2Out >> 1, amValue);
         break;
       }
       case 1: {
         // (O1+O2)→O3→O4, output O4
         const c1Out = c1.calcOutput(0, amValue);
-        const m2Out = m2.calcOutput(m1Out + c1Out, amValue);
-        output = c2.calcOutput(m2Out, amValue);
+        const m2Out = m2.calcOutput((m1Out + c1Out) >> 1, amValue);
+        output = c2.calcOutput(m2Out >> 1, amValue);
         break;
       }
       case 2: {
         // (O1+(O2→O3))→O4, output O4
         const c1Out = c1.calcOutput(0, amValue);
-        const m2Out = m2.calcOutput(c1Out, amValue);
-        output = c2.calcOutput(m1Out + m2Out, amValue);
+        const m2Out = m2.calcOutput(c1Out >> 1, amValue);
+        output = c2.calcOutput((m1Out + m2Out) >> 1, amValue);
         break;
       }
       case 3: {
         // ((O1→O2)+O3)→O4, output O4
-        const c1Out = c1.calcOutput(m1Out, amValue);
+        const c1Out = c1.calcOutput(m1Out >> 1, amValue);
         const m2Out = m2.calcOutput(0, amValue);
-        output = c2.calcOutput(c1Out + m2Out, amValue);
+        output = c2.calcOutput((c1Out + m2Out) >> 1, amValue);
         break;
       }
       case 4: {
         // (O1→O2)+(O3→O4), output O2+O4
-        const c1Out = c1.calcOutput(m1Out, amValue);
+        const c1Out = c1.calcOutput(m1Out >> 1, amValue);
         const m2Out = m2.calcOutput(0, amValue);
-        const c2Out = c2.calcOutput(m2Out, amValue);
+        const c2Out = c2.calcOutput(m2Out >> 1, amValue);
         output = c1Out + c2Out;
         break;
       }
       case 5: {
         // O1→(O2+O3+O4), output O2+O3+O4
-        const c1Out = c1.calcOutput(m1Out, amValue);
-        const m2Out = m2.calcOutput(m1Out, amValue);
-        const c2Out = c2.calcOutput(m1Out, amValue);
+        const c1Out = c1.calcOutput(m1Out >> 1, amValue);
+        const m2Out = m2.calcOutput(m1Out >> 1, amValue);
+        const c2Out = c2.calcOutput(m1Out >> 1, amValue);
         output = c1Out + m2Out + c2Out;
         break;
       }
       case 6: {
         // (O1→O2)+O3+O4, output O2+O3+O4
-        const c1Out = c1.calcOutput(m1Out, amValue);
+        const c1Out = c1.calcOutput(m1Out >> 1, amValue);
         const m2Out = m2.calcOutput(0, amValue);
         const c2Out = c2.calcOutput(0, amValue);
         output = c1Out + m2Out + c2Out;
