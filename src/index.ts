@@ -96,6 +96,7 @@ async function handleRomFile(file: File): Promise<void> {
   setStatus(`Loading: ${file.name}…`);
 
   try {
+    await emulator.initAudio();
     await emulator.loadRom(file);
     emulator.resumeAudio();
     dropZone.classList.add("hidden");
@@ -130,7 +131,8 @@ loadBtn.addEventListener("click", () => {
   const gameName = gameSelect.value;
   if (!gameName) return;
 
-  // Init audio NOW (in the user gesture call stack) — browsers require this
+  // Start audio init NOW in the user gesture call stack
+  // (creates AudioContext synchronously, worklet setup is async)
   void emulator.initAudio();
 
   loadBtn.disabled = true;

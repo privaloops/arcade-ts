@@ -321,6 +321,7 @@ export class AudioOutput {
 
   private _volume = 1.0;
   private _initialized = false;
+  private _initPromise: Promise<void> | null = null;
 
   constructor() {}
 
@@ -330,12 +331,21 @@ export class AudioOutput {
 
   /**
    * Initialize the audio subsystem.
-   * MUST be called from a user-gesture handler (click, keydown…).
+   * Safe to call multiple times — returns the same promise if already initializing.
    */
   async init(): Promise<void> {
     if (this._initialized) return;
+    if (this._initPromise) return this._initPromise;
 
-    this.context = new AudioContext({ latencyHint: 'interactive' });
+    this._initPromise = this._doInit();
+    return this._initPromise;
+  }
+
+  private async _doInit(): Promise<void> {
+    // Create AudioContext synchronously (must be in user gesture call stack)
+    if (!this.context) {
+      this.context = new AudioContext({ latencyHint: 'interactive' });
+    }
 
     const rate = this.context.sampleRate;
 
