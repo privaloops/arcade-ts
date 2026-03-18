@@ -17,6 +17,7 @@ import { Z80, Z80State } from "./cpu/z80";
 import { Bus } from "./memory/bus";
 import { Z80Bus } from "./memory/z80-bus";
 import { Renderer, FRAMEBUFFER_SIZE } from "./video/renderer";
+import { WebGLRenderer } from "./video/renderer-webgl";
 import { CPS1Video } from "./video/cps1-video";
 import { InputManager } from "./input/input";
 import { loadRomFromZip, RomSet } from "./memory/rom-loader";
@@ -71,7 +72,7 @@ export class Emulator {
   private readonly z80: Z80;
   private readonly bus: Bus;
   private readonly z80Bus: Z80Bus;
-  private readonly renderer: Renderer;
+  private readonly renderer: Renderer | WebGLRenderer;
   private readonly input: InputManager;
   private video: CPS1Video | null = null;
 
@@ -98,7 +99,14 @@ export class Emulator {
     this.z80Bus = new Z80Bus();
     this.m68000 = new M68000(this.bus);
     this.z80 = new Z80(this.z80Bus);
-    this.renderer = new Renderer(canvas);
+    // Try WebGL2 first, fallback to Canvas 2D
+    try {
+      this.renderer = new WebGLRenderer(canvas);
+      console.log('Using WebGL2 renderer');
+    } catch {
+      this.renderer = new Renderer(canvas);
+      console.log('Using Canvas 2D renderer (WebGL2 unavailable)');
+    }
     this.input = new InputManager();
     this.framebuffer = new Uint8Array(FRAMEBUFFER_SIZE);
 
