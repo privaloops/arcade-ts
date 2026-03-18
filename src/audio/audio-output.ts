@@ -503,9 +503,12 @@ export class AudioOutput {
     return out;
   }
 
-  /** Hard clip a single sample to [-1, 1]. */
+  /** Soft limiter: smoothly compresses peaks approaching ±1.0.
+   *  Linear below 0.8, soft knee above. No harsh discontinuity. */
   private _clip(s: number): number {
-    return s > 1 ? 1 : s < -1 ? -1 : s;
+    if (s > 0.8) return 0.8 + 0.2 * Math.tanh((s - 0.8) * 5);
+    if (s < -0.8) return -0.8 - 0.2 * Math.tanh((-s - 0.8) * 5);
+    return s;
   }
 
   /**

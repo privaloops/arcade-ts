@@ -18,15 +18,33 @@
  *   0x400+: ADPCM sample data (4-bit packed, high nibble first)
  */
 
-/** OKI ADPCM step size table (49 entries) */
-const STEP_TABLE: readonly number[] = [
-  16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45, 50, 55, 60, 66,
-  73, 80, 88, 97, 107, 118, 130, 143, 157, 173, 190, 209, 230, 253, 279, 307,
-  337, 371, 408, 449, 494, 544, 598, 658, 724, 796, 876, 963, 1060, 1166, 1282, 1411, 1552,
-];
-
 /** Index adjustment per nibble value (lower 3 bits) */
 const INDEX_ADJUST: readonly number[] = [-1, -1, -1, -1, 2, 4, 6, 8];
+
+/**
+ * Precomputed diff lookup table matching MAME's oki_adpcm_state::compute_tables().
+ * 49 steps × 16 nibbles = 784 entries.
+ */
+const DIFF_LOOKUP: Int16Array = (() => {
+  const nbl2bit: readonly number[][] = [
+    [ 1, 0, 0, 0], [ 1, 0, 0, 1], [ 1, 0, 1, 0], [ 1, 0, 1, 1],
+    [ 1, 1, 0, 0], [ 1, 1, 0, 1], [ 1, 1, 1, 0], [ 1, 1, 1, 1],
+    [-1, 0, 0, 0], [-1, 0, 0, 1], [-1, 0, 1, 0], [-1, 0, 1, 1],
+    [-1, 1, 0, 0], [-1, 1, 0, 1], [-1, 1, 1, 0], [-1, 1, 1, 1],
+  ];
+  const table = new Int16Array(49 * 16);
+  for (let step = 0; step <= 48; step++) {
+    const stepval = Math.floor(16.0 * Math.pow(11.0 / 10.0, step));
+    for (let nib = 0; nib < 16; nib++) {
+      table[step * 16 + nib] = nbl2bit[nib]![0]! *
+        (stepval   * nbl2bit[nib]![1]! +
+        (stepval >> 1) * nbl2bit[nib]![2]! +
+        (stepval >> 2) * nbl2bit[nib]![3]! +
+        (stepval >> 3));
+    }
+  }
+  return table;
+})();
 
 /**
  * Volume table: MAME's s_volume_table — float values (int / 0x20).
@@ -217,17 +235,8 @@ export class OKI6295 {
       channel.address++;
     }
 
-    // OKI ADPCM decode matching MAME: delta = (2 * (nibble & 7) + 1) * (step >> 3)
-    // Using integer arithmetic to match MAME exactly (avoid float drift).
-    const step = STEP_TABLE[channel.stepIndex]!;
-    const diff = (step >> 3);
-    let delta = (2 * (nibble & 7) + 1) * diff;
-
-    if (nibble & 8) {
-      channel.signal -= delta;
-    } else {
-      channel.signal += delta;
-    }
+    // MAME-exact ADPCM decode using precomputed diff lookup table.
+    channel.signal += DIFF_LOOKUP[channel.stepIndex * 16 + nibble]!;
 
     // Clamp to 12-bit signed range
     if (channel.signal > 2047) {
