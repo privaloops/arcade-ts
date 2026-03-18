@@ -5,7 +5,6 @@
  */
 
 import { Emulator } from "./emulator";
-import { CPS1_PARENT_GAMES, getArchiveOrgUrl } from "./game-catalog";
 
 function getElement<T extends HTMLElement>(id: string): T {
   const el = document.getElementById(id);
@@ -16,13 +15,11 @@ function getElement<T extends HTMLElement>(id: string): T {
 const canvas = getElement<HTMLCanvasElement>("screen");
 const dropZone = getElement<HTMLDivElement>("drop-zone");
 const statusEl = getElement<HTMLParagraphElement>("status");
+const fileInput = getElement<HTMLInputElement>("file-input");
 
 // ── Emulator instance ────────────────────────────────────────────────────────
 
 const emulator = new Emulator(canvas);
-
-// Debug: expose emulator for Playwright audio testing
-(window as unknown as Record<string, unknown>).__emulator = emulator;
 
 // ── Audio init (requires user gesture) ──────────────────────────────────────
 
@@ -130,55 +127,18 @@ async function handleRomFile(file: File): Promise<void> {
   }
 }
 
-// ── Game selector (dropdown + archive.org download) ──────────────────────────
+// ── File picker ──────────────────────────────────────────────────────────────
 
-const gameSelect = getElement<HTMLSelectElement>("game-select");
-const loadBtn = getElement<HTMLButtonElement>("load-btn");
-
-// Populate dropdown with all parent CPS1 games
-for (const game of CPS1_PARENT_GAMES) {
-  const opt = document.createElement("option");
-  opt.value = game.name;
-  opt.textContent = game.description;
-  gameSelect.appendChild(opt);
-}
-
-gameSelect.addEventListener("change", () => {
-  loadBtn.disabled = !gameSelect.value;
+dropZone.addEventListener("click", () => {
+  fileInput.click();
 });
 
-loadBtn.addEventListener("click", () => {
-  const gameName = gameSelect.value;
-  if (!gameName) return;
-
-  // Start audio init NOW in the user gesture call stack
-  // (creates AudioContext synchronously, worklet setup is async)
-  void emulator.initAudio();
-
-  loadBtn.disabled = true;
-  gameSelect.disabled = true;
-
-  // Download via server proxy (archive.org) — avoids CORS
-  const proxyUrl = `/api/rom/${gameName}.zip`;
-
-  setStatus(`Downloading ${gameName} from archive.org…`);
-
-  fetch(proxyUrl)
-    .then((r) => {
-      if (!r.ok) throw new Error(`Download failed (${r.status})`);
-      return r.blob();
-    })
-    .then((blob) => {
-      const file = new File([blob], `${gameName}.zip`, { type: "application/zip" });
-      return handleRomFile(file);
-    })
-    .catch((err) => {
-      const msg = err instanceof Error ? err.message : String(err);
-      setStatus(`Error: ${msg}`);
-    })
-    .finally(() => {
-      loadBtn.disabled = false;
-      gameSelect.disabled = false;
-    });
+fileInput.addEventListener("change", () => {
+  const file = fileInput.files?.[0];
+  if (file) {
+    void emulator.initAudio();
+    void handleRomFile(file);
+  }
+  fileInput.value = ""; // allow re-selecting the same file
 });
 

@@ -249,13 +249,5 @@ export const CPS1_GAME_CATALOG: CPS1GameEntry[] = [
   { name: 'wonder3', description: 'Wonder 3 (Japan 910520)', parent: '3wonders' },
 ];
 
-/** Parent (non-clone) games only — 52 entries */
+/** Parent (non-clone) games only */
 export const CPS1_PARENT_GAMES = CPS1_GAME_CATALOG.filter(g => !g.parent);
-
-/** Archive.org MAME 0.260 non-merged ROM download base URL */
-export const ARCHIVE_ORG_BASE = 'https://archive.org/download/mame-0.260-roms-non-merged/MAME%200.260%20ROMs%20%28non-merged%29/MAME%200.260%20ROMs%20%28non-merged%29';
-
-/** Get the download URL for a game ROM ZIP */
-export function getArchiveOrgUrl(gameName: string): string {
-  return `${ARCHIVE_ORG_BASE}/${gameName}.zip`;
-}

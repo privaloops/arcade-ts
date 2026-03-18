@@ -100,7 +100,6 @@
         height: 100dvh;
       }
       body.pseudo-fullscreen header,
-      body.pseudo-fullscreen #rom-controls,
       body.pseudo-fullscreen #status {
         display: none;
       }
@@ -159,14 +158,6 @@
         letter-spacing: 0.1em;
       }
 
-      #rom-controls {
-        display: flex;
-        gap: 8px;
-        align-items: center;
-        justify-content: center;
-        flex-wrap: wrap;
-      }
-
       #file-input {
         display: none;
       }
@@ -183,8 +174,6 @@
         #app { padding: 8px; gap: 10px; }
         header h1 { font-size: 1.1rem; }
         header p { font-size: 0.6rem; }
-        #rom-controls { width: 100%; }
-        #game-select { flex: 1; min-width: 0; font-size: 0.7rem; }
       }
 
       /* Landscape mobile: maximize canvas height */
@@ -197,7 +186,6 @@
           width: auto;
           aspect-ratio: 384 / 224;
         }
-        #rom-controls { gap: 4px; }
         #status { font-size: 0.6rem; }
       }
     </style>
@@ -213,18 +201,13 @@
         <canvas id="screen" width="384" height="224"></canvas>
 
         <div id="drop-zone">
-          <span class="label" style="font-size:0.65rem;color:#444;letter-spacing:0.1em;">Select a game below</span>
+          <span class="label">Drop ROM ZIP here</span>
+          <span class="sublabel">or tap to browse</span>
         </div>
+        <input type="file" id="file-input" accept=".zip" />
       </div>
 
-      <div id="rom-controls">
-        <select id="game-select" style="padding:6px 10px;background:#1a1a1a;color:#e8003c;border:1px solid #333;font-family:inherit;font-size:0.75rem;">
-          <option value="">-- Select a CPS1 game --</option>
-        </select>
-        <button id="load-btn" style="padding:6px 16px;background:#1a1a1a;color:#e8003c;border:1px solid #333;cursor:pointer;font-family:inherit;font-size:0.8rem;letter-spacing:0.1em;" disabled>LOAD</button>
-      </div>
-
-      <p id="status">Ready. P=Pause F=Fullscreen Esc=Quit</p>
+      <p id="status">P=Pause F=Fullscreen Esc=Quit</p>
     </div>
 
     <script type="module" src="/src/index.ts"></script>

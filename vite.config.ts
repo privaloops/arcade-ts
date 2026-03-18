@@ -13,15 +13,5 @@ export default defineConfig({
       "Cross-Origin-Opener-Policy": "same-origin",
       "Cross-Origin-Embedder-Policy": "require-corp",
     },
-    proxy: {
-      // Proxy ROM downloads from archive.org (avoids CORS issues)
-      "/api/rom": {
-        target: "https://archive.org",
-        changeOrigin: true,
-        followRedirects: true,
-        rewrite: (path) =>
-          `/download/mame-0.260-roms-non-merged/MAME%200.260%20ROMs%20%28non-merged%29/MAME%200.260%20ROMs%20%28non-merged%29/${path.replace("/api/rom/", "")}`,
-      },
-    },
   },
 });
