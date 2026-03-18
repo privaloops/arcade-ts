@@ -133,17 +133,10 @@ export class Emulator {
     this.ym2151.setExternalTimerMode(true);
 
     // Wire Z80 bus → YM2151 chip
-    let ym2151WriteCount = 0;
     this.z80Bus.setYm2151AddressWriteCallback((value: number) => {
       this.ym2151.writeAddress(value);
     });
     this.z80Bus.setYm2151WriteCallback((_register: number, data: number) => {
-      ym2151WriteCount++;
-      if (ym2151WriteCount <= 5) {
-        console.log('YM2151 write #' + ym2151WriteCount + ': reg=0x' + _register.toString(16).padStart(2, '0') + ' data=0x' + data.toString(16).padStart(2, '0'));
-      } else if (ym2151WriteCount === 100) {
-        console.log('YM2151: 100 writes so far');
-      }
       this.ym2151.writeData(data);
     });
     this.z80Bus.setYm2151ReadStatusCallback(() => {
@@ -290,6 +283,9 @@ export class Emulator {
     }
   }
 
+  /** Debug: expose YM2151 for audio testing */
+  getYm2151(): YM2151 { return this.ym2151; }
+
   // ── Cleanup ───────────────────────────────────────────────────────────────
 
   destroy(): void {
@@ -301,19 +297,25 @@ export class Emulator {
   // ── Private: main loop ────────────────────────────────────────────────────
 
   private prevRafTime = 0;
+  private frameDebt = 0; // accumulated time debt in ms
   private scheduleFrame(): void {
     if (!this.running || this.paused) return;
     this.animFrameId = requestAnimationFrame((ts) => {
-      const elapsed = this.prevRafTime > 0 ? ts - this.prevRafTime : 16.7;
+      const elapsed = this.prevRafTime > 0 ? ts - this.prevRafTime : 16.77;
       this.prevRafTime = ts;
 
-      // Run enough emulation frames to match real time.
-      // CPS1 = ~59.637 Hz = ~16.77ms per frame.
-      // If browser throttles rAF (e.g. 33ms = 30fps), run 2 frames.
-      const framesToRun = Math.min(3, Math.round(elapsed / 16.77));
-      for (let i = 0; i < framesToRun; i++) {
+      // Accumulate time and run frames as needed.
+      // This works correctly at any rAF rate (30Hz, 60Hz, 120Hz, 144Hz).
+      this.frameDebt += elapsed;
+      const FRAME_MS = 1000 / FRAME_RATE; // ~16.77ms
+      let framesRun = 0;
+      while (this.frameDebt >= FRAME_MS && framesRun < 3) {
         this.runOneFrame();
+        this.frameDebt -= FRAME_MS;
+        framesRun++;
       }
+      // Prevent debt from growing too large (e.g. tab was backgrounded)
+      if (this.frameDebt > FRAME_MS * 3) this.frameDebt = 0;
 
       this.scheduleFrame();
     });
@@ -381,7 +383,6 @@ export class Emulator {
     // Batch YM2151 timer ticks: tick every 256 Z80 T-states (4x fewer calls)
     // then advance multiple ticks at once. This is less accurate but much faster.
     const YM_TICK_INTERVAL = 64;
-    const YM_BATCH_SIZE = 256;
     let z80Cycles = 0;
     let ymTickAccum = 0;
     try {
@@ -390,12 +391,9 @@ export class Emulator {
         z80Cycles += cyc;
         ymTickAccum += cyc;
 
-        if (ymTickAccum >= YM_BATCH_SIZE) {
-          const ticks = (ymTickAccum / YM_TICK_INTERVAL) | 0;
-          ymTickAccum -= ticks * YM_TICK_INTERVAL;
-          for (let t = 0; t < ticks; t++) {
-            this.ym2151.tickTimers();
-          }
+        while (ymTickAccum >= YM_TICK_INTERVAL) {
+          ymTickAccum -= YM_TICK_INTERVAL;
+          this.ym2151.tickTimers();
         }
       }
     } catch (e) {
@@ -420,7 +418,6 @@ export class Emulator {
         console.log(`Frame ${this.frameCount}: Audio debug - YM samples/frame=${ymSamplesPerFrame}, non-zero=${nonZeroL}, audioInit=${this.audioOutput.isInitialized()}`);
       }
 
-      // OKI6295: 7575 Hz / ~59.637 fps ≈ 127 samples per frame
       let okiSamplesPerFrame = 0;
       if (this.oki6295 !== null) {
         okiSamplesPerFrame = Math.ceil(this.oki6295.getSampleRate() / FRAME_RATE);

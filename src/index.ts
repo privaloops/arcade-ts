@@ -30,6 +30,9 @@ ctx.fillRect(0, 0, canvas.width, canvas.height);
 
 const emulator = new Emulator(canvas);
 
+// Debug: expose emulator for Playwright audio testing
+(window as unknown as Record<string, unknown>).__emulator = emulator;
+
 // ── Audio init (requires user gesture) ──────────────────────────────────────
 
 const initAudio = (): void => {

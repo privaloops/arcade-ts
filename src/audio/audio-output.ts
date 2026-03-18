@@ -304,6 +304,7 @@ export class AudioOutput {
   private okiResampler: LinearResampler | null = null;
 
   /** Scratch buffers for resampling output (allocated once) */
+  private _debugPushCount = 0;
   private ymResampledL: Float32Array = new Float32Array(8192);
   private ymResampledR: Float32Array = new Float32Array(8192);
   private okiResampledM: Float32Array = new Float32Array(8192);
@@ -403,6 +404,11 @@ export class AudioOutput {
       const oki = i < nOki ? (okiOut[i] ?? 0) : 0;
       mixedL[i] = this._clip((ymOutL[i] ?? 0) + oki) * this._volume;
       mixedR[i] = this._clip((ymOutR[i] ?? 0) + oki) * this._volume;
+    }
+
+    if (this._debugPushCount !== undefined) this._debugPushCount++;
+    if (this._debugPushCount === 300) {
+      console.log('Audio push: ymIn=' + ymCount + ' ymOut=' + nYmL + ' okiIn=' + okiCount + ' okiOut=' + nOki + ' mixed=' + nOut);
     }
 
     if (this.ringBuffer) {

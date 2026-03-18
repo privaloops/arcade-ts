@@ -1,42 +1,28 @@
 /**
- * YM2151 (OPM) — 4-Operator FM Synthesizer
+ * YM2151 (OPM) -- 4-Operator FM Synthesizer
  *
  * 8 channels, 4 operators per channel (M1, C1, M2, C2).
  * Clock: 3.579545 MHz, sample rate = clock / 64 = 55930 Hz.
  *
- * This is a software emulation targeting recognizable audio output.
- * Not cycle-accurate, but functionally correct for CPS1 music playback.
- *
- * Reference: YM2151 Application Manual, YMFM by Aaron Giles, jt51 by Jotego
+ * Rewritten using exact YMFM data tables and algorithms from
+ * Aaron Giles' YMFM reference implementation.
  */
 
-// ─── Constants ───────────────────────────────────────────────────────────────
+// --- Constants ---------------------------------------------------------------
 
 const YM_CLOCK = 3_579_545;
 const YM_RATE = Math.floor(YM_CLOCK / 64); // 55930 Hz
 
-/** Number of channels */
 const NUM_CHANNELS = 8;
-
-/** Number of operators per channel */
 const NUM_OPERATORS = 4;
 
-/** Sine table: 256 entries for quarter-wave (4.8 fixed-point log-sin attenuation) */
-const SINE_TABLE_SIZE = 256;
-
-/**
- * Envelope generator max attenuation (10-bit: 0x3FF = 1023).
- * 0 = max volume, 0x3FF = silence.
- */
+/** Envelope max attenuation (10-bit: 0x3FF = 1023). 0 = max vol. */
 const EG_MAX = 0x3FF;
 
-/** TL shift: TL is 7-bit (0-127), shifted left 3 to get 10-bit envelope range */
+/** TL is 7-bit (0-127), shifted left 3 to get 10-bit envelope range */
 const TL_SHIFT = 3;
 
-/** EG counter step size — the real chip runs the EG at clock/3/32 */
-const EG_TIMER_OVERFLOW = 3;
-
-// ─── Envelope phases ─────────────────────────────────────────────────────────
+// --- Envelope phases ---------------------------------------------------------
 
 const enum EnvPhase {
   Attack = 0,
@@ -46,12 +32,68 @@ const enum EnvPhase {
   Off = 4,
 }
 
-// ─── Lookup tables ───────────────────────────────────────────────────────────
+// --- YMFM Phase Step Table (768 entries) ------------------------------------
+
+const S_PHASE_STEP = new Uint32Array([
+  41568,41600,41632,41664,41696,41728,41760,41792,41856,41888,41920,41952,42016,42048,42080,42112,
+  42176,42208,42240,42272,42304,42336,42368,42400,42464,42496,42528,42560,42624,42656,42688,42720,
+  42784,42816,42848,42880,42912,42944,42976,43008,43072,43104,43136,43168,43232,43264,43296,43328,
+  43392,43424,43456,43488,43552,43584,43616,43648,43712,43744,43776,43808,43872,43904,43936,43968,
+  44032,44064,44096,44128,44192,44224,44256,44288,44352,44384,44416,44448,44512,44544,44576,44608,
+  44672,44704,44736,44768,44832,44864,44896,44928,44992,45024,45056,45088,45152,45184,45216,45248,
+  45312,45344,45376,45408,45472,45504,45536,45568,45632,45664,45728,45760,45792,45824,45888,45920,
+  45984,46016,46048,46080,46144,46176,46208,46240,46304,46336,46368,46400,46464,46496,46528,46560,
+  46656,46688,46720,46752,46816,46848,46880,46912,46976,47008,47072,47104,47136,47168,47232,47264,
+  47328,47360,47392,47424,47488,47520,47552,47584,47648,47680,47744,47776,47808,47840,47904,47936,
+  48032,48064,48096,48128,48192,48224,48288,48320,48384,48416,48448,48480,48544,48576,48640,48672,
+  48736,48768,48800,48832,48896,48928,48992,49024,49088,49120,49152,49184,49248,49280,49344,49376,
+  49440,49472,49504,49536,49600,49632,49696,49728,49792,49824,49856,49888,49952,49984,50048,50080,
+  50144,50176,50208,50240,50304,50336,50400,50432,50496,50528,50560,50592,50656,50688,50752,50784,
+  50880,50912,50944,50976,51040,51072,51136,51168,51232,51264,51328,51360,51424,51456,51488,51520,
+  51616,51648,51680,51712,51776,51808,51872,51904,51968,52000,52064,52096,52160,52192,52224,52256,
+  52384,52416,52448,52480,52544,52576,52640,52672,52736,52768,52832,52864,52928,52960,52992,53024,
+  53120,53152,53216,53248,53312,53344,53408,53440,53504,53536,53600,53632,53696,53728,53792,53824,
+  53920,53952,54016,54048,54112,54144,54208,54240,54304,54336,54400,54432,54496,54528,54592,54624,
+  54688,54720,54784,54816,54880,54912,54976,55008,55072,55104,55168,55200,55264,55296,55360,55392,
+  55488,55520,55584,55616,55680,55712,55776,55808,55872,55936,55968,56032,56064,56128,56160,56224,
+  56288,56320,56384,56416,56480,56512,56576,56608,56672,56736,56768,56832,56864,56928,56960,57024,
+  57120,57152,57216,57248,57312,57376,57408,57472,57536,57568,57632,57664,57728,57792,57824,57888,
+  57952,57984,58048,58080,58144,58208,58240,58304,58368,58400,58464,58496,58560,58624,58656,58720,
+  58784,58816,58880,58912,58976,59040,59072,59136,59200,59232,59296,59328,59392,59456,59488,59552,
+  59648,59680,59744,59776,59840,59904,59936,60000,60064,60128,60160,60224,60288,60320,60384,60416,
+  60512,60544,60608,60640,60704,60768,60800,60864,60928,60992,61024,61088,61152,61184,61248,61280,
+  61376,61408,61472,61536,61600,61632,61696,61760,61824,61856,61920,61984,62048,62080,62144,62208,
+  62272,62304,62368,62432,62496,62528,62592,62656,62720,62752,62816,62880,62944,62976,63040,63104,
+  63200,63232,63296,63360,63424,63456,63520,63584,63648,63680,63744,63808,63872,63904,63968,64032,
+  64096,64128,64192,64256,64320,64352,64416,64480,64544,64608,64672,64704,64768,64832,64896,64928,
+  65024,65056,65120,65184,65248,65312,65376,65408,65504,65536,65600,65664,65728,65792,65856,65888,
+  65984,66016,66080,66144,66208,66272,66336,66368,66464,66496,66560,66624,66688,66752,66816,66848,
+  66944,66976,67040,67104,67168,67232,67296,67328,67424,67456,67520,67584,67648,67712,67776,67808,
+  67904,67936,68000,68064,68128,68192,68256,68288,68384,68448,68512,68544,68640,68672,68736,68800,
+  68896,68928,68992,69056,69120,69184,69248,69280,69376,69440,69504,69536,69632,69664,69728,69792,
+  69920,69952,70016,70080,70144,70208,70272,70304,70400,70464,70528,70560,70656,70688,70752,70816,
+  70912,70976,71040,71104,71136,71232,71264,71360,71424,71488,71552,71616,71648,71744,71776,71872,
+  71968,72032,72096,72160,72192,72288,72320,72416,72480,72544,72608,72672,72704,72800,72832,72928,
+  72992,73056,73120,73184,73216,73312,73344,73440,73504,73568,73632,73696,73728,73824,73856,73952,
+  74080,74144,74208,74272,74304,74400,74432,74528,74592,74656,74720,74784,74816,74912,74944,75040,
+  75136,75200,75264,75328,75360,75456,75488,75584,75648,75712,75776,75840,75872,75968,76000,76096,
+  76224,76288,76352,76416,76448,76544,76576,76672,76736,76800,76864,76928,77024,77120,77152,77248,
+  77344,77408,77472,77536,77568,77664,77696,77792,77856,77920,77984,78048,78144,78240,78272,78368,
+  78464,78528,78592,78656,78688,78784,78816,78912,78976,79040,79104,79168,79264,79360,79392,79488,
+  79616,79680,79744,79808,79840,79936,79968,80064,80128,80192,80256,80320,80416,80512,80544,80640,
+  80768,80832,80896,80960,80992,81088,81120,81216,81280,81344,81408,81472,81568,81664,81696,81792,
+  81952,82016,82080,82144,82176,82272,82304,82400,82464,82528,82592,82656,82752,82848,82880,82976,
+]);
+
+// --- DT2 delta table (YMFM) ------------------------------------------------
+
+const S_DETUNE2_DELTA = [0, 384, 500, 608];
+
+// --- Lookup tables -----------------------------------------------------------
 
 /**
  * Quarter-wave sine table: 256 entries of 4.8 fixed-point log-sin attenuation.
- * From the YMFM reference (Aaron Giles), which matches the YM2151 internal ROM.
- * Index i represents phase 0..PI/2. Output is attenuation (0 = full, higher = quieter).
+ * From the YMFM reference (matches YM2151 internal ROM).
  */
 const sineTable = new Uint16Array([
   0x859,0x6c3,0x607,0x58b,0x52e,0x4e4,0x4a6,0x471,0x443,0x41a,0x3f5,0x3d3,0x3b5,0x398,0x37e,0x365,
@@ -74,54 +116,35 @@ const sineTable = new Uint16Array([
 
 /**
  * Exponential / power table: 256 entries.
- * Converts 8-bit fractional attenuation to 12-bit linear mantissa.
- * Formula: ((mantissa | 0x400) << 2) — from YMFM reference.
- * The caller then right-shifts by (attenuation >> 8) for the integer part.
+ * Converts 8-bit fractional attenuation to linear mantissa.
  */
 const expTable = new Uint16Array(256);
 
 /**
  * DT1 (detune 1) table.
  * Indexed by [dt1][keycode >> 2], gives phase increment offset.
- * Based on the YM2151 manual tables.
  */
 const dt1Table: number[][] = [];
 
 /**
- * Envelope rate increment table — 64 entries, 8 sub-steps each.
+ * Envelope rate increment table -- 64 entries, 8 sub-steps each.
  * Matches the YMFM s_increment_table nibble encoding.
- * Each entry is an array of 8 increment values for 8 counter sub-steps.
  */
 const egIncTable: number[][] = [];
 
-/**
- * Note frequency table: 16 entries (only 0-11 used, representing C# through C).
- * Values represent the base phase increment for octave 0.
- * These come from the YM2151 manual: frequency number for each note.
- */
-const noteFreqTable = new Float64Array(16);
-
 // Build lookup tables at module load time
 function buildTables(): void {
-  // ── Exponential table ──
-  // Generate 256 entries matching the power curve.
-  // Formula: exp2(-(i/256)) * 2048, with implied bit 0x400.
-  // This matches YMFM: ((mantissa | 0x400) << 2).
+  // -- Exponential table --
   for (let i = 0; i < 256; i++) {
-    // 2^(-i/256) scaled to 10-bit mantissa
     const mantissa = Math.round(Math.pow(2, 1 - i / 256) * 1024) - 1024;
     expTable[i] = ((mantissa | 0x400) << 2) >>> 0;
   }
 
-  // ── DT1 table ──
+  // -- DT1 table --
   const dt1Base: number[][] = [
-    // dt1 = 0: no detune
     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    // dt1 = 1
     [0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 6, 6, 7, 8, 8, 8, 8],
-    // dt1 = 2
     [1, 1, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 6, 6, 7, 8, 8, 9, 10, 11, 12, 13, 14, 16, 16, 16, 16],
-    // dt1 = 3
     [2, 2, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 6, 6, 7, 8, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 20, 22, 22, 22, 22],
   ];
   for (let d = 0; d < 8; d++) {
@@ -133,26 +156,24 @@ function buildTables(): void {
     }
   }
 
-  // ── Envelope increment table ──
-  // Matches the YMFM s_increment_table (nibble-packed 32-bit values).
-  // Each 32-bit value encodes 8 nibbles: increments for 8 sub-counter steps.
+  // -- Envelope increment table --
   const egIncPacked: number[] = [
-    0x00000000, 0x00000000, 0x10101010, 0x10101010, // rates 0-3
-    0x10101010, 0x10101010, 0x11101110, 0x11101110, // rates 4-7
-    0x10101010, 0x10111010, 0x11101110, 0x11111110, // rates 8-11
-    0x10101010, 0x10111010, 0x11101110, 0x11111110, // rates 12-15
-    0x10101010, 0x10111010, 0x11101110, 0x11111110, // rates 16-19
-    0x10101010, 0x10111010, 0x11101110, 0x11111110, // rates 20-23
-    0x10101010, 0x10111010, 0x11101110, 0x11111110, // rates 24-27
-    0x10101010, 0x10111010, 0x11101110, 0x11111110, // rates 28-31
-    0x10101010, 0x10111010, 0x11101110, 0x11111110, // rates 32-35
-    0x10101010, 0x10111010, 0x11101110, 0x11111110, // rates 36-39
-    0x10101010, 0x10111010, 0x11101110, 0x11111110, // rates 40-43
-    0x10101010, 0x10111010, 0x11101110, 0x11111110, // rates 44-47
-    0x11111111, 0x21112111, 0x21212121, 0x22212221, // rates 48-51
-    0x22222222, 0x42224222, 0x42424242, 0x44424442, // rates 52-55
-    0x44444444, 0x84448444, 0x84848484, 0x88848884, // rates 56-59
-    0x88888888, 0x88888888, 0x88888888, 0x88888888, // rates 60-63
+    0x00000000, 0x00000000, 0x10101010, 0x10101010,
+    0x10101010, 0x10101010, 0x11101110, 0x11101110,
+    0x10101010, 0x10111010, 0x11101110, 0x11111110,
+    0x10101010, 0x10111010, 0x11101110, 0x11111110,
+    0x10101010, 0x10111010, 0x11101110, 0x11111110,
+    0x10101010, 0x10111010, 0x11101110, 0x11111110,
+    0x10101010, 0x10111010, 0x11101110, 0x11111110,
+    0x10101010, 0x10111010, 0x11101110, 0x11111110,
+    0x10101010, 0x10111010, 0x11101110, 0x11111110,
+    0x10101010, 0x10111010, 0x11101110, 0x11111110,
+    0x10101010, 0x10111010, 0x11101110, 0x11111110,
+    0x10101010, 0x10111010, 0x11101110, 0x11111110,
+    0x11111111, 0x21112111, 0x21212121, 0x22212221,
+    0x22222222, 0x42224222, 0x42424242, 0x44424442,
+    0x44444444, 0x84448444, 0x84848484, 0x88848884,
+    0x88888888, 0x88888888, 0x88888888, 0x88888888,
   ];
   for (let rate = 0; rate < 64; rate++) {
     const packed = egIncPacked[rate]!;
@@ -162,40 +183,48 @@ function buildTables(): void {
     }
     egIncTable[rate] = incs;
   }
-
-  // ── Note frequency table ──
-  // The YM2151 KC note field uses these note values:
-  // 0=C#, 1=D, 2=D#, 4=E, 5=F, 6=F#, 8=G, 9=G#, 10=A, 12=A#, 13=B, 14=C
-  const noteMap = [
-    // index → semitone offset from C
-    1, 2, 3, 3, 4, 5, 6, 6, 7, 8, 9, 9, 10, 11, 0, 0
-  ];
-  const c0Freq = 32.7032; // C0 frequency in Hz
-  for (let i = 0; i < 16; i++) {
-    const semitone = noteMap[i]!;
-    const freq = c0Freq * Math.pow(2, semitone / 12);
-    // Phase increment per sample for octave 0
-    // Phase accumulator is 20-bit (1<<20 = one full cycle)
-    noteFreqTable[i] = (freq / YM_RATE) * (1 << 20);
-  }
 }
 
 buildTables();
 
-// ─── Sine / Exp lookup functions (matching YMFM) ────────────────────────────
+// --- YMFM Phase step function -----------------------------------------------
+
+/**
+ * Convert OPM key code (blockFreq = KC<<6 | KF) to phase step,
+ * with detune delta applied. Exact YMFM logic.
+ */
+function opmKeyCodeToPhaseStep(blockFreq: number, delta: number): number {
+  const block = (blockFreq >> 10) & 7;
+  const adjustedCode = ((blockFreq >> 6) & 0xF) - ((blockFreq >> 8) & 3);
+  let effFreq = (adjustedCode << 6) | (blockFreq & 0x3F);
+  effFreq += delta;
+
+  if (effFreq >= 768 || effFreq < 0) {
+    let b = block;
+    if (effFreq < 0) {
+      effFreq += 768;
+      if (b-- === 0) return S_PHASE_STEP[0]! >> 7;
+    } else {
+      effFreq -= 768;
+      if (effFreq >= 768) { b++; effFreq -= 768; }
+      if (b++ >= 7) return S_PHASE_STEP[767]!;
+    }
+    return S_PHASE_STEP[effFreq]! >> (b ^ 7);
+  }
+  return S_PHASE_STEP[effFreq]! >> (block ^ 7);
+}
+
+// --- Sine / Exp lookup functions (matching YMFM) ----------------------------
 
 /**
  * Look up the absolute sine attenuation for a 10-bit phase input.
  * Uses the 256-entry quarter-wave table with mirroring.
- * Returns attenuation in 4.8 fixed-point (12-bit total).
  */
 function absSinAttenuation(phase10: number): number {
-  // Bits 8: mirror flag (second half of half-wave is mirrored)
   const mirror = phase10 & 0x100;
-  // Low 8 bits: table index
   let idx = phase10 & 0xFF;
   if (mirror) {
-    idx = 0xFF - idx; // mirror second quarter
+    idx = 0xFF - idx;
   }
   return sineTable[idx]!;
 }
@@ -203,24 +232,15 @@ function absSinAttenuation(phase10: number): number {
 /**
  * Convert log-attenuation to linear volume.
  * Input: total attenuation in 4.8 fixed-point format.
- * Output: 13-bit unsigned linear value (0..~8191).
+ * Output: 13-bit unsigned linear value.
  */
 function attenuationToVolume(attenuation: number): number {
-  // Fractional part (low 8 bits) indexes the exp table
   const frac = attenuation & 0xFF;
-  // Integer part (high bits) determines the right-shift
   const shift = attenuation >> 8;
-  // Look up mantissa and shift by integer part
   return expTable[frac]! >> shift;
 }
 
-// ─── MUL (frequency multiplier) ─────────────────────────────────────────────
-// MUL=0 means x0.5, MUL=1-15 means x1 through x15
-function getMulFactor(mul: number): number {
-  return mul === 0 ? 0.5 : mul;
-}
-
-// ─── Operator state ──────────────────────────────────────────────────────────
+// --- Operator state ----------------------------------------------------------
 
 class Operator {
   // Phase
@@ -230,14 +250,14 @@ class Operator {
   // Envelope (integer, 10-bit: 0 = max vol, 0x3FF = silence)
   envPhase: EnvPhase = EnvPhase.Off;
   envLevel: number = EG_MAX;
-  totalLevel: number = 0;       // TL (0-127) << 3 = 0-1016
+  totalLevel: number = 0;
 
   // ADSR rates (raw register values)
-  ar: number = 0;   // attack rate (0-31)
-  d1r: number = 0;  // decay 1 rate (0-31)
-  d2r: number = 0;  // decay 2 rate (0-31)
-  rr: number = 0;   // release rate (0-15)
-  d1l: number = 0;  // decay 1 level (0-15)
+  ar: number = 0;
+  d1r: number = 0;
+  d2r: number = 0;
+  rr: number = 0;
+  d1l: number = 0;
 
   // Effective rates (computed from raw + key scale, 0-63)
   effAR: number = 0;
@@ -264,7 +284,7 @@ class Operator {
   // Key on state
   keyOn: boolean = false;
 
-  // Feedback (only for operator M1, stored per-channel but applied per-op)
+  // Feedback (only for operator M1)
   feedbackShift: number = 0;
   feedback0: number = 0;
   feedback1: number = 0;
@@ -282,46 +302,48 @@ class Operator {
     this.effD2R = Math.min(63, this.d2r > 0 ? (this.d2r * 2 + 1) + ksShift : 0);
     this.effRR = Math.min(63, (this.rr * 4 + 2) + ksShift);
 
-    // D1L -> envelope level threshold
-    // D1L=0 => 0, D1L=1-14 => d1l << 5 (32-step), D1L=15 => max attenuation
     this.d1lLevel = this.d1l === 15 ? EG_MAX : (this.d1l << 5);
   }
 
   /**
-   * Compute phase increment from channel key code, key fraction, detune and MUL.
+   * Compute phase increment using YMFM's opmKeyCodeToPhaseStep.
+   *
+   * blockFreq for OPM = (KC << 6) | KF, where:
+   *   KC bits [6:4] = block (octave)
+   *   KC bits [3:0] = note
+   *   KF bits [5:0] = key fraction
    */
   computePhaseInc(keyCode: number, keyFraction: number): void {
-    const octave = (keyCode >> 4) & 0x07;
-    const note = keyCode & 0x0F;
+    // Build the 13-bit blockFreq: KC(7 bits) << 6 | KF(6 bits)
+    const blockFreq = (keyCode << 6) | keyFraction;
 
-    // Base phase increment from note table (octave 0)
-    let baseInc = noteFreqTable[note & 0x0F]!;
+    // DT2 delta
+    const dt2Delta = S_DETUNE2_DELTA[this.dt2 & 3]!;
 
-    // Shift by octave
-    baseInc *= (1 << octave);
-
-    // Apply key fraction (KF is 6-bit, represents 1/64 of a semitone)
-    if (keyFraction > 0) {
-      baseInc *= Math.pow(2, keyFraction / (64 * 12));
-    }
+    // Base phase step from YMFM table, with DT2 applied
+    let phaseStep = opmKeyCodeToPhaseStep(blockFreq, dt2Delta);
 
     // Apply DT1
     const dt1Idx = this.dt1 & 7;
     if (dt1Idx !== 0) {
       const kcDiv = Math.min(31, keyCode >> 1);
       const detune = dt1Table[dt1Idx]![kcDiv]!;
-      baseInc += detune;
+      phaseStep += detune;
     }
 
-    // Apply MUL
-    baseInc *= getMulFactor(this.mul);
+    // Apply MUL: MUL=0 means x0.5, MUL=1-15 means x1..x15
+    if (this.mul === 0) {
+      phaseStep >>= 1;
+    } else {
+      phaseStep *= this.mul;
+    }
 
-    this.phaseInc = Math.floor(baseInc);
+    // The phase step from YMFM is already scaled for a 20-bit accumulator
+    // (table values are ~41568..82976, shifted right by block^7).
+    // At block=7, shift=0, values are up to ~82976 which fits in 20 bits.
+    this.phaseInc = phaseStep & 0xFFFFF;
   }
 
-  /**
-   * Trigger key on: reset phase, start attack.
-   */
   keyOnEvent(): void {
     if (!this.keyOn) {
       this.keyOn = true;
@@ -331,9 +353,6 @@ class Operator {
     }
   }
 
-  /**
-   * Trigger key off: enter release phase.
-   */
   keyOffEvent(): void {
     if (this.keyOn) {
       this.keyOn = false;
@@ -343,23 +362,20 @@ class Operator {
 
   /**
    * Advance envelope by one sample.
-   * Uses the YMFM-style rate-dependent counter with the increment table.
+   * Uses YMFM-style rate-dependent counter with the increment table.
    */
   updateEnvelope(): void {
-    // Advance the global sub-step counter (wraps at 8)
     this.egCounter = (this.egCounter + 1) & 7;
 
     switch (this.envPhase) {
       case EnvPhase.Attack: {
         if (this.effAR >= 62) {
-          // Instant attack
           this.envLevel = 0;
           this.envPhase = EnvPhase.Decay1;
         } else if (this.effAR > 0) {
           const increment = this._getIncrement(this.effAR);
           if (increment > 0) {
-            // YMFM attack formula: attenuation += (~attenuation * increment) >> 4
-            // This is exponential: faster when far from 0, slows as it approaches 0
+            // YMFM attack formula: m_env_attenuation += (~m_env_attenuation * increment) >> 4
             this.envLevel += ((~this.envLevel * increment) >> 4);
             if (this.envLevel <= 0) {
               this.envLevel = 0;
@@ -378,7 +394,6 @@ class Operator {
             this.envPhase = EnvPhase.Decay2;
           }
         } else {
-          // D1R = 0 means no decay, transition immediately to D2
           this.envPhase = EnvPhase.Decay2;
         }
         break;
@@ -392,7 +407,6 @@ class Operator {
             this.envPhase = EnvPhase.Off;
           }
         }
-        // D2R = 0 means sustain forever at D1L level
         break;
       }
       case EnvPhase.Release: {
@@ -414,30 +428,18 @@ class Operator {
 
   /**
    * Get the envelope increment for the current sub-step, using the rate table.
-   * The rate determines which row in egIncTable to use, and the counter
-   * sub-step determines which column.
-   *
-   * For rates 0-47: the increment is applied every N samples (determined by shift).
-   * For rates 48-63: the increment value itself scales up.
    */
   private _getIncrement(rate: number): number {
     if (rate <= 0) return 0;
 
-    // Rates < 48 use a shift to slow down the counter
-    // Rates >= 48 use direct increment scaling
     const effectiveRate = Math.min(63, rate);
-
-    // The shift determines how often we actually apply an increment.
-    // For low rates, we only increment every 2^shift samples.
     const shift = Math.max(0, 13 - (effectiveRate >> 2));
     const counterMask = (1 << shift) - 1;
 
-    // Only apply increment when counter aligns with the shift
     if (shift > 0 && (this.egCounter & counterMask) !== 0) {
       return 0;
     }
 
-    // Select which of the 8 sub-step increments to use
     const subStep = shift > 0
       ? (this.egCounter >> shift) & 7
       : this.egCounter & 7;
@@ -446,7 +448,7 @@ class Operator {
   }
 
   /**
-   * Calculate operator output.
+   * Calculate operator output (YMFM compute_volume logic).
    * @param modulation Phase modulation input from other operators (signed)
    * @param lfoAm LFO amplitude modulation value
    * @returns Signed output (14-bit range)
@@ -457,71 +459,52 @@ class Operator {
     // Phase: 20-bit accumulator, use top 10 bits + modulation
     const rawPhase = ((this.phase >> 10) + modulation) & 0x3FF;
 
-    // Get log-sin attenuation from quarter-wave table
-    // Bit 9 = sign (second half-wave is negative)
-    // Bits 0-8 = quarter-wave lookup input
+    // sinAttenuation = S_SIN_TABLE[phase & 0xFF] (with mirroring for bits 8-9)
     const sinAttenuation = absSinAttenuation(rawPhase & 0x1FF);
 
-    // Build total envelope attenuation (10-bit)
+    // envAttenuation = (envLevel + totalLevel + amOffset) << 2
     let envTotal = this.envLevel + this.totalLevel;
-
-    // Add LFO AM if enabled
     if (this.amsEn) {
       envTotal += lfoAm;
     }
-
-    // Clamp to 10-bit range
     if (envTotal > EG_MAX) envTotal = EG_MAX;
+    const envAttenuation = envTotal << 2;
 
-    // Combine sine attenuation (4.8 format) with envelope (shifted to 4.8)
-    // Envelope is 10-bit, we treat it as 2.8 format (shift left 0 since
-    // the sine table is already in 4.8 format and envelope represents
-    // the same log scale)
-    const totalAttenuation = sinAttenuation + (envTotal << 2);
+    // totalAtten = sinAttenuation + envAttenuation
+    const totalAttenuation = sinAttenuation + envAttenuation;
 
-    // If total attenuation is too high, output silence
-    // Max useful attenuation: ~4096 (beyond that, volume is effectively 0)
+    // if totalAtten >= 0x1000: return 0
     if (totalAttenuation >= 0x1000) return 0;
 
-    // Convert from log to linear via exp table
+    // linear = S_POWER_TABLE[totalAtten & 0xFF] >> (totalAtten >> 8)
     const linear = attenuationToVolume(totalAttenuation);
 
-    // Sign from phase: bit 9 of the 10-bit phase determines sign
-    const sign = (rawPhase & 0x200) ? -1 : 1;
+    // sign from phase bit 9
+    const sign = rawPhase & 0x200;
 
-    // linear is 13-bit (0..~8191), shift right to get 14-bit signed range
-    return sign * (linear >> 2);
+    // return sign ? -linear : linear
+    return sign ? -linear : linear;
   }
 
-  /**
-   * Advance phase by one sample.
-   */
   advancePhase(): void {
     this.phase = (this.phase + this.phaseInc) & 0xFFFFF; // 20-bit wrap
   }
 }
 
-// ─── Channel state ───────────────────────────────────────────────────────────
+// --- Channel state -----------------------------------------------------------
 
 class Channel {
-  /** 4 operators: M1 (idx 0), C1 (idx 1), M2 (idx 2), C2 (idx 3) */
   ops: Operator[];
 
-  // Key code and fraction
-  keyCode: number = 0;    // 7-bit: octave(3) | note(4)
-  keyFraction: number = 0; // 6-bit
+  keyCode: number = 0;
+  keyFraction: number = 0;
 
-  // Connection algorithm (0-7)
   algorithm: number = 0;
-
-  // Feedback level for M1 (0-7, 0=off)
   feedback: number = 0;
 
-  // Stereo output: left and right enable
   leftEnable: boolean = true;
   rightEnable: boolean = true;
 
-  // PMS / AMS
   pms: number = 0;
   ams: number = 0;
 
@@ -532,9 +515,6 @@ class Channel {
     }
   }
 
-  /**
-   * Recompute all operator phase increments and rates.
-   */
   updateFrequency(): void {
     for (let i = 0; i < NUM_OPERATORS; i++) {
       this.ops[i]!.computePhaseInc(this.keyCode, this.keyFraction);
@@ -548,17 +528,17 @@ class Channel {
    * YMFM operator naming: O1=M1, O2=C1, O3=M2, O4=C2
    * (our ops[0]=M1, ops[1]=C1, ops[2]=M2, ops[3]=C2)
    *
-   * Algorithm connections (from YMFM reference):
-   *   0: M1->C1->M2->C2          (1 carrier: C2)
-   *   1: (M1+C1)->M2->C2         (1 carrier: C2)
-   *   2: (M1+(C1->M2))->C2       (1 carrier: C2)
-   *   3: ((M1->C1)+M2)->C2       (1 carrier: C2)
-   *   4: (M1->C1)+(M2->C2)       (2 carriers: C1,C2)
-   *   5: M1->(C1+M2+C2)          (3 carriers: C1,M2,C2)
-   *   6: (M1->C1)+M2+C2          (3 carriers: C1,M2,C2)
-   *   7: M1+C1+M2+C2             (4 carriers: all)
+   * Algorithm connections (YMFM encoding):
+   *   0: O1->O2->O3->O4, output O4
+   *   1: (O1+O2)->O3->O4, output O4
+   *   2: (O1+(O2->O3))->O4, output O4
+   *   3: ((O1->O2)+O3)->O4, output O4
+   *   4: (O1->O2)+(O3->O4), output O2+O4
+   *   5: O1->(O2+O3+O4), output O2+O3+O4
+   *   6: (O1->O2)+O3+O4, output O2+O3+O4
+   *   7: O1+O2+O3+O4, output all
    */
-  generateSample(lfoPhase: number, lfoAm: number): number {
+  generateSample(_lfoPhase: number, lfoAm: number): number {
     const m1 = this.ops[0]!;
     const c1 = this.ops[1]!;
     const m2 = this.ops[2]!;
@@ -566,88 +546,82 @@ class Channel {
 
     // AMS depth mapping: 0=0dB, 1=1.4dB, 2=5.9dB, 3=11.8dB
     const amsDepth = [0, 32, 128, 256][this.ams]!;
-    const amValue = Math.floor((lfoAm * amsDepth) >> 8);
+    const amValue = (lfoAm * amsDepth) >> 8;
 
-    // Feedback on M1: average of last two outputs, shifted by feedback amount
+    // Feedback on M1
     let m1Mod = 0;
     if (this.feedback > 0) {
       m1Mod = (m1.feedback0 + m1.feedback1) >> (10 - this.feedback);
     }
 
-    // Calculate M1 output (always first, with self-feedback)
     const m1Out = m1.calcOutput(m1Mod, amValue);
 
-    // Store M1 feedback
+    // Store M1 feedback (YMFM stores raw output, not shifted)
     m1.feedback1 = m1.feedback0;
-    m1.feedback0 = m1Out >> 1;
+    m1.feedback0 = m1Out;
 
     let output = 0;
 
+    // YMFM: modulation inputs are direct (no >> 1), carriers are summed directly
     switch (this.algorithm) {
       case 0: {
-        // M1->C1->M2->C2 (serial chain)
-        // Only C2 is carrier
-        const c1Out = c1.calcOutput(m1Out >> 1, amValue);
-        const m2Out = m2.calcOutput(c1Out >> 1, amValue);
-        output = c2.calcOutput(m2Out >> 1, amValue);
+        // O1→O2→O3→O4, output O4
+        const c1Out = c1.calcOutput(m1Out, amValue);
+        const m2Out = m2.calcOutput(c1Out, amValue);
+        output = c2.calcOutput(m2Out, amValue);
         break;
       }
       case 1: {
-        // (M1+C1)->M2->C2
+        // (O1+O2)→O3→O4, output O4
         const c1Out = c1.calcOutput(0, amValue);
-        const m2Out = m2.calcOutput((m1Out + c1Out) >> 1, amValue);
-        output = c2.calcOutput(m2Out >> 1, amValue);
+        const m2Out = m2.calcOutput(m1Out + c1Out, amValue);
+        output = c2.calcOutput(m2Out, amValue);
         break;
       }
       case 2: {
-        // (M1+(C1->M2))->C2
+        // (O1+(O2→O3))→O4, output O4
         const c1Out = c1.calcOutput(0, amValue);
-        const m2Out = m2.calcOutput(c1Out >> 1, amValue);
-        output = c2.calcOutput((m1Out + m2Out) >> 1, amValue);
+        const m2Out = m2.calcOutput(c1Out, amValue);
+        output = c2.calcOutput(m1Out + m2Out, amValue);
         break;
       }
       case 3: {
-        // ((M1->C1)+M2)->C2
-        const c1Out = c1.calcOutput(m1Out >> 1, amValue);
+        // ((O1→O2)+O3)→O4, output O4
+        const c1Out = c1.calcOutput(m1Out, amValue);
         const m2Out = m2.calcOutput(0, amValue);
-        output = c2.calcOutput((c1Out + m2Out) >> 1, amValue);
+        output = c2.calcOutput(c1Out + m2Out, amValue);
         break;
       }
       case 4: {
-        // (M1->C1) + (M2->C2), two parallel pairs
-        // 2 carriers: C1 and C2
-        const c1Out = c1.calcOutput(m1Out >> 1, amValue);
+        // (O1→O2)+(O3→O4), output O2+O4
+        const c1Out = c1.calcOutput(m1Out, amValue);
         const m2Out = m2.calcOutput(0, amValue);
-        const c2Out = c2.calcOutput(m2Out >> 1, amValue);
-        output = (c1Out + c2Out) >> 1;
+        const c2Out = c2.calcOutput(m2Out, amValue);
+        output = c1Out + c2Out;
         break;
       }
       case 5: {
-        // M1 feeds all three: C1, M2, C2
-        // 3 carriers: C1, M2, C2
-        const mod = m1Out >> 1;
-        const c1Out = c1.calcOutput(mod, amValue);
-        const m2Out = m2.calcOutput(mod, amValue);
-        const c2Out = c2.calcOutput(mod, amValue);
-        output = (c1Out + m2Out + c2Out) / 3;
+        // O1→(O2+O3+O4), output O2+O3+O4
+        const c1Out = c1.calcOutput(m1Out, amValue);
+        const m2Out = m2.calcOutput(m1Out, amValue);
+        const c2Out = c2.calcOutput(m1Out, amValue);
+        output = c1Out + m2Out + c2Out;
         break;
       }
       case 6: {
-        // M1->C1, M2 and C2 independent
-        // 3 carriers: C1, M2, C2
-        const c1Out = c1.calcOutput(m1Out >> 1, amValue);
+        // (O1→O2)+O3+O4, output O2+O3+O4
+        const c1Out = c1.calcOutput(m1Out, amValue);
         const m2Out = m2.calcOutput(0, amValue);
         const c2Out = c2.calcOutput(0, amValue);
-        output = (c1Out + m2Out + c2Out) / 3;
+        output = c1Out + m2Out + c2Out;
         break;
       }
       case 7: {
-        // All four independent (no modulation except M1 self-feedback)
-        // 4 carriers: M1, C1, M2, C2
+        // O1+O2+O3+O4, output all
         const c1Out = c1.calcOutput(0, amValue);
         const m2Out = m2.calcOutput(0, amValue);
         const c2Out = c2.calcOutput(0, amValue);
-        output = (m1Out + c1Out + m2Out + c2Out) >> 2;
+        output = m1Out + c1Out + m2Out + c2Out;
         break;
       }
     }
@@ -667,23 +641,18 @@ class Channel {
   }
 }
 
-// ─── LFO ─────────────────────────────────────────────────────────────────────
+// --- LFO ---------------------------------------------------------------------
 
 class LFO {
   phase: number = 0;
   phaseInc: number = 0;
   waveform: number = 0; // 0=saw, 1=square, 2=triangle, 3=noise
 
-  amd: number = 0; // amplitude modulation depth (0-127)
-  pmd: number = 0; // phase modulation depth (0-127)
+  amd: number = 0;
+  pmd: number = 0;
 
-  // Noise LFSR for noise waveform
   noiseState: number = 1;
 
-  /**
-   * Set LFO frequency from register value.
-   * The YM2151 LFO frequency table maps 0-255 to ~0.008Hz to ~32.6Hz.
-   */
   setFrequency(value: number): void {
     if (value === 0) {
       this.phaseInc = 0;
@@ -693,16 +662,13 @@ class LFO {
     }
   }
 
-  /**
-   * Advance LFO and return [phaseModulation, amplitudeModulation].
-   */
   advance(): [number, number] {
     this.phase = (this.phase + this.phaseInc) & 0xFFFFF;
 
-    const phaseNorm = this.phase / (1 << 20); // 0..1
+    const phaseNorm = this.phase / (1 << 20);
 
-    let waveVal: number; // -1..+1 for phase mod
-    let amWaveVal: number; // 0..1 for amplitude mod
+    let waveVal: number;
+    let amWaveVal: number;
 
     switch (this.waveform) {
       case 0: // Sawtooth
@@ -734,7 +700,7 @@ class LFO {
     }
 
     const phaseMod = Math.floor(waveVal * this.pmd);
-    const ampMod = Math.floor(amWaveVal * this.amd * 4); // scale to envelope units
+    const ampMod = Math.floor(amWaveVal * this.amd * 4);
 
     return [phaseMod, ampMod];
   }
@@ -744,19 +710,15 @@ class LFO {
   }
 }
 
-// ─── Noise generator ─────────────────────────────────────────────────────────
+// --- Noise generator ---------------------------------------------------------
 
 class NoiseGenerator {
   enabled: boolean = false;
-  frequency: number = 0; // 5-bit (0-31)
-  lfsr: number = 0x7FFF; // 15-bit LFSR
+  frequency: number = 0;
+  lfsr: number = 0x7FFF;
   counter: number = 0;
   output: number = 0;
 
-  /**
-   * Advance noise generator by one sample.
-   * Returns noise output as signed value.
-   */
   advance(): number {
     if (!this.enabled) return 0;
 
@@ -772,19 +734,15 @@ class NoiseGenerator {
   }
 }
 
-// ─── Timer ───────────────────────────────────────────────────────────────────
+// --- Timer -------------------------------------------------------------------
 
 class Timer {
-  period: number = 0;          // in samples
+  period: number = 0;
   counter: number = 0;
   enabled: boolean = false;
-  overflow: boolean = false;   // overflow flag
-  irqEnable: boolean = false;  // IRQ mask
+  overflow: boolean = false;
+  irqEnable: boolean = false;
 
-  /**
-   * Advance timer by one sample.
-   * @returns true if timer overflowed this sample.
-   */
   advance(): boolean {
     if (!this.enabled) return false;
 
@@ -803,7 +761,7 @@ class Timer {
   }
 }
 
-// ─── YM2151 main class ──────────────────────────────────────────────────────
+// --- YM2151 main class -------------------------------------------------------
 
 export class YM2151 {
   private channels: Channel[];
@@ -812,29 +770,21 @@ export class YM2151 {
   private timerA: Timer;
   private timerB: Timer;
 
-  // Register state
   private registers: Uint8Array;
   private selectedRegister: number;
 
-  // Timer raw values
   private timerAHigh: number;
   private timerALow: number;
   private timerBValue: number;
 
-  // Timer callback (for Z80 IRQ assert)
   private timerCallback: ((timerIndex: number) => void) | null;
-
-  // IRQ line clear callback
   private irqClearCallback: (() => void) | null;
 
-  // Busy flag
   private busyCycles: number;
 
-  // CT1/CT2 output pins
   private ct1: boolean;
   private ct2: boolean;
 
-  // When true, generateSamples() skips timer advancement
   private _externalTimerMode: boolean;
 
   constructor() {
@@ -860,7 +810,7 @@ export class YM2151 {
     this._externalTimerMode = false;
   }
 
-  // ── Public interface ─────────────────────────────────────────────────────
+  // -- Public interface -------------------------------------------------------
 
   writeAddress(value: number): void {
     this.selectedRegister = value & 0xFF;
@@ -887,15 +837,10 @@ export class YM2151 {
     this._externalTimerMode = enabled;
   }
 
-  /**
-   * Generate stereo audio samples.
-   */
-  generateSamples(bufferL: Float32Array, bufferR: Float32Array, numSamples: number): void {
+  generateSamples(bufferL: Float32Array, bufferR: Float32Array, numSamples: number, startOffset: number = 0): void {
     for (let s = 0; s < numSamples; s++) {
-      // Advance LFO
       const [lfoPM, lfoAM] = this.lfo.advance();
 
-      // Advance timers and busy counter only if NOT in external timer mode
       if (!this._externalTimerMode) {
         if (this.busyCycles > 0) this.busyCycles--;
 
@@ -911,10 +856,8 @@ export class YM2151 {
         }
       }
 
-      // Advance noise
       const noiseOut = this.noise.advance();
 
-      // Mix all channels
       let mixL = 0;
       let mixR = 0;
 
@@ -922,7 +865,6 @@ export class YM2151 {
         const channel = this.channels[ch]!;
         let sample: number;
 
-        // Channel 7 can use noise instead of normal output
         if (ch === 7 && this.noise.enabled) {
           sample = channel.generateSample(lfoPM, lfoAM);
           sample = (sample + noiseOut) >> 1;
@@ -934,12 +876,9 @@ export class YM2151 {
         if (channel.rightEnable) mixR += sample;
       }
 
-      // Normalize to float [-1, 1]
-      // Each channel outputs ~14-bit signed (~+/-2048 typical).
-      // 8 channels max sum ~+/-16384. Use 1/16384 for headroom.
       const scale = 1.0 / 16384;
-      bufferL[s] = mixL * scale;
-      bufferR[s] = mixR * scale;
+      bufferL[startOffset + s] = mixL * scale;
+      bufferR[startOffset + s] = mixR * scale;
     }
   }
 
@@ -1044,14 +983,14 @@ export class YM2151 {
     }
   }
 
-  // ── Register write dispatch ──────────────────────────────────────────────
+  // -- Register write dispatch ------------------------------------------------
 
   private getOperatorIndex(reg: number): { channel: number; operator: number } | null {
     const offset = reg & 0x1F;
     const channel = offset & 0x07;
     const opSlot = (offset >> 3) & 0x03;
 
-    // Map YM2151 slot order to our internal order:
+    // Map YM2151 slot order to internal order:
     // Slot 0 = M1 (ops[0]), Slot 1 = M2 (ops[2]), Slot 2 = C1 (ops[1]), Slot 3 = C2 (ops[3])
     const slotToOp = [0, 2, 1, 3];
     const operator = slotToOp[opSlot]!;
@@ -1061,7 +1000,7 @@ export class YM2151 {
   }
 
   private writeRegister(reg: number, value: number): void {
-    // ── Global registers (0x00-0x1F) ─────────────────────────────────────
+    // -- Global registers (0x00-0x1F) -----------------------------------------
 
     if (reg === 0x01) {
       if (value & 0x02) {
@@ -1076,8 +1015,8 @@ export class YM2151 {
       const slotMask = (value >> 3) & 0x0F;
       const channel = this.channels[ch]!;
 
-      // Slot mapping: bit 0=M1, bit 1=C1, bit 2=M2, bit 3=C2
-      const slotToOp = [0, 1, 2, 3];
+      // Must match the per-operator register mapping: slot1=M2(ops[2]), slot2=C1(ops[1])
+      const slotToOp = [0, 2, 1, 3];
       for (let slot = 0; slot < 4; slot++) {
         const op = channel.ops[slotToOp[slot]!]!;
         if (slotMask & (1 << slot)) {
@@ -1155,7 +1094,7 @@ export class YM2151 {
       return;
     }
 
-    // ── Per-channel registers (0x20-0x3F) ────────────────────────────────
+    // -- Per-channel registers (0x20-0x3F) ------------------------------------
 
     if (reg >= 0x20 && reg <= 0x27) {
       const ch = reg & 0x07;
@@ -1191,7 +1130,7 @@ export class YM2151 {
       return;
     }
 
-    // ── Per-operator registers (0x40-0xFF) ───────────────────────────────
+    // -- Per-operator registers (0x40-0xFF) -----------------------------------
 
     if (reg >= 0x40 && reg <= 0x5F) {
       const idx = this.getOperatorIndex(reg);
@@ -1252,7 +1191,7 @@ export class YM2151 {
     }
   }
 
-  // ── Timer period computation ───────────────────────────────────────────
+  // -- Timer period computation -----------------------------------------------
 
   private updateTimerA(): void {
     const ta = (this.timerAHigh << 2) | this.timerALow;

@@ -111,9 +111,13 @@ export class Z80Bus implements Z80BusInterface {
     }
 
     // Banked audio ROM: 0x8000-0xBFFF (16KB window)
+    // MAME ROM_LOAD puts first 32KB at 0x0000, ROM_CONTINUE puts next 32KB at 0x10000.
+    // The bank register selects which 16KB page within the 0x10000+ region:
+    //   bank 0 = ROM 0x10000-0x13FFF (audioFile[0x8000-0xBFFF])
+    //   bank 1 = ROM 0x14000-0x17FFF (audioFile[0xC000-0xFFFF])
     if (address <= 0xBFFF) {
-      const bankOffset = 0x8000 + this.currentBank * 0x4000;
-      const romAddress = bankOffset + (address - 0x8000);
+      const bankBase = 0x10000 + this.currentBank * 0x4000;
+      const romAddress = bankBase + (address - 0x8000);
       if (romAddress < this.audioRom.length) {
         return this.audioRom[romAddress]!;
       }
