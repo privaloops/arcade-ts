@@ -28,16 +28,24 @@ const STEP_TABLE: readonly number[] = [
 /** Index adjustment per nibble value (lower 3 bits) */
 const INDEX_ADJUST: readonly number[] = [-1, -1, -1, -1, 2, 4, 6, 8];
 
-/** Volume attenuation table: maps 0-15 attenuation to linear scale (0 = max, 15 = silent) */
-const VOLUME_TABLE: readonly number[] = (() => {
-  const table: number[] = new Array(16);
-  for (let i = 0; i < 16; i++) {
-    // Each step = -3dB → factor = 10^(-3*i/20)
-    // At i=0: 1.0, i=1: ~0.708, ... i=15: ~0.00562
-    table[i] = Math.pow(10, (-3 * i) / 20);
-  }
-  return table;
-})();
+/**
+ * Volume attenuation table matching MAME's okim6295.cpp s_volume_table.
+ * Integer multiplier divided by 0x20 (32) to get 0.0-1.0 range.
+ * Attenuation 9-15 = silent (0).
+ */
+const VOLUME_TABLE: readonly number[] = [
+  0x20 / 0x20, // 0:  0 dB
+  0x16 / 0x20, // 1: -3.2 dB
+  0x10 / 0x20, // 2: -6.0 dB
+  0x0B / 0x20, // 3: -9.2 dB
+  0x08 / 0x20, // 4: -12.0 dB
+  0x06 / 0x20, // 5: -14.5 dB
+  0x04 / 0x20, // 6: -18.0 dB
+  0x03 / 0x20, // 7: -20.5 dB
+  0x02 / 0x20, // 8: -24.0 dB
+  0,            // 9-15: silence
+  0, 0, 0, 0, 0, 0,
+];
 
 /** CPS1 OKI6295 native sample rate */
 const OKI_SAMPLE_RATE = 7575;
@@ -94,19 +102,18 @@ export class OKI6295 {
   // ---------------------------------------------------------------------------
 
   /**
-   * Command register write (address 0xF000).
+   * Command register write (address 0xF002).
    *
-   * Two-byte protocol:
-   *   1) Byte with bit 7 set → stores phrase number, waits for byte 2
-   *   2) Byte 2 → bits 7-4 select which channels to start, bits 3-0 = attenuation
-   *
-   * Single byte with bit 7 clear → bits 6-3 select which channels to stop.
+   * Protocol (matches MAME okim6295.cpp):
+   *   - Bit 7 clear, no pending → phrase select: store phrase (bits 6-0), wait for byte 2
+   *   - Pending phrase + any byte → byte 2: bits 7-4 = channel mask, bits 3-0 = attenuation → start
+   *   - Bit 7 set, no pending → stop command: stop voices selected by bits 3-0
    */
   write(value: number): void {
     value = value & 0xFF;
 
     if (this.pendingPhrase >= 0) {
-      // This is byte 2: channel mask + volume
+      // Byte 2: channel mask + volume → start playing the pending phrase
       const channelMask = (value >> 4) & 0x0F;
       const attenuation = value & 0x0F;
       const phrase = this.pendingPhrase;
@@ -118,27 +125,28 @@ export class OKI6295 {
         return; // invalid phrase, ignore
       }
 
-      // Start/end addresses are 3 bytes each, big-endian, in nibble units
-      const startNibble =
+      // Start/end addresses are 3 bytes each, big-endian, byte addresses
+      // masked to 18 bits (MAME: start &= 0x3ffff)
+      const startByte = (
         (this.rom[tableOffset]! << 16) |
         (this.rom[tableOffset + 1]! << 8) |
-        this.rom[tableOffset + 2]!;
-      const endNibble =
+        this.rom[tableOffset + 2]!
+      ) & 0x3FFFF;
+      const endByte = (
         (this.rom[tableOffset + 3]! << 16) |
         (this.rom[tableOffset + 4]! << 8) |
-        this.rom[tableOffset + 5]!;
-
-      // Convert nibble addresses to byte addresses (divide by 2)
-      const startByte = startNibble >> 1;
-      const endByte = endNibble >> 1;
+        this.rom[tableOffset + 5]!
+      ) & 0x3FFFF;
 
       if (startByte >= endByte || startByte >= this.rom.length) {
         return; // invalid range
       }
 
-      // Start the selected channels
+      // Start voices matching the mask (MAME iterates with voicemask >>= 1)
+      // Only starts on non-playing voices (MAME: if (!voice.m_playing))
+      let mask = channelMask;
       for (let ch = 0; ch < NUM_CHANNELS; ch++) {
-        if (channelMask & (1 << (NUM_CHANNELS - 1 - ch))) {
+        if ((mask & 1) && !this.channels[ch]!.playing) {
           const channel = this.channels[ch]!;
           channel.playing = true;
           channel.address = startByte;
@@ -148,34 +156,36 @@ export class OKI6295 {
           channel.stepIndex = 0;
           channel.volume = VOLUME_TABLE[attenuation]!;
         }
+        mask >>= 1;
       }
       return;
     }
 
     if (value & 0x80) {
-      // Byte 1: phrase select — store and wait for byte 2
+      // Bit 7 set = phrase select (MAME: m_command = command & 0x7f)
       this.pendingPhrase = value & 0x7F;
     } else {
-      // Stop command: bits 6-3 = channel stop mask
-      const stopMask = (value >> 3) & 0x0F;
+      // Bit 7 clear = stop command (MAME: voicemask = command >> 3)
+      // Voices selected by bits 6-3: voice 0 at bit 3, voice 3 at bit 6
+      let stopMask = value >> 3;
       for (let ch = 0; ch < NUM_CHANNELS; ch++) {
-        if (stopMask & (1 << (NUM_CHANNELS - 1 - ch))) {
+        if (stopMask & 1) {
           this.channels[ch]!.playing = false;
         }
+        stopMask >>= 1;
       }
     }
   }
 
   /**
    * Status register read (address 0xF002).
-   * Returns a byte where bit N (3-0) is set if channel N is currently playing.
-   * Bit layout: bit 3 = ch0 busy, bit 2 = ch1 busy, bit 1 = ch2 busy, bit 0 = ch3 busy.
+   * MAME: returns 0xF0 | playing_bits (bits 4-7 always set, bit N = voice N playing)
    */
   read(): number {
-    let status = 0;
+    let status = 0xF0;
     for (let ch = 0; ch < NUM_CHANNELS; ch++) {
       if (this.channels[ch]!.playing) {
-        status |= 1 << (NUM_CHANNELS - 1 - ch);
+        status |= 1 << ch;
       }
     }
     return status;
@@ -208,9 +218,11 @@ export class OKI6295 {
       channel.address++;
     }
 
-    // Standard OKI ADPCM decode
+    // OKI ADPCM decode matching MAME: delta = (2 * (nibble & 7) + 1) * (step >> 3)
+    // Using integer arithmetic to match MAME exactly (avoid float drift).
     const step = STEP_TABLE[channel.stepIndex]!;
-    const delta = (step * (nibble & 7)) / 4 + step / 8;
+    const diff = (step >> 3);
+    let delta = (2 * (nibble & 7) + 1) * diff;
 
     if (nibble & 8) {
       channel.signal -= delta;
