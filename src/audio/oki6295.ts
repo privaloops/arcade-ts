@@ -273,9 +273,11 @@ export class OKI6295 {
         mix += sample * channel.volume;
       }
 
-      // Normalize: 12-bit signed × 4 channels max → range [-8192, 8191]
-      // Divide by 2048 (single channel max) × 4 = 8192 to fit in [-1, 1]
-      buffer[i] = mix / 8192;
+      // MAME normalization: signal * volume_int / 32768 (put_clamp divisor).
+      // Our volume is volume_int/32 (float), so: signal * (vol_int/32) / X
+      // must equal signal * vol_int / 32768 → X = 32768/32 = 1024.
+      // 4 voices sum → divide by 1024 per voice, clamp combined result.
+      buffer[i] = Math.max(-1, Math.min(1, mix / 1024));
     }
   }
 

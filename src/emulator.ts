@@ -390,13 +390,16 @@ export class Emulator {
       const ymSamplesPerFrame = Math.ceil(this.ym2151.getSampleRate() / FRAME_RATE);
       this.ym2151.generateSamples(this.ymBufferL, this.ymBufferR, ymSamplesPerFrame);
 
-      // Debug: check if YM2151 is producing non-zero samples
-      if (this.frameCount === 300 || this.frameCount === 600) {
-        let nonZeroL = 0;
+      // Audio level debug: measure peak YM and OKI levels
+      if (this.frameCount >= 300 && this.frameCount <= 480 && this.frameCount % 60 === 0) {
+        let ymPeakL = 0, ymPeakR = 0;
         for (let i = 0; i < ymSamplesPerFrame; i++) {
-          if (this.ymBufferL[i] !== 0) nonZeroL++;
+          const al = Math.abs(this.ymBufferL[i]!);
+          const ar = Math.abs(this.ymBufferR[i]!);
+          if (al > ymPeakL) ymPeakL = al;
+          if (ar > ymPeakR) ymPeakR = ar;
         }
-        console.log(`Frame ${this.frameCount}: Audio debug - YM samples/frame=${ymSamplesPerFrame}, non-zero=${nonZeroL}, audioInit=${this.audioOutput.isInitialized()}`);
+        console.log(`Frame ${this.frameCount}: YM peak L=${ymPeakL.toFixed(4)} R=${ymPeakR.toFixed(4)} mono=${(ymPeakL*0.35+ymPeakR*0.35).toFixed(4)} samples=${ymSamplesPerFrame}`);
       }
 
       let okiSamplesPerFrame = 0;

@@ -400,10 +400,19 @@ export class AudioOutput {
     const mixedL = new Float32Array(nOut);
     const mixedR = new Float32Array(nOut);
 
+    // CPS1 is MONO: MAME routes both YM channels to a single speaker:
+    //   ym2151.add_route(0, "mono", 0.35)   → L to mono at 0.35
+    //   ym2151.add_route(1, "mono", 0.35)   → R to mono at 0.35
+    //   OKIM6295.add_route(ALL_OUTPUTS, "mono", 0.30)
+    // Mono output = ymL*0.35 + ymR*0.35 + oki*0.30
+    // We output stereo for browser compatibility but sum both YM channels
+    // to match the mono level (verified: MAME peak=0.87, RMS=0.12).
     for (let i = 0; i < nOut; i++) {
       const oki = i < nOki ? (okiOut[i] ?? 0) : 0;
-      mixedL[i] = this._clip((ymOutL[i] ?? 0) + oki) * this._volume;
-      mixedR[i] = this._clip((ymOutR[i] ?? 0) + oki) * this._volume;
+      const ymMono = (ymOutL[i] ?? 0) * 0.35 + (ymOutR[i] ?? 0) * 0.35;
+      const mono = this._clip(ymMono + oki * 0.30) * this._volume;
+      mixedL[i] = mono;
+      mixedR[i] = mono;
     }
 
     if (this._debugPushCount !== undefined) this._debugPushCount++;
