@@ -294,6 +294,12 @@ export class Emulator {
   /** Debug: expose YM2151 for audio testing */
   getYm2151(): YM2151 { return this.ym2151; }
 
+  /** Suspend audio (e.g. when paused). */
+  suspendAudio(): void { this.audioOutput.suspend(); }
+
+  /** Resume audio (e.g. when unpaused). */
+  resumeAudio(): void { this.audioOutput.resume(); }
+
   // ── Cleanup ───────────────────────────────────────────────────────────────
 
   destroy(): void {

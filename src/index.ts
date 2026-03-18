@@ -47,6 +47,22 @@ const initAudio = (): void => {
 window.addEventListener("click", initAudio);
 window.addEventListener("keydown", initAudio);
 
+// ── Pause toggle (P key) ─────────────────────────────────────────────────────
+
+window.addEventListener("keydown", (e) => {
+  if (e.code === "KeyP") {
+    if (emulator.isRunning()) {
+      emulator.pause();
+      emulator.suspendAudio();
+      setStatus("Paused (P to resume)");
+    } else {
+      emulator.resume();
+      emulator.resumeAudio();
+      setStatus("Running");
+    }
+  }
+});
+
 // ── ROM drag & drop ──────────────────────────────────────────────────────────
 
 function setStatus(message: string): void {
