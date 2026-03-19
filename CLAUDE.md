@@ -47,7 +47,12 @@ wasm/
 src/__tests__/
   bus.test.ts       # Tests bus address decoding
   m68000.test.ts    # Tests CPU M68000 (opcodes basiques)
+  m68000-tom-harte.test.ts  # Tests M68000 Tom Harte (84 instructions, 200 vecteurs chacune)
+  z80-tom-harte.test.ts     # Tests Z80 SingleStepTests (588 instructions, 200 vecteurs chacune)
   oki6295.test.ts   # Tests OKI6295 (ADPCM, commandes)
+tests/
+  68000/*.json      # Vecteurs Tom Harte M68000 (ProcessorTests)
+  z80/*.json        # Vecteurs SingleStepTests Z80 (JSMoo)
 ```
 
 ## Stack technique
