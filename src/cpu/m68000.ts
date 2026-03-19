@@ -644,6 +644,11 @@ export class M68000 {
   }
 
   private readFromAddr(addr: number, size: number): number {
+    // Address error: word/long access to odd address
+    if (size > 1 && (addr & 1)) {
+      this.raiseAddressError(addr);
+      return 0;
+    }
     switch (size) {
       case 1: return this.bus.read8(addr & 0xFFFFFF);
       case 2: return this.bus.read16(addr & 0xFFFFFF);
@@ -672,6 +677,11 @@ export class M68000 {
   }
 
   private writeToAddr(addr: number, size: number, val: number): void {
+    // Address error: word/long access to odd address
+    if (size > 1 && (addr & 1)) {
+      this.raiseAddressError(addr);
+      return;
+    }
     switch (size) {
       case 1: this.bus.write8(addr & 0xFFFFFF, val & 0xFF); break;
       case 2: this.bus.write16(addr & 0xFFFFFF, val & 0xFFFF); break;
