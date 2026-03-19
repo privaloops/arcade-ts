@@ -2081,7 +2081,7 @@ export class Z80 {
         this.writeByte(this.getHL(), val);
         this.b = (this.b - 1) & 0xFF;
         this.setHL((this.getHL() + 1) & 0xFFFF);
-        const k = (val + ((this.c + 1) & 0xFF)) & 0xFF;
+        const k = val + ((this.c + 1) & 0xFF);
         this.f = (this.b === 0 ? F_Z : 0) |
                  (this.b & F_S) |
                  (this.b & (F_3 | F_5)) |
@@ -2097,7 +2097,7 @@ export class Z80 {
         this.writeByte(this.getHL(), val);
         this.b = (this.b - 1) & 0xFF;
         this.setHL((this.getHL() + 1) & 0xFFFF);
-        const k = (val + ((this.c + 1) & 0xFF)) & 0xFF;
+        const k = val + ((this.c + 1) & 0xFF);
         this.f = (this.b === 0 ? F_Z : 0) |
                  (this.b & F_S) |
                  (this.b & (F_3 | F_5)) |
@@ -2117,7 +2117,7 @@ export class Z80 {
         this.writeByte(this.getHL(), val);
         this.b = (this.b - 1) & 0xFF;
         this.setHL((this.getHL() - 1) & 0xFFFF);
-        const k = (val + ((this.c - 1) & 0xFF)) & 0xFF;
+        const k = val + ((this.c - 1) & 0xFF);
         this.f = (this.b === 0 ? F_Z : 0) |
                  (this.b & F_S) |
                  (this.b & (F_3 | F_5)) |
@@ -2133,7 +2133,7 @@ export class Z80 {
         this.writeByte(this.getHL(), val);
         this.b = (this.b - 1) & 0xFF;
         this.setHL((this.getHL() - 1) & 0xFFFF);
-        const k = (val + ((this.c - 1) & 0xFF)) & 0xFF;
+        const k = val + ((this.c - 1) & 0xFF);
         this.f = (this.b === 0 ? F_Z : 0) |
                  (this.b & F_S) |
                  (this.b & (F_3 | F_5)) |
@@ -2153,7 +2153,7 @@ export class Z80 {
         this.b = (this.b - 1) & 0xFF;
         this.bus.ioWrite(this.getBC(), val);
         this.setHL((this.getHL() + 1) & 0xFFFF);
-        const k = (val + this.l) & 0xFF;
+        const k = val + this.l;
         this.f = (this.b === 0 ? F_Z : 0) |
                  (this.b & F_S) |
                  (this.b & (F_3 | F_5)) |
@@ -2169,7 +2169,7 @@ export class Z80 {
         this.b = (this.b - 1) & 0xFF;
         this.bus.ioWrite(this.getBC(), val);
         this.setHL((this.getHL() + 1) & 0xFFFF);
-        const k = (val + this.l) & 0xFF;
+        const k = val + this.l;
         this.f = (this.b === 0 ? F_Z : 0) |
                  (this.b & F_S) |
                  (this.b & (F_3 | F_5)) |
@@ -2189,7 +2189,7 @@ export class Z80 {
         this.b = (this.b - 1) & 0xFF;
         this.bus.ioWrite(this.getBC(), val);
         this.setHL((this.getHL() - 1) & 0xFFFF);
-        const k = (val + this.l) & 0xFF;
+        const k = val + this.l;
         this.f = (this.b === 0 ? F_Z : 0) |
                  (this.b & F_S) |
                  (this.b & (F_3 | F_5)) |
@@ -2205,7 +2205,7 @@ export class Z80 {
         this.b = (this.b - 1) & 0xFF;
         this.bus.ioWrite(this.getBC(), val);
         this.setHL((this.getHL() - 1) & 0xFFFF);
-        const k = (val + this.l) & 0xFF;
+        const k = val + this.l;
         this.f = (this.b === 0 ? F_Z : 0) |
                  (this.b & F_S) |
                  (this.b & (F_3 | F_5)) |
