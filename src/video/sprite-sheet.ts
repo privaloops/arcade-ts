@@ -82,18 +82,12 @@ export class SpriteSheetManager {
     vram: Uint8Array,
     paletteBase: number,
   ): string {
+    // Check palette hash FIRST — invalidate stale cache before lookup
+    this.checkPaletteChanged(vram, paletteBase);
+
     const key = `${tileSize}:${tileCode}:${paletteIndex}`;
     const cached = this.cache.get(key);
     if (cached) return cached;
-
-    // Check if palette data in VRAM changed (fast checksum of 8KB palette area)
-    const paletteHash = this.hashPaletteVram(vram, paletteBase);
-    if (paletteBase !== this.lastPaletteBase || paletteHash !== this.lastPaletteHash) {
-      this.paletteCache.clear();
-      this.cache.clear();
-      this.lastPaletteBase = paletteBase;
-      this.lastPaletteHash = paletteHash;
-    }
 
     let palette = this.paletteCache.get(paletteIndex);
     if (!palette) {
@@ -106,7 +100,18 @@ export class SpriteSheetManager {
     return url;
   }
 
-  /** Invalidate cache (call when palette VRAM changes significantly). */
+  /** Check if palette VRAM changed since last call; invalidate caches if so. */
+  private checkPaletteChanged(vram: Uint8Array, paletteBase: number): void {
+    const paletteHash = this.hashPaletteVram(vram, paletteBase);
+    if (paletteBase !== this.lastPaletteBase || paletteHash !== this.lastPaletteHash) {
+      this.paletteCache.clear();
+      this.cache.clear();
+      this.lastPaletteBase = paletteBase;
+      this.lastPaletteHash = paletteHash;
+    }
+  }
+
+  /** Invalidate cache. */
   invalidate(): void {
     this.cache.clear();
     this.paletteCache.clear();
@@ -125,18 +130,12 @@ export class SpriteSheetManager {
     vram: Uint8Array,
     paletteBase: number,
   ): string {
+    // Check palette hash FIRST
+    this.checkPaletteChanged(vram, paletteBase);
+
     const key = `multi:${baseCode}:${nx}x${ny}:${paletteIndex}`;
     const cached = this.cache.get(key);
     if (cached) return cached;
-
-    // Check palette hash
-    const paletteHash = this.hashPaletteVram(vram, paletteBase);
-    if (paletteBase !== this.lastPaletteBase || paletteHash !== this.lastPaletteHash) {
-      this.paletteCache.clear();
-      this.cache.clear();
-      this.lastPaletteBase = paletteBase;
-      this.lastPaletteHash = paletteHash;
-    }
 
     let palette = this.paletteCache.get(paletteIndex);
     if (!palette) {
