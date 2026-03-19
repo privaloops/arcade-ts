@@ -29,6 +29,7 @@ export class Bus implements BusInterface {
   private vram: Uint8Array;          // 0x900000-0x92FFFF (192KB)
   private workRam: Uint8Array;       // 0xFF0000-0xFFFFFF (64KB)
   private _soundLatchCallback: ((value: number) => void) | null = null;
+  _ioDebug: boolean = false;
 
   // Callback for IRQ acknowledge — set by the emulator to clear interrupt lines
   private irqAckCallback: (() => void) | null = null;
@@ -107,7 +108,11 @@ export class Bus implements BusInterface {
 
     // Player inputs: 0x800000-0x800007
     if (address >= 0x800000 && address <= 0x800007) {
-      return this.ioPorts[address - 0x800000]!;
+      const val = this.ioPorts[address - 0x800000]!;
+      if (this._ioDebug) {
+        console.log(`IO read8 0x${address.toString(16)} → 0x${val.toString(16).padStart(2, '0')}`);
+      }
+      return val;
     }
 
     // DIP switches / system: 0x800018-0x80001F

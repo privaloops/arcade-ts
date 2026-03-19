@@ -20,6 +20,8 @@ const fileInput = getElement<HTMLInputElement>("file-input");
 // ── Emulator instance ────────────────────────────────────────────────────────
 
 const emulator = new Emulator(canvas);
+// Debug: expose for console access
+(window as unknown as Record<string, unknown>).__emu = emulator;
 
 // ── Audio init (requires user gesture) ──────────────────────────────────────
 

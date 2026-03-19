@@ -319,18 +319,16 @@ export class Emulator {
       const elapsed = this.prevRafTime > 0 ? ts - this.prevRafTime : 16.77;
       this.prevRafTime = ts;
 
-      // Accumulate time and run frames as needed.
-      // This works correctly at any rAF rate (30Hz, 60Hz, 120Hz, 144Hz).
-      this.frameDebt += elapsed;
+      // Frame rate limiter: run exactly at CPS1 native rate (~59.637 Hz).
+      // Skip this rAF if not enough time has passed for a full frame.
       const FRAME_MS = 1000 / FRAME_RATE; // ~16.77ms
-      let framesRun = 0;
-      while (this.frameDebt >= FRAME_MS && framesRun < 3) {
+      this.frameDebt += elapsed;
+      if (this.frameDebt >= FRAME_MS) {
         this.runOneFrame();
         this.frameDebt -= FRAME_MS;
-        framesRun++;
+        // Clamp debt to prevent runaway after tab backgrounding
+        if (this.frameDebt > FRAME_MS) this.frameDebt = 0;
       }
-      // Prevent debt from growing too large (e.g. tab was backgrounded)
-      if (this.frameDebt > FRAME_MS * 3) this.frameDebt = 0;
 
       this.scheduleFrame();
     });

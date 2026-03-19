@@ -112,6 +112,7 @@ export class InputManager {
   private boundKeyUp: (e: KeyboardEvent) => void;
   private boundGamepadConnected: (e: GamepadEvent) => void;
   private boundGamepadDisconnected: (e: GamepadEvent) => void;
+  private boundBlur: () => void;
 
   constructor() {
     this.mappings = [
@@ -123,11 +124,14 @@ export class InputManager {
     this.boundKeyUp = this.onKeyUp.bind(this);
     this.boundGamepadConnected = this.onGamepadConnected.bind(this);
     this.boundGamepadDisconnected = this.onGamepadDisconnected.bind(this);
+    this.boundBlur = this.onBlur.bind(this);
 
     window.addEventListener("keydown", this.boundKeyDown);
     window.addEventListener("keyup", this.boundKeyUp);
     window.addEventListener("gamepadconnected", this.boundGamepadConnected);
     window.addEventListener("gamepaddisconnected", this.boundGamepadDisconnected);
+    // Clear all stuck keys when page loses focus (alt-tab, DevTools, etc.)
+    window.addEventListener("blur", this.boundBlur);
   }
 
   /**
@@ -215,6 +219,7 @@ export class InputManager {
     window.removeEventListener("keyup", this.boundKeyUp);
     window.removeEventListener("gamepadconnected", this.boundGamepadConnected);
     window.removeEventListener("gamepaddisconnected", this.boundGamepadDisconnected);
+    window.removeEventListener("blur", this.boundBlur);
   }
 
   // ── Private: keyboard events ──────────────────────────────────────────────
@@ -229,6 +234,10 @@ export class InputManager {
 
   private onKeyUp(e: KeyboardEvent): void {
     this.keyState.delete(e.code);
+  }
+
+  private onBlur(): void {
+    this.keyState.clear();
   }
 
   private isMappedKey(code: string): boolean {
