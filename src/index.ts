@@ -23,6 +23,25 @@ const emulator = new Emulator(canvas);
 // Debug: expose for console access
 (window as unknown as Record<string, unknown>).__emu = emulator;
 
+// T = toggle CPU trace. First T starts recording, second T stops + downloads.
+let tracing = false;
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'KeyT' || e.key === 't' || e.key === 'T') {
+    const cpu = (emulator as unknown as { m68000: { startTrace(n: number): void; _traceEnabled: boolean; _traceLog: string[]; downloadTrace(f: string): void; getTrace(): string } }).m68000;
+    if (!tracing) {
+      cpu.startTrace(999999);
+      tracing = true;
+      console.log('TRACE ON — press T again to stop and download');
+    } else {
+      cpu._traceEnabled = false;
+      tracing = false;
+      console.log(`TRACE OFF — ${cpu._traceLog.length} instructions captured`);
+      cpu.downloadTrace('grab_trace.log');
+    }
+  }
+});
+
+
 // ── Audio init (requires user gesture) ──────────────────────────────────────
 
 const initAudio = (): void => {
