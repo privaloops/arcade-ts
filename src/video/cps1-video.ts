@@ -479,8 +479,9 @@ export class CPS1Video {
     if (useRowScroll) {
       for (let screenY = 0; screenY < SCREEN_HEIGHT; screenY++) {
         const vy = ((screenY + scrollY) & 0xFFFF) % virtualH;
-        // MAME: other[(i + otheroffs) & 0x3ff] where i = screenY
-        const otherIdx = (screenY + otherOffs) & 0x3FF;
+        // MAME: i = tilemapRow - m_scroll2y = screenY + CPS_VBEND
+        // other index = (i + otheroffs) & 0x3ff
+        const otherIdx = (screenY + CPS_VBEND + otherOffs) & 0x3FF;
         const otherAddr = otherBase + otherIdx * 2;
         const rowOffset = otherAddr + 1 < VRAM_SIZE
           ? ((this.vram[otherAddr]! << 8) | this.vram[otherAddr + 1]!) & 0xFFFF
