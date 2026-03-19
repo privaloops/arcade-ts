@@ -152,6 +152,11 @@ export class M68000 {
   // Cycles accumulated for current instruction
   private cycles: number = 0;
 
+  // Instruction tracer
+  private _traceLog: string[] = [];
+  private _traceEnabled: boolean = false;
+  private _traceMax: number = 0;
+
   constructor(bus: BusInterface) {
     this.bus = bus;
   }
@@ -159,6 +164,29 @@ export class M68000 {
   // =========================================================================
   // Public API
   // =========================================================================
+
+  /** Start tracing N instructions. Retrieve with getTrace(). */
+  startTrace(maxInstructions: number = 1000): void {
+    this._traceLog = [];
+    this._traceMax = maxInstructions;
+    this._traceEnabled = true;
+  }
+
+  /** Get the trace log as a string (one line per instruction). */
+  getTrace(): string {
+    return this._traceLog.join('\n');
+  }
+
+  /** Download the trace as a text file. */
+  downloadTrace(filename: string = 'trace.log'): void {
+    const blob = new Blob([this.getTrace()], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 
   reset(): void {
     this.sr = 0x2700;
@@ -194,6 +222,23 @@ export class M68000 {
 
     // Check trace flag BEFORE executing
     const traceBeforeExec = (this.sr & (1 << SR_T)) !== 0;
+
+    // Log instruction before execution (if tracing)
+    if (this._traceEnabled && this._traceLog.length < this._traceMax) {
+      const instrPC = this.pc; // PC points to current instruction (before prefetch)
+      this._traceLog.push(
+        `PC=${instrPC.toString(16).padStart(6, '0').toUpperCase()} ` +
+        `SR=${this.sr.toString(16).padStart(4, '0').toUpperCase()} ` +
+        `D0=${(this.d[0]! >>> 0).toString(16).padStart(8, '0').toUpperCase()} ` +
+        `D1=${(this.d[1]! >>> 0).toString(16).padStart(8, '0').toUpperCase()} ` +
+        `A0=${(this.a[0]! >>> 0).toString(16).padStart(8, '0').toUpperCase()} ` +
+        `A7=${(this.a[7]! >>> 0).toString(16).padStart(8, '0').toUpperCase()} ` +
+        `OP=${this.prefetch[0]!.toString(16).padStart(4, '0').toUpperCase()}`
+      );
+      if (this._traceLog.length >= this._traceMax) {
+        this._traceEnabled = false;
+      }
+    }
 
     // Fetch and decode
     this.opcode = this.prefetchRead();
