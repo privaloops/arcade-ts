@@ -897,6 +897,19 @@ export class CPS1Video {
     }
   }
 
+  /**
+   * Buffer sprite data from VRAM. Must be called at VBlank time (scanline 240),
+   * BEFORE the game's VBlank IRQ handler changes OBJ_BASE for the next frame.
+   * This matches MAME's screen_vblank_cps1 which copies m_obj to m_buffered_obj.
+   */
+  bufferSprites(): void {
+    const objBase = this.vramBaseOffset(CPSA_OBJ_BASE, OBJ_SIZE);
+    const copyLen = Math.min(OBJ_SIZE, VRAM_SIZE - objBase);
+    if (copyLen > 0) {
+      this.objBuffer.set(this.vram.subarray(objBase, objBase + copyLen));
+    }
+  }
+
   renderFrame(framebuffer: Uint8Array): void {
     if (framebuffer.length < FRAMEBUFFER_SIZE) {
       throw new Error(
@@ -906,13 +919,6 @@ export class CPS1Video {
 
     // Invalidate palette cache for new frame
     this.paletteCacheValid = false;
-
-    // Buffer sprites: copy obj table from VRAM to internal buffer (like MAME's m_buffered_obj)
-    const objBase = this.vramBaseOffset(CPSA_OBJ_BASE, OBJ_SIZE);
-    const copyLen = Math.min(OBJ_SIZE, VRAM_SIZE - objBase);
-    if (copyLen > 0) {
-      this.objBuffer.set(this.vram.subarray(objBase, objBase + copyLen));
-    }
 
     // 1. Clear framebuffer to black (RGBA = 0, 0, 0, 255)
     // Use Uint32Array for fast fill: 0xFF000000 = ABGR(255, 0, 0, 0) = opaque black

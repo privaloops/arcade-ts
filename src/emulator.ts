@@ -404,8 +404,14 @@ export class Emulator {
     let m68kCycles = 0;
     try {
       for (let scanline = 0; scanline < CPS_VTOTAL; scanline++) {
-        // Assert VBlank IRQ at the start of scanline 240
+        // At VBlank (scanline 240): buffer sprites BEFORE asserting IRQ.
+        // The game's IRQ handler will update OBJ_BASE for the next frame,
+        // so we must capture the current sprite table first (matches MAME's
+        // screen_vblank_cps1 which copies m_obj to m_buffered_obj).
         if (scanline === CPS_VBLANK_LINE) {
+          if (this.video) {
+            this.video.bufferSprites();
+          }
           this.m68000.assertInterrupt(VBLANK_IRQ_LEVEL);
         }
 
