@@ -154,16 +154,21 @@ function gfxromBankMapper(type: number, code: number, mapperTable: GfxRange[], b
     }
   }
 
-  // No range matched. If there are NO ranges at all for this tile type,
-  // fall back to bank 0 (default). If there ARE ranges but the code
-  // didn't match any, also fall back to bank 0 — MAME's mapper always
-  // returns a valid code (never -1), wrapping into bank 0 for unmapped codes.
-  const bankSize0 = bankSizes[0]!;
-  if (bankSize0 > 0) {
-    return (bankBases[0]! + (shiftedCode & (bankSize0 - 1))) >> shift;
+  // No range matched. Fall back to bank 0 in two cases:
+  // 1. No ranges defined for this type (early CPS1 games like Ghouls)
+  // 2. Sprites: MAME always resolves sprites via bank 0 when no range
+  //    matches — needed for games with spriteCodeOffset (e.g., Ghouls
+  //    +0x4000 pushes codes beyond the explicit sprite range).
+  // For scroll layers with defined ranges, return -1 to skip (prevents
+  // garbage tiles from unmapped codes in games like Strider).
+  if (!hasRangeForType || type === GFXTYPE_SPRITES) {
+    const bankSize0 = bankSizes[0]!;
+    if (bankSize0 > 0) {
+      return (bankBases[0]! + (shiftedCode & (bankSize0 - 1))) >> shift;
+    }
   }
 
-  return -1; // No bank 0 configured
+  return -1; // Out of range
 }
 
 // ---------------------------------------------------------------------------
