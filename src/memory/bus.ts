@@ -32,6 +32,8 @@ export class Bus implements BusInterface {
   private _soundLatch2Callback: ((value: number) => void) | null = null;
   // Callback for IRQ acknowledge — set by the emulator to clear interrupt lines
   private irqAckCallback: (() => void) | null = null;
+  // Debug: VRAM write watchpoint callback (address, value)
+  private _vramWatchCallback: ((addr: number, value: number, isWord: boolean) => void) | null = null;
 
   constructor() {
     this.programRom = new Uint8Array(0);
@@ -88,6 +90,11 @@ export class Bus implements BusInterface {
 
   setSoundLatch2Callback(cb: (value: number) => void): void {
     this._soundLatch2Callback = cb;
+  }
+
+  /** Debug: set a watchpoint on VRAM writes */
+  setVramWatchCallback(cb: ((addr: number, value: number, isWord: boolean) => void) | null): void {
+    this._vramWatchCallback = cb;
   }
 
   getWorkRam(): Uint8Array {
@@ -228,6 +235,9 @@ export class Bus implements BusInterface {
     // VRAM: 0x900000-0x92FFFF
     if (address >= 0x900000 && address <= 0x92FFFF) {
       this.vram[address - 0x900000] = value;
+      if (this._vramWatchCallback !== null) {
+        this._vramWatchCallback(address, value, false);
+      }
       return;
     }
 

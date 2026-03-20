@@ -1841,16 +1841,39 @@ function assembleProgram(
     }
   }
 
-  // ROM_LOAD16_WORD_SWAP: swap bytes within each 16-bit word
+  // ROM_LOAD16_WORD_SWAP: standard files are little-endian words and need
+  // byte-swapping to big-endian (68K native). Some ROM sets ship files already
+  // pre-swapped to big-endian. We auto-detect the byte order statistically:
+  // in CPS1 ROM data, the LSB byte of each word tends to be larger than the
+  // MSB byte (due to palette format, opcode distribution, etc.). We count
+  // how often byte[0] > byte[1] across all non-zero words:
+  //   - ratio > 1 → byte[0] is the LSB → file is little-endian → needs swap
+  //   - ratio ≤ 1 → byte[0] is the MSB → file is already big-endian → no swap
   if (def.wordSwapEntries) {
     for (const entry of def.wordSwapEntries) {
       const data = fileMap.get(entry.file.toLowerCase());
-      if (data !== undefined) {
-        const copyLen = Math.min(data.length, entry.size, def.size - entry.offset);
+      if (data === undefined) continue;
+      const copyLen = Math.min(data.length, entry.size, def.size - entry.offset);
+
+      let b0bigger = 0;
+      let b1bigger = 0;
+      for (let i = 0; i < copyLen; i += 2) {
+        const b0 = data[i]!;
+        const b1 = data[i + 1]!;
+        if (b0 === 0 && b1 === 0) continue;
+        if (b0 > b1) b0bigger++;
+        else if (b1 > b0) b1bigger++;
+      }
+
+      const needSwap = b1bigger === 0 || b0bigger / b1bigger > 1;
+
+      if (needSwap) {
         for (let i = 0; i < copyLen; i += 2) {
           result[entry.offset + i] = data[i + 1] ?? 0;
           result[entry.offset + i + 1] = data[i] ?? 0;
         }
+      } else {
+        result.set(data.subarray(0, copyLen), entry.offset);
       }
     }
   }

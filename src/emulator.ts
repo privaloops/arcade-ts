@@ -298,6 +298,47 @@ export class Emulator {
   /** Debug: expose YM2151 for audio testing */
   getYm2151(): NukedOPMWasm { return this.ym2151; }
 
+  /**
+   * Debug: watch VRAM writes in the palette area and log entries with G=0xF.
+   * Useful for diagnosing palette corruption. Activate via console:
+   *   window.__emu.debugWatchPalette()
+   */
+  debugWatchPalette(maxHits: number = 50): void {
+    const hits: Array<string> = [];
+    const cpu = this.m68000 as unknown as {
+      pc: number;
+      d: Int32Array;
+      a: Int32Array;
+      opcode: number;
+    };
+    let pendingHi: { addr: number; value: number } | null = null;
+
+    this.bus.setVramWatchCallback((addr, value) => {
+      if (hits.length >= maxHits) return;
+      if (addr < 0x910000 || addr > 0x912FFF) return;
+
+      if ((addr & 1) === 0) {
+        pendingHi = { addr, value };
+      } else if (pendingHi !== null && addr === pendingHi.addr + 1) {
+        const word = (pendingHi.value << 8) | value;
+        const msg = `[PAL] PC=0x${cpu.pc.toString(16)} op=0x${cpu.opcode.toString(16).padStart(4, '0')} ` +
+          `addr=0x${pendingHi.addr.toString(16)} word=0x${word.toString(16).padStart(4, '0')} ` +
+          `D2=0x${(cpu.d[2]! >>> 0).toString(16).padStart(8, '0')} D3=0x${(cpu.d[3]! >>> 0).toString(16).padStart(8, '0')} ` +
+          `A0=0x${(cpu.a[0]! >>> 0).toString(16)} A1=0x${(cpu.a[1]! >>> 0).toString(16)}`;
+        hits.push(msg);
+        console.log(msg);
+        pendingHi = null;
+      }
+    });
+    console.log('[PALETTE WATCH] Active — monitoring palette VRAM writes (0x910000-0x912FFF)');
+  }
+
+  /** Debug: stop palette watch */
+  debugStopWatch(): void {
+    this.bus.setVramWatchCallback(null);
+    console.log('[PALETTE WATCH] Stopped');
+  }
+
   /** Suspend audio (e.g. when paused). */
   suspendAudio(): void { this.audioOutput.suspend(); }
 
