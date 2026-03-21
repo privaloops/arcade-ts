@@ -31,15 +31,12 @@ export class Bus implements BusInterface {
   private workRam: Uint8Array;       // 0xFF0000-0xFFFFFF (64KB)
   private _soundLatchCallback: ((value: number) => void) | null = null;
   private _soundLatch2Callback: ((value: number) => void) | null = null;
-  // Callback for IRQ acknowledge — set by the emulator to clear interrupt lines
-  private irqAckCallback: (() => void) | null = null;
   // Debug: VRAM write watchpoint callback (address, value)
   private _vramWatchCallback: ((addr: number, value: number, isWord: boolean) => void) | null = null;
   // QSound shared RAM (set by emulator for QSound games)
   private _qsoundSharedRam1: Uint8Array | null = null; // 68K: 0xF18000-0xF19FFF
   private _qsoundSharedRam2: Uint8Array | null = null; // 68K: 0xF1E000-0xF1FFFF
   private _eeprom: EEPROM93C46 | null = null;
-  private _qsoundDirect: ((cmd: number) => void) | null = null;
 
   constructor() {
     this.programRom = new Uint8Array(0);
@@ -68,10 +65,6 @@ export class Bus implements BusInterface {
 
   loadProgramRom(data: Uint8Array): void {
     this.programRom = data;
-  }
-
-  setIrqAckCallback(cb: () => void): void {
-    this.irqAckCallback = cb;
   }
 
   getVram(): Uint8Array {
@@ -104,10 +97,6 @@ export class Bus implements BusInterface {
   }
 
   /** Set direct QSound callback (bypass Z80 for testing) */
-  setQsoundDirect(cb: ((cmd: number) => void) | null): void {
-    this._qsoundDirect = cb;
-  }
-
   /** Set EEPROM for QSound games */
   setEeprom(eeprom: EEPROM93C46 | null): void {
     this._eeprom = eeprom;

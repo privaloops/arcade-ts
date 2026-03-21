@@ -28,9 +28,6 @@ export class Z80BusQSound implements Z80BusInterface {
   // QSound DSP callbacks
   private onQsWrite: ((offset: number, data: number) => void) | null;
   private onQsRead: (() => number) | null;
-  private onQsTick: (() => void) | null;
-  public qsWriteCount = 0; // debug
-  private _qsLatch = 0; // debug: track data latch for logging
 
   constructor() {
     this.audioRom = new Uint8Array(0);
@@ -39,7 +36,6 @@ export class Z80BusQSound implements Z80BusInterface {
     this.currentBank = 0;
     this.onQsWrite = null;
     this.onQsRead = null;
-    this.onQsTick = null;
   }
 
   loadAudioRom(data: Uint8Array): void {
@@ -72,10 +68,6 @@ export class Z80BusQSound implements Z80BusInterface {
 
   setQsoundReadCallback(callback: () => number): void {
     this.onQsRead = callback;
-  }
-
-  setQsoundTickCallback(callback: () => void): void {
-    this.onQsTick = callback;
   }
 
   read(address: number): number {
@@ -141,16 +133,6 @@ export class Z80BusQSound implements Z80BusInterface {
 
     // QSound write: 0xD000-0xD002
     if (address >= 0xD000 && address <= 0xD002) {
-      if (address === 0xD002) {
-        this.qsWriteCount++;
-        if (this.qsWriteCount <= 20) {
-          console.log(`[QS reg] addr=0x${value.toString(16).padStart(2,'0')} data=0x${this._qsLatch.toString(16).padStart(4,'0')}`);
-        }
-      } else if (address === 0xD000) {
-        this._qsLatch = (this._qsLatch & 0x00ff) | (value << 8);
-      } else {
-        this._qsLatch = (this._qsLatch & 0xff00) | value;
-      }
       if (this.onQsWrite !== null) {
         this.onQsWrite(address - 0xD000, value);
       }

@@ -1,5 +1,13 @@
 # Backlog
 
+## M68000 CPU — Tom Harte test failures (41 tests)
+
+- [ ] **ADDX.b/MOVE.b/MOVEA avec -(A7)/(A7)+** — Le 68000 force A7 pair: décrémente/incrémente de 2 (pas 1) pour les ops byte sur A7. Fix localisé dans m68000.ts (predecrement/postincrement).
+- [ ] **DIVS** — Flags incorrects (N, Z, V, C) sur division signée. 9 vecteurs échouent.
+- [ ] **DIVU** — Flags incorrects sur division non-signée. 10 vecteurs échouent.
+- [ ] **MULS** — Flags incorrects sur multiplication signée. 11 vecteurs échouent.
+- [ ] **MULU** — Flags incorrects sur multiplication non-signée. 11 vecteurs échouent.
+
 ## Audio
 
 - [ ] **Web Worker audio** — Déporter la génération audio (Z80 + OPM + OKI) dans un Web Worker séparé du main thread. Résoudrait le crépitement son en mode DOM renderer (les repaints DOM bloquent le main thread et causent des underruns du ring buffer audio).

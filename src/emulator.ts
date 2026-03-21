@@ -17,9 +17,12 @@ import { Z80, Z80State } from "./cpu/z80";
 import { Bus } from "./memory/bus";
 import { Z80Bus } from "./memory/z80-bus";
 import { Z80BusQSound } from "./memory/z80-bus-qsound";
-import { Renderer, FRAMEBUFFER_SIZE } from "./video/renderer";
+import { Renderer } from "./video/renderer";
+import { FRAMEBUFFER_SIZE, YM2151_SAMPLE_RATE, OKI6295_SAMPLE_RATE, QSOUND_SAMPLE_RATE as QS_RATE } from "./constants";
 import { WebGLRenderer } from "./video/renderer-webgl";
 import { CPS1Video } from "./video/cps1-video";
+import type { RendererInterface } from "./types";
+import type { VideoConfig } from "./video/cps1-video";
 import { InputManager } from "./input/input";
 import { loadRomFromZip, RomSet } from "./memory/rom-loader";
 import { NukedOPMWasm, initOPMWasm } from "./audio/nuked-opm-wasm";
@@ -54,7 +57,12 @@ const M68K_CYCLES_PER_FRAME = Math.round(M68K_CLOCK / FRAME_RATE); // ~167 700
 const M68K_CYCLES_PER_SCANLINE = Math.round(M68K_CYCLES_PER_FRAME / CPS_VTOTAL); // ~640
 const Z80_CYCLES_PER_FRAME = Math.round(Z80_CLOCK / FRAME_RATE);   // ~60 040
 const VBLANK_IRQ_LEVEL = 2;           // CPS1 VBlank = 68000 IRQ level 2 (IPL1)
-const QSOUND_SAMPLE_RATE = 24038;    // QSound native rate: 60 MHz / 2 / 1248
+const FRAME_MS = 1000 / FRAME_RATE;  // ~16.77ms per frame
+const Z80_CYCLES_PER_IRQ_QS = Math.round(Z80_CLOCK / 250); // QSound 250Hz IRQ timer
+const Z80_CYCLES_PER_SCANLINE = Math.round(Z80_CYCLES_PER_FRAME / CPS_VTOTAL);
+const QS_SAMPLES_PER_FRAME = Math.ceil(QS_RATE / FRAME_RATE);
+const YM_SAMPLES_PER_FRAME = Math.ceil(YM2151_SAMPLE_RATE / FRAME_RATE);
+const OKI_SAMPLES_PER_FRAME = Math.ceil(OKI6295_SAMPLE_RATE / FRAME_RATE);
 
 // ── Emulator state snapshot (for save state / rollback) ─────────────────────
 
@@ -77,10 +85,11 @@ export class Emulator {
   private readonly z80: Z80;
   private readonly bus: Bus;
   private readonly z80Bus: Z80Bus;
-  private readonly renderer: Renderer | WebGLRenderer;
+  private readonly renderer: RendererInterface;
   private readonly input: InputManager;
   private video: CPS1Video | null = null;
   private _vblankCallback: (() => void) | null = null;
+  private _customRenderCallback: (() => void) | null = null;
 
   // Audio chips
   private ym2151!: NukedOPMWasm;
@@ -385,6 +394,33 @@ export class Emulator {
     this._vblankCallback = cb;
   }
 
+  /**
+   * Set a custom render callback that replaces the default renderFrame.
+   * Pass null to restore the default canvas/WebGL rendering.
+   */
+  setRenderCallback(cb: (() => void) | null): void {
+    this._customRenderCallback = cb;
+  }
+
+  /** Expose video config needed by the DOM renderer. Returns null if no ROM loaded. */
+  getVideoConfig(): VideoConfig | null {
+    return this.video?.getVideoConfig() ?? null;
+  }
+
+  /** Expose the video layer (for DOM renderer setComponents). */
+  getVideo(): CPS1Video | null {
+    return this.video;
+  }
+
+  /** Expose bus buffers needed by the DOM renderer. */
+  getBusBuffers(): { vram: Uint8Array; cpsaRegs: Uint8Array; cpsbRegs: Uint8Array } {
+    return {
+      vram: this.bus.getVram(),
+      cpsaRegs: this.bus.getCpsaRegisters(),
+      cpsbRegs: this.bus.getCpsbRegisters(),
+    };
+  }
+
   /** Debug: expose YM2151 for audio testing */
   getYm2151(): NukedOPMWasm { return this.ym2151; }
 
@@ -441,6 +477,7 @@ export class Emulator {
     this.stop();
     this.input.destroy();
     this.audioOutput.suspend();
+    this.qsound?.destroy();
   }
 
   // ── Private: main loop ────────────────────────────────────────────────────
@@ -450,12 +487,10 @@ export class Emulator {
   private scheduleFrame(): void {
     if (!this.running || this.paused) return;
     this.animFrameId = requestAnimationFrame((ts) => {
-      const elapsed = this.prevRafTime > 0 ? ts - this.prevRafTime : 16.77;
+      const elapsed = this.prevRafTime > 0 ? ts - this.prevRafTime : FRAME_MS;
       this.prevRafTime = ts;
 
       // Frame rate limiter: run exactly at CPS1 native rate (~59.637 Hz).
-      // Skip this rAF if not enough time has passed for a full frame.
-      const FRAME_MS = 1000 / FRAME_RATE; // ~16.77ms
       this.frameDebt += elapsed;
       if (this.frameDebt >= FRAME_MS) {
         this.runOneFrame();
@@ -476,40 +511,25 @@ export class Emulator {
   private fpsDisplay = 0;
 
   private runOneFrame(): void {
-    // 1. Update input ports on the bus
     this.input.updateBusPorts(this.bus.getIoPorts());
+    this.runCpuFrame();
+    this.generateAudio();
+    this.frameCount++;
+    this.updateFps();
+    this.renderFrame();
+  }
 
-    const tCpu0 = performance.now();
-    // 3. Run M68000 with scanline-accurate VBlank timing.
-    //
-    // Like real CPS1 hardware (and MAME), we iterate through 262 scanlines.
-    // At scanline 240 (CPS_VBLANK_LINE), we assert IRQ level 2.
-    // The interrupt line stays asserted until the CPU acknowledges it
-    // (via the IACK callback wired in the constructor).
-    //
-    // During POST, the SR is 0x2700 (IPL=7), masking all interrupts.
-    // The VBlank is asserted but never serviced until the game lowers the mask.
-    // This is exactly how the real hardware works.
-
-    // QSound 250Hz IRQ timing constant (used in interleaved loop below)
-    const Z80_CYCLES_PER_IRQ_QS = Math.round(Z80_CLOCK / 250);
-    const z80CyclesPerScanline = Math.round(Z80_CYCLES_PER_FRAME / CPS_VTOTAL);
-
+  /** Run M68000 + Z80 (QSound interleaved) for one frame with scanline-accurate VBlank. */
+  private runCpuFrame(): void {
     let m68kCycles = 0;
     try {
       for (let scanline = 0; scanline < CPS_VTOTAL; scanline++) {
-        // At VBlank (scanline 240): buffer sprites BEFORE asserting IRQ.
         if (scanline === CPS_VBLANK_LINE) {
-          if (this.video) {
-            this.video.bufferSprites();
-          }
-          if (this._vblankCallback) {
-            this._vblankCallback();
-          }
+          if (this.video) this.video.bufferSprites();
+          if (this._vblankCallback) this._vblankCallback();
           this.m68000.assertInterrupt(VBLANK_IRQ_LEVEL);
         }
 
-        // Run 68000 for one scanline worth of cycles (~640)
         const targetCycles = m68kCycles + M68K_CYCLES_PER_SCANLINE;
         while (m68kCycles < targetCycles) {
           m68kCycles += this.m68000.step();
@@ -519,11 +539,9 @@ export class Emulator {
         if (this.isQSound) {
           let z80Done = 0;
           try {
-            while (z80Done < z80CyclesPerScanline) {
+            while (z80Done < Z80_CYCLES_PER_SCANLINE) {
               const cyc = this.z80.step();
               z80Done += cyc;
-
-              // 250Hz periodic IRQ timer (edge-triggered pulse)
               this.qsIrqAccum += cyc;
               if (this.qsIrqAccum >= Z80_CYCLES_PER_IRQ_QS) {
                 this.qsIrqAccum -= Z80_CYCLES_PER_IRQ_QS;
@@ -544,71 +562,55 @@ export class Emulator {
         console.error(`M68000 error #${this.m68kErrorCount} at frame ${this.frameCount}:`, e);
       }
     }
+  }
 
+  /** Generate audio samples for one frame (QSound or standard YM2151+OKI path). */
+  private generateAudio(): void {
     if (this.isQSound) {
-      // ── QSound audio: generate samples and push to output ────────────
       if (this.qsound && this.audioOutput.isInitialized()) {
-        const qsSamplesPerFrame = Math.ceil(QSOUND_SAMPLE_RATE / FRAME_RATE);
-        if (this.qsBufferL.length < qsSamplesPerFrame) {
-          this.qsBufferL = new Float32Array(qsSamplesPerFrame * 2);
-          this.qsBufferR = new Float32Array(qsSamplesPerFrame * 2);
-        }
-        this.qsound.generateSamples(this.qsBufferL, this.qsBufferR, qsSamplesPerFrame);
-        this.audioOutput.pushQSoundSamples(this.qsBufferL, this.qsBufferR, qsSamplesPerFrame);
+        this.qsound.generateSamples(this.qsBufferL, this.qsBufferR, QS_SAMPLES_PER_FRAME);
+        this.audioOutput.pushQSoundSamples(this.qsBufferL, this.qsBufferR, QS_SAMPLES_PER_FRAME);
       }
-    } else {
-      // ── Standard CPS1 audio path ────────────────────────────────────
+      return;
+    }
 
-      // Advance sound latch queue
-      this.z80Bus.advanceSoundLatch();
-
-      // Run Z80 with interleaved YM2151 clocking.
-      // Prescale of 2: one OPM_Clock = 2 Z80 T-states.
-      let z80Cycles = 0;
-      let opmAccum = 0;
-      try {
-        while (z80Cycles < Z80_CYCLES_PER_FRAME) {
-          const cyc = this.z80.step();
-          z80Cycles += cyc;
-          opmAccum += cyc;
-          const opmClocks = opmAccum >> 1;
-          opmAccum &= 1;
-          if (opmClocks > 0) {
-            this.ym2151.clockCycles(opmClocks);
-          }
-        }
-      } catch (e) {
-        this.z80ErrorCount++;
-        if (this.z80ErrorCount <= 5 || this.z80ErrorCount % 600 === 0) {
-          console.error(`Z80 error #${this.z80ErrorCount} at frame ${this.frameCount}:`, e);
+    // Standard CPS1: run Z80 full frame with interleaved YM2151 clocking
+    this.z80Bus.advanceSoundLatch();
+    let z80Cycles = 0;
+    let opmAccum = 0;
+    try {
+      while (z80Cycles < Z80_CYCLES_PER_FRAME) {
+        const cyc = this.z80.step();
+        z80Cycles += cyc;
+        opmAccum += cyc;
+        const opmClocks = opmAccum >> 1;
+        opmAccum &= 1;
+        if (opmClocks > 0) {
+          this.ym2151.clockCycles(opmClocks);
         }
       }
-
-      // Generate audio samples
-      {
-        const ymSamplesPerFrame = Math.ceil(this.ym2151.getSampleRate() / FRAME_RATE);
-        this.ym2151.generateSamples(this.ymBufferL, this.ymBufferR, ymSamplesPerFrame);
-
-        let okiSamplesPerFrame = 0;
-        if (this.oki6295 !== null) {
-          okiSamplesPerFrame = Math.ceil(this.oki6295.getSampleRate() / FRAME_RATE);
-          this.oki6295.generateSamples(this.okiBuffer, okiSamplesPerFrame);
-        }
-
-        if (this.audioOutput.isInitialized()) {
-          this.audioOutput.pushEmulatorSamples(
-            this.ymBufferL, this.ymBufferR, ymSamplesPerFrame,
-            this.okiBuffer, okiSamplesPerFrame,
-          );
-        }
+    } catch (e) {
+      this.z80ErrorCount++;
+      if (this.z80ErrorCount <= 5 || this.z80ErrorCount % 600 === 0) {
+        console.error(`Z80 error #${this.z80ErrorCount} at frame ${this.frameCount}:`, e);
       }
     }
 
-    this.frameCount++;
+    this.ym2151.generateSamples(this.ymBufferL, this.ymBufferR, YM_SAMPLES_PER_FRAME);
+    let okiSamplesThisFrame = 0;
+    if (this.oki6295 !== null) {
+      okiSamplesThisFrame = OKI_SAMPLES_PER_FRAME;
+      this.oki6295.generateSamples(this.okiBuffer, okiSamplesThisFrame);
+    }
+    if (this.audioOutput.isInitialized()) {
+      this.audioOutput.pushEmulatorSamples(
+        this.ymBufferL, this.ymBufferR, YM_SAMPLES_PER_FRAME,
+        this.okiBuffer, okiSamplesThisFrame,
+      );
+    }
+  }
 
-    const tCpu1 = performance.now();
-
-    // 7. FPS counter
+  private updateFps(): void {
     const now = performance.now();
     this.fpsFrames++;
     if (now - this.fpsLastTime >= 1000) {
@@ -616,19 +618,17 @@ export class Emulator {
       this.fpsFrames = 0;
       this.fpsLastTime = now;
     }
-
-    // 8. Render the frame
-    const t0 = performance.now();
-    this.renderFrame();
-    const t1 = performance.now();
   }
 
   private renderFrame(): void {
+    if (this._customRenderCallback) {
+      this._customRenderCallback();
+      return;
+    }
     if (this.video) {
       this.video.renderFrame(this.framebuffer);
     }
     this.renderer.render(this.framebuffer);
-    // FPS overlay on canvas
     this.renderer.drawText(`${this.fpsDisplay} FPS`, 384 - 60, 12);
   }
 }

@@ -7,8 +7,9 @@
  */
 
 import { SCREEN_WIDTH, SCREEN_HEIGHT, FRAMEBUFFER_SIZE } from './renderer';
+import type { RendererInterface } from '../types';
 
-export class WebGLRenderer {
+export class WebGLRenderer implements RendererInterface {
   private readonly canvas: HTMLCanvasElement;
   private readonly gl: WebGL2RenderingContext;
   private readonly texture: WebGLTexture;

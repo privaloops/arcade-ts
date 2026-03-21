@@ -18,14 +18,7 @@
 // Constants
 // ---------------------------------------------------------------------------
 
-/** Native YM2151 sample rate (OPM clock / 64) */
-const YM2151_SAMPLE_RATE = 55930;
-
-/** Native OKI6295 sample rate */
-const OKI6295_SAMPLE_RATE = 7575;
-
-/** QSound sample rate: 60 MHz / 2 / 1248 */
-const QSOUND_SAMPLE_RATE = 24038;
+import { YM2151_SAMPLE_RATE, OKI6295_SAMPLE_RATE, QSOUND_SAMPLE_RATE } from '../constants';
 
 /** Ring buffer capacity in stereo sample pairs */
 const RING_BUFFER_SAMPLES = 4096;
@@ -589,8 +582,3 @@ export class AudioOutput {
 
 }
 
-// ---------------------------------------------------------------------------
-// Re-export native rates as constants (useful for callers)
-// ---------------------------------------------------------------------------
-
-export { YM2151_SAMPLE_RATE, OKI6295_SAMPLE_RATE };

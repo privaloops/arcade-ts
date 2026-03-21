@@ -9,7 +9,6 @@ import { CPS1_PARENT_GAMES, ROT270_GAMES } from "./game-catalog";
 import { FrameStateExtractor } from "./video/frame-state";
 import { SpriteSheetManager } from "./video/sprite-sheet";
 import { GameScreen } from "./video/GameScreen";
-import type { CPS1Video } from "./video/cps1-video";
 
 function getElement<T extends HTMLElement>(id: string): T {
   const el = document.getElementById(id);
@@ -30,6 +29,28 @@ function getRendererMode(): "canvas" | "dom" {
   return checked?.value === "dom" ? "dom" : "canvas";
 }
 
+/** Set up or re-create the DOM renderer using emulator public API. */
+function setupDomRenderer(): void {
+  const videoConfig = emulator.getVideoConfig();
+  const video = emulator.getVideo();
+  if (!videoConfig || !video) return;
+
+  const bufs = emulator.getBusBuffers();
+  const sheets = new SpriteSheetManager(videoConfig.graphicsRom);
+  const extractor = new FrameStateExtractor(
+    bufs.vram, bufs.cpsaRegs, bufs.cpsbRegs,
+    { layerControl: videoConfig.layerCtrlOffset, paletteControl: 0x30, priority: [0,0,0,0],
+      layerEnableMask: [videoConfig.enableScroll1, videoConfig.enableScroll2, videoConfig.enableScroll3, 0, 0],
+      idOffset: -1, idValue: 0 },
+    { ranges: videoConfig.mapperTable, bankSizes: videoConfig.bankSizes },
+  );
+  gameScreen = new GameScreen(domScreen);
+  gameScreen.setComponents(video, extractor, sheets, bufs.vram);
+  resizeDomScreen();
+  emulator.setVblankCallback(() => extractor.bufferSprites());
+  emulator.setRenderCallback(() => { gameScreen?.updateFrame(); });
+}
+
 // Listen for renderer toggle changes during gameplay
 document.querySelectorAll<HTMLInputElement>('input[name="renderer"]').forEach(radio => {
   radio.addEventListener("change", () => {
@@ -38,43 +59,13 @@ document.querySelectorAll<HTMLInputElement>('input[name="renderer"]').forEach(ra
     if (mode === "dom") {
       canvas.style.visibility = "hidden";
       domScreen.style.display = "block";
-      // Set up DOM renderer if not already
-      if (!gameScreen) {
-        const internals = emulator as unknown as {
-          bus: { getVram(): Uint8Array; getCpsaRegisters(): Uint8Array; getCpsbRegisters(): Uint8Array };
-          video: import("./video/cps1-video").CPS1Video;
-        };
-        const video = internals.video;
-        const videoInt = video as unknown as {
-          graphicsRom: Uint8Array;
-          mapperTable: Array<{ type: number; start: number; end: number; bank: number }>;
-          bankSizes: number[];
-          layerCtrlOffset: number;
-          enableScroll1: number; enableScroll2: number; enableScroll3: number;
-        };
-        const sheets = new SpriteSheetManager(videoInt.graphicsRom);
-        const extractor = new FrameStateExtractor(
-          internals.bus.getVram(), internals.bus.getCpsaRegisters(), internals.bus.getCpsbRegisters(),
-          { layerControl: videoInt.layerCtrlOffset, paletteControl: 0x30, priority: [0,0,0,0],
-            layerEnableMask: [videoInt.enableScroll1, videoInt.enableScroll2, videoInt.enableScroll3, 0, 0],
-            idOffset: -1, idValue: 0 },
-          { ranges: videoInt.mapperTable, bankSizes: videoInt.bankSizes as [number, number, number, number] },
-        );
-        gameScreen = new GameScreen(domScreen);
-        gameScreen.setComponents(video, extractor, sheets, internals.bus.getVram());
-        resizeDomScreen();
-        emulator.setVblankCallback(() => extractor.bufferSprites());
-      }
-      (emulator as unknown as { renderFrame: () => void }).renderFrame = () => {
-        gameScreen?.updateFrame();
-      };
+      if (!gameScreen) setupDomRenderer();
+      else emulator.setRenderCallback(() => { gameScreen?.updateFrame(); });
     } else {
       domScreen.style.display = "none";
       canvas.style.visibility = "visible";
       emulator.setVblankCallback(null);
-      // Restore canvas renderFrame
-      const orig = Emulator.prototype as unknown as { renderFrame: () => void };
-      (emulator as unknown as { renderFrame: () => void }).renderFrame = orig.renderFrame.bind(emulator);
+      emulator.setRenderCallback(null);
     }
     setStatus(`Renderer: ${mode}`);
   });
@@ -262,40 +253,10 @@ async function handleRomFile(file: File): Promise<void> {
 
     const mode = getRendererMode();
     if (mode === "dom") {
-      // DOM renderer: hook into emulator internals
       canvas.style.visibility = "hidden";
       domScreen.style.display = "block";
-      const internals = emulator as unknown as {
-        bus: { getVram(): Uint8Array; getCpsaRegisters(): Uint8Array; getCpsbRegisters(): Uint8Array };
-        video: CPS1Video;
-      };
-      const video = internals.video;
-      const videoInt = video as unknown as {
-        graphicsRom: Uint8Array;
-        mapperTable: Array<{ type: number; start: number; end: number; bank: number }>;
-        bankSizes: number[];
-        layerCtrlOffset: number;
-        enableScroll1: number;
-        enableScroll2: number;
-        enableScroll3: number;
-      };
-      const sheets = new SpriteSheetManager(videoInt.graphicsRom);
-      const extractor = new FrameStateExtractor(
-        internals.bus.getVram(), internals.bus.getCpsaRegisters(), internals.bus.getCpsbRegisters(),
-        { layerControl: videoInt.layerCtrlOffset, paletteControl: 0x30, priority: [0,0,0,0],
-          layerEnableMask: [videoInt.enableScroll1, videoInt.enableScroll2, videoInt.enableScroll3, 0, 0],
-          idOffset: -1, idValue: 0 },
-        { ranges: videoInt.mapperTable, bankSizes: videoInt.bankSizes as [number, number, number, number] },
-      );
-      gameScreen = new GameScreen(domScreen);
-      gameScreen.setComponents(video, extractor, sheets, internals.bus.getVram());
-      resizeDomScreen();
-      emulator.setVblankCallback(() => extractor.bufferSprites());
-      (emulator as unknown as { renderFrame: () => void }).renderFrame = () => {
-        gameScreen?.updateFrame();
-      };
+      setupDomRenderer();
     } else {
-      // Canvas renderer (default)
       canvas.style.visibility = "visible";
       domScreen.style.display = "none";
     }

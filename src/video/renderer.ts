@@ -10,11 +10,11 @@
  * WebGPU renderer (Phase 6) will replace this; keep the same interface.
  */
 
-export const SCREEN_WIDTH = 384;
-export const SCREEN_HEIGHT = 224;
-export const FRAMEBUFFER_SIZE = SCREEN_WIDTH * SCREEN_HEIGHT * 4; // RGBA bytes
+import type { RendererInterface } from '../types';
+import { SCREEN_WIDTH, SCREEN_HEIGHT, FRAMEBUFFER_SIZE } from '../constants';
+export { SCREEN_WIDTH, SCREEN_HEIGHT, FRAMEBUFFER_SIZE } from '../constants';
 
-export class Renderer {
+export class Renderer implements RendererInterface {
   private readonly canvas: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D;
   private readonly imageData: ImageData;

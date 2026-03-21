@@ -89,9 +89,11 @@ export class EEPROM93C46 {
         this.do_ = (this.readData >> (15 - this.readBitPos)) & 1;
         this.readBitPos++;
         if (this.readBitPos >= 16) {
+          // All bits clocked out. Stay in read state until CS deassert
+          // so the host can still sample the last bit. DO stays as bit 0.
           this.state = 'idle';
           this.bitCount = 0;
-          this.do_ = 1;
+          // Don't overwrite do_ — the host needs to read bit 0
         }
         break;
 

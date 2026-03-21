@@ -7,6 +7,7 @@
  */
 
 import type { CpsBConfig, GfxMapperConfig } from '../memory/rom-loader';
+import { SCREEN_WIDTH, SCREEN_HEIGHT } from '../constants';
 
 // ---------------------------------------------------------------------------
 // Public interfaces
@@ -57,11 +58,9 @@ export interface FrameState {
 }
 
 // ---------------------------------------------------------------------------
-// Constants (must match cps1-video.ts)
+// Constants (shared via constants.ts, others local)
 // ---------------------------------------------------------------------------
 
-const SCREEN_WIDTH = 384;
-const SCREEN_HEIGHT = 224;
 const CPS_HBEND = 64;
 const CPS_VBEND = 16;
 const VRAM_SIZE = 0x30000;
