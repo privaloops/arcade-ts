@@ -421,6 +421,9 @@ export class Emulator {
     };
   }
 
+  /** Expose InputManager for gamepad config UI. */
+  getInputManager(): InputManager { return this.input; }
+
   /** Debug: expose YM2151 for audio testing */
   getYm2151(): NukedOPMWasm { return this.ym2151; }
 
@@ -511,7 +514,7 @@ export class Emulator {
   private fpsDisplay = 0;
 
   private runOneFrame(): void {
-    this.input.updateBusPorts(this.bus.getIoPorts());
+    this.input.updateBusPorts(this.bus.getIoPorts(), this.bus.getCpsbRegisters());
     this.runCpuFrame();
     this.generateAudio();
     this.frameCount++;

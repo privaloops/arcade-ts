@@ -48,7 +48,7 @@
       }
 
       header h1 {
-        font-size: 1.4rem;
+        font-size: 2rem;
         letter-spacing: 0.3em;
         text-transform: uppercase;
         color: #e8003c;
@@ -56,18 +56,18 @@
       }
 
       header p {
-        font-size: 0.7rem;
-        color: #aaa;
+        font-size: 1rem;
+        color: #ccc;
         letter-spacing: 0.15em;
-        margin-top: 4px;
+        margin-top: 6px;
       }
 
       #renderer-toggle {
-        margin-top: 6px;
-        font-size: 0.65rem;
-        color: #888;
+        margin-top: 8px;
+        font-size: 0.95rem;
+        color: #bbb;
         display: flex;
-        gap: 12px;
+        gap: 16px;
         justify-content: center;
       }
 
@@ -222,31 +222,31 @@
       }
 
       #drop-zone .label {
-        font-size: 0.85rem;
+        font-size: 1.2rem;
         letter-spacing: 0.15em;
-        color: #ccc;
+        color: #eee;
         text-transform: uppercase;
       }
 
       #drop-zone .sublabel {
-        font-size: 0.65rem;
-        color: #aaa;
+        font-size: 0.95rem;
+        color: #ccc;
         letter-spacing: 0.1em;
       }
 
       #drop-zone .format {
-        font-size: 0.6rem;
-        color: #e8003c;
+        font-size: 0.9rem;
+        color: #ff1a50;
         letter-spacing: 0.1em;
-        margin-top: 4px;
+        margin-top: 6px;
       }
 
       #drop-zone .games {
-        font-size: 0.55rem;
-        color: #999;
-        max-width: 80%;
+        font-size: 0.85rem;
+        color: #bbb;
+        max-width: 85%;
         text-align: center;
-        line-height: 1.6;
+        line-height: 1.8;
       }
 
       #file-input {
@@ -254,25 +254,25 @@
       }
 
       #status {
-        font-size: 0.7rem;
-        color: #aaa;
+        font-size: 1rem;
+        color: #ccc;
         letter-spacing: 0.1em;
-        min-height: 1em;
+        min-height: 1.2em;
         text-align: center;
       }
 
       #gamepad-status {
-        color: #0c0;
+        color: #0f0;
         margin-left: 8px;
       }
 
       /* Controls reference — shown when game is running */
       #controls {
         display: none;
-        font-size: 0.65rem;
-        color: #bbb;
+        font-size: 0.95rem;
+        color: #ddd;
         text-align: center;
-        line-height: 1.8;
+        line-height: 2;
         letter-spacing: 0.05em;
       }
 
@@ -282,10 +282,10 @@
 
       #controls kbd {
         display: inline-block;
-        border: 1px solid #666;
+        border: 1px solid #888;
         border-radius: 3px;
-        padding: 0 4px;
-        color: #eee;
+        padding: 1px 6px;
+        color: #fff;
         font-family: inherit;
         font-size: inherit;
         line-height: 1.6;
@@ -309,9 +309,9 @@
       /* Mobile: smaller controls */
       @media (max-width: 500px) {
         #app { padding: 8px; gap: 10px; }
-        header h1 { font-size: 1.1rem; }
-        header p { font-size: 0.6rem; }
-        #controls { font-size: 0.55rem; }
+        header h1 { font-size: 1.5rem; }
+        header p { font-size: 0.85rem; }
+        #controls { font-size: 0.85rem; }
         #legal { display: none; }
       }
 
@@ -325,7 +325,139 @@
           width: auto;
           aspect-ratio: 384 / 224;
         }
-        #status { font-size: 0.6rem; }
+        #status { font-size: 0.85rem; }
+      }
+      /* Gamepad config modal */
+      #gamepad-modal-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,0.9);
+        z-index: 10000;
+        align-items: center;
+        justify-content: center;
+      }
+
+      #gamepad-modal-overlay.open {
+        display: flex;
+      }
+
+      #gamepad-modal {
+        background: #181818;
+        border: 1px solid #444;
+        border-radius: 8px;
+        padding: 28px 32px;
+        max-width: 500px;
+        width: 94%;
+        font-family: "Courier New", Courier, monospace;
+        color: #f0f0f0;
+      }
+
+      #gamepad-modal h2 {
+        font-size: 1.4rem;
+        color: #ff1a50;
+        text-transform: uppercase;
+        letter-spacing: 0.15em;
+        margin-bottom: 20px;
+        text-align: center;
+      }
+
+      #gamepad-modal .gp-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 10px 0;
+        border-bottom: 1px solid #333;
+      }
+
+      #gamepad-modal .gp-label {
+        font-size: 1.1rem;
+        font-weight: bold;
+        color: #f0f0f0;
+        min-width: 100px;
+      }
+
+      #gamepad-modal .gp-right {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      #gamepad-modal .gp-btn {
+        background: #222;
+        border: 1px solid #555;
+        color: #ff1a50;
+        font-family: inherit;
+        font-size: 1rem;
+        font-weight: bold;
+        padding: 8px 18px;
+        cursor: pointer;
+        min-width: 80px;
+        text-align: center;
+        border-radius: 4px;
+      }
+
+      #gamepad-modal .gp-btn:hover {
+        border-color: #ff1a50;
+        background: #2a2a2a;
+      }
+
+      #gamepad-modal .gp-btn.listening {
+        color: #ff0;
+        border-color: #ff0;
+        animation: blink 0.6s infinite;
+      }
+
+      @keyframes blink {
+        50% { opacity: 0.4; }
+      }
+
+      /* Autofire toggle */
+      #gamepad-modal .gp-autofire {
+        font-size: 0.95rem;
+        font-weight: bold;
+        color: #999;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        user-select: none;
+      }
+
+      #gamepad-modal .gp-autofire input {
+        accent-color: #ff1a50;
+        width: 16px;
+        height: 16px;
+        cursor: pointer;
+      }
+
+      #gamepad-modal .gp-autofire.active {
+        color: #ff1a50;
+      }
+
+      #gamepad-modal .gp-actions {
+        display: flex;
+        gap: 12px;
+        justify-content: center;
+        margin-top: 22px;
+      }
+
+      #gamepad-modal .gp-actions button {
+        background: #222;
+        border: 1px solid #555;
+        color: #f0f0f0;
+        font-family: inherit;
+        font-size: 1rem;
+        font-weight: bold;
+        padding: 10px 22px;
+        cursor: pointer;
+        letter-spacing: 0.05em;
+        border-radius: 4px;
+      }
+
+      #gamepad-modal .gp-actions button:hover {
+        border-color: #ff1a50;
+        color: #ff1a50;
       }
     </style>
   </head>
@@ -354,11 +486,11 @@
         <input type="file" id="file-input" accept=".zip" />
       </div>
 
-      <div id="rom-controls" style="display:flex;gap:8px;align-items:center;justify-content:center;flex-wrap:wrap;">
-        <select id="game-select" style="padding:6px 10px;background:#1a1a1a;color:#e8003c;border:1px solid #333;font-family:inherit;font-size:0.75rem;">
+      <div id="rom-controls" style="display:flex;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap;">
+        <select id="game-select" style="padding:10px 14px;background:#1a1a1a;color:#ff1a50;border:1px solid #555;font-family:inherit;font-size:1rem;border-radius:4px;">
           <option value="">-- Select a CPS1 game --</option>
         </select>
-        <button id="load-btn" style="padding:6px 16px;background:#1a1a1a;color:#e8003c;border:1px solid #333;cursor:pointer;font-family:inherit;font-size:0.8rem;letter-spacing:0.1em;" disabled>LOAD</button>
+        <button id="load-btn" style="padding:10px 22px;background:#1a1a1a;color:#ff1a50;border:1px solid #555;cursor:pointer;font-family:inherit;font-size:1.1rem;font-weight:bold;letter-spacing:0.1em;border-radius:4px;" disabled>LOAD</button>
       </div>
 
       <div id="controls">
@@ -371,6 +503,18 @@
         <kbd>M</kbd> Mute
         <kbd>F</kbd> Fullscreen
         <kbd>Esc</kbd> Quit
+        <button id="config-btn" style="margin-left:10px;background:#1a1a1a;border:1px solid #555;color:#ff1a50;font-family:inherit;font-size:0.95rem;font-weight:bold;padding:4px 12px;cursor:pointer;vertical-align:middle;border-radius:3px;">CONFIG</button>
+      </div>
+
+      <div id="gamepad-modal-overlay">
+        <div id="gamepad-modal">
+          <h2>Gamepad Config (P1)</h2>
+          <div id="gp-mapping-list"></div>
+          <div class="gp-actions">
+            <button id="gp-reset-btn">RESET</button>
+            <button id="gp-close-btn">CLOSE</button>
+          </div>
+        </div>
       </div>
 
       <p id="status"><span id="gamepad-status"></span></p>

@@ -9,6 +9,7 @@ import { CPS1_PARENT_GAMES, ROT270_GAMES } from "./game-catalog";
 import { FrameStateExtractor } from "./video/frame-state";
 import { SpriteSheetManager } from "./video/sprite-sheet";
 import { GameScreen } from "./video/GameScreen";
+import { DEFAULT_GP_MAPPING, type GamepadMapping, type AutofireKey } from "./input/input";
 
 function getElement<T extends HTMLElement>(id: string): T {
   const el = document.getElementById(id);
@@ -329,5 +330,171 @@ loadBtn.addEventListener("click", async () => {
     setStatus(`Download failed: ${msg}`);
     loadBtn.disabled = false;
   }
+});
+
+// ── Gamepad config modal ──────────────────────────────────────────────────────
+
+const configBtn = getElement<HTMLButtonElement>("config-btn");
+const gpOverlay = getElement<HTMLDivElement>("gamepad-modal-overlay");
+const gpMappingList = getElement<HTMLDivElement>("gp-mapping-list");
+const gpResetBtn = getElement<HTMLButtonElement>("gp-reset-btn");
+const gpCloseBtn = getElement<HTMLButtonElement>("gp-close-btn");
+
+const GP_BUTTON_NAMES: Record<number, string> = {
+  0: "A", 1: "B", 2: "X", 3: "Y",
+  4: "LB", 5: "RB", 6: "LT", 7: "RT",
+  8: "Select", 9: "Start", 10: "L3", 11: "R3",
+  12: "D-Up", 13: "D-Down", 14: "D-Left", 15: "D-Right",
+  16: "Home",
+};
+
+function gpBtnName(index: number): string {
+  return GP_BUTTON_NAMES[index] ?? `Btn ${index}`;
+}
+
+type MappingKey = keyof GamepadMapping;
+
+const GP_CONFIG_ROWS: { key: MappingKey; label: string }[] = [
+  { key: "button1", label: "Button 1" },
+  { key: "button2", label: "Button 2" },
+  { key: "button3", label: "Button 3" },
+  { key: "button4", label: "Button 4" },
+  { key: "button5", label: "Button 5" },
+  { key: "button6", label: "Button 6" },
+  { key: "start",   label: "Start" },
+  { key: "coin",    label: "Coin" },
+];
+
+let listeningKey: MappingKey | null = null;
+let listeningBtn: HTMLButtonElement | null = null;
+let listenRafId = 0;
+
+const AUTOFIRE_ELIGIBLE: Set<string> = new Set(["button1", "button2", "button3", "button4", "button5", "button6"]);
+
+function renderGpModal(): void {
+  const input = emulator.getInputManager();
+  const mapping = input.getGamepadMapping(0);
+  const autofireFlags = input.getAutofireFlags(0);
+  gpMappingList.innerHTML = "";
+
+  for (const row of GP_CONFIG_ROWS) {
+    const div = document.createElement("div");
+    div.className = "gp-row";
+
+    const label = document.createElement("span");
+    label.className = "gp-label";
+    label.textContent = row.label;
+
+    const right = document.createElement("div");
+    right.className = "gp-right";
+
+    const btn = document.createElement("button");
+    btn.className = "gp-btn";
+    btn.textContent = gpBtnName(mapping[row.key]);
+    btn.addEventListener("click", () => startListening(row.key, btn));
+    right.appendChild(btn);
+
+    // Autofire checkbox (only for action buttons)
+    if (AUTOFIRE_ELIGIBLE.has(row.key)) {
+      const afKey = row.key as AutofireKey;
+      const afLabel = document.createElement("label");
+      afLabel.className = "gp-autofire" + (autofireFlags.has(afKey) ? " active" : "");
+
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.checked = autofireFlags.has(afKey);
+      cb.addEventListener("change", () => {
+        input.setAutofire(0, afKey, cb.checked);
+        afLabel.classList.toggle("active", cb.checked);
+      });
+
+      afLabel.appendChild(cb);
+      afLabel.appendChild(document.createTextNode("AUTO"));
+      right.appendChild(afLabel);
+    }
+
+    div.appendChild(label);
+    div.appendChild(right);
+    gpMappingList.appendChild(div);
+  }
+}
+
+function startListening(key: MappingKey, btn: HTMLButtonElement): void {
+  // Cancel previous listening
+  if (listeningBtn) listeningBtn.classList.remove("listening");
+  cancelAnimationFrame(listenRafId);
+
+  listeningKey = key;
+  listeningBtn = btn;
+  btn.textContent = "Press...";
+  btn.classList.add("listening");
+
+  // Record which buttons are already pressed so we can ignore them
+  const alreadyPressed = new Set<number>();
+  const gamepads = navigator.getGamepads();
+  for (const gp of gamepads) {
+    if (!gp) continue;
+    for (let i = 0; i < gp.buttons.length; i++) {
+      if (gp.buttons[i]!.pressed) alreadyPressed.add(i);
+    }
+  }
+
+  function poll(): void {
+    const gamepads = navigator.getGamepads();
+    for (const gp of gamepads) {
+      if (!gp) continue;
+      for (let i = 0; i < gp.buttons.length; i++) {
+        if (gp.buttons[i]!.pressed && !alreadyPressed.has(i)) {
+          captureButton(i);
+          return;
+        }
+      }
+    }
+    listenRafId = requestAnimationFrame(poll);
+  }
+  listenRafId = requestAnimationFrame(poll);
+}
+
+function captureButton(index: number): void {
+  if (!listeningKey || !listeningBtn) return;
+
+  const input = emulator.getInputManager();
+  const mapping = input.getGamepadMapping(0);
+  mapping[listeningKey] = index;
+  input.setGamepadMapping(0, mapping);
+
+  listeningBtn.textContent = gpBtnName(index);
+  listeningBtn.classList.remove("listening");
+  listeningKey = null;
+  listeningBtn = null;
+}
+
+function openGpModal(): void {
+  renderGpModal();
+  gpOverlay.classList.add("open");
+}
+
+function closeGpModal(): void {
+  if (listeningBtn) listeningBtn.classList.remove("listening");
+  cancelAnimationFrame(listenRafId);
+  listeningKey = null;
+  listeningBtn = null;
+  gpOverlay.classList.remove("open");
+}
+
+configBtn.addEventListener("click", openGpModal);
+gpCloseBtn.addEventListener("click", closeGpModal);
+gpOverlay.addEventListener("click", (e) => {
+  if (e.target === gpOverlay) closeGpModal();
+});
+
+gpResetBtn.addEventListener("click", () => {
+  const input = emulator.getInputManager();
+  input.setGamepadMapping(0, { ...DEFAULT_GP_MAPPING });
+  // Clear all autofire flags
+  for (const key of AUTOFIRE_ELIGIBLE) {
+    input.setAutofire(0, key as AutofireKey, false);
+  }
+  renderGpModal();
 });
 

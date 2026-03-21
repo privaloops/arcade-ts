@@ -83,20 +83,46 @@ const DEFAULT_P2_MAPPING: KeyMapping = {
   coin: "Digit6",
 };
 
-// ── Standard gamepad button indices (W3C Standard Gamepad) ──────────────────
+// ── Gamepad mapping types ────────────────────────────────────────────────────
 
-const GP_DPAD_UP = 12;
-const GP_DPAD_DOWN = 13;
-const GP_DPAD_LEFT = 14;
-const GP_DPAD_RIGHT = 15;
-const GP_BUTTON_A = 0;   // LP
-const GP_BUTTON_B = 1;   // MP
-const GP_BUTTON_X = 2;   // HP
-const GP_BUTTON_Y = 3;   // LK
-const GP_BUTTON_LB = 4;  // MK
-const GP_BUTTON_RB = 5;  // HK
-const GP_START = 9;
-const GP_SELECT = 8;     // Coin
+export interface GamepadMapping {
+  up: number;
+  down: number;
+  left: number;
+  right: number;
+  button1: number;  // LP
+  button2: number;  // MP
+  button3: number;  // HP
+  button4: number;  // LK
+  button5: number;  // MK
+  button6: number;  // HK
+  start: number;
+  coin: number;
+}
+
+export type AutofireKey = "button1" | "button2" | "button3" | "button4" | "button5" | "button6";
+const AUTOFIRE_KEYS: AutofireKey[] = ["button1", "button2", "button3", "button4", "button5", "button6"];
+const AUTOFIRE_STORAGE_P1 = "cps1-autofire-p1";
+const AUTOFIRE_STORAGE_P2 = "cps1-autofire-p2";
+const AUTOFIRE_PERIOD = 2; // toggle every N frames (~30Hz at 60fps)
+
+export const DEFAULT_GP_MAPPING: GamepadMapping = {
+  up: 12,       // D-pad Up
+  down: 13,     // D-pad Down
+  left: 14,     // D-pad Left
+  right: 15,    // D-pad Right
+  button1: 0,   // A → LP
+  button2: 1,   // B → MP
+  button3: 2,   // X → HP
+  button4: 3,   // Y → LK
+  button5: 4,   // LB → MK
+  button6: 5,   // RB → HK
+  start: 9,     // Start
+  coin: 8,      // Select → Coin
+};
+
+const GP_STORAGE_KEY_P1 = "cps1-gamepad-p1";
+const GP_STORAGE_KEY_P2 = "cps1-gamepad-p2";
 
 // Axis threshold for analog sticks used as d-pad
 const AXIS_THRESHOLD = 0.5;
@@ -106,6 +132,9 @@ const AXIS_THRESHOLD = 0.5;
 export class InputManager {
   private keyState: Set<string> = new Set();
   private mappings: [KeyMapping, KeyMapping];
+  private gamepadMappings: [GamepadMapping, GamepadMapping];
+  private autofireFlags: [Set<AutofireKey>, Set<AutofireKey>];
+  private autofireCounter = 0;
   private gamepadIndices: [number | null, number | null] = [null, null];
 
   private boundKeyDown: (e: KeyboardEvent) => void;
@@ -118,6 +147,16 @@ export class InputManager {
     this.mappings = [
       { ...DEFAULT_P1_MAPPING },
       { ...DEFAULT_P2_MAPPING },
+    ];
+
+    this.gamepadMappings = [
+      this.loadGamepadMapping(GP_STORAGE_KEY_P1),
+      this.loadGamepadMapping(GP_STORAGE_KEY_P2),
+    ];
+
+    this.autofireFlags = [
+      this.loadAutofire(AUTOFIRE_STORAGE_P1),
+      this.loadAutofire(AUTOFIRE_STORAGE_P2),
     ];
 
     this.boundKeyDown = this.onKeyDown.bind(this);
@@ -177,23 +216,53 @@ export class InputManager {
   }
 
   /**
+   * Reconfigure gamepad mapping for a player (0 = P1, 1 = P2).
+   * Persists to localStorage.
+   */
+  setGamepadMapping(player: number, mapping: GamepadMapping): void {
+    const idx = player === 1 ? 1 : 0;
+    this.gamepadMappings[idx] = { ...mapping };
+    const key = idx === 0 ? GP_STORAGE_KEY_P1 : GP_STORAGE_KEY_P2;
+    try { localStorage.setItem(key, JSON.stringify(mapping)); } catch { /* quota */ }
+  }
+
+  /**
+   * Get current gamepad mapping for a player.
+   */
+  getGamepadMapping(player: number): GamepadMapping {
+    return { ...this.gamepadMappings[player === 1 ? 1 : 0] };
+  }
+
+  /**
+   * Set autofire state for a button.
+   */
+  setAutofire(player: number, key: AutofireKey, enabled: boolean): void {
+    const idx = player === 1 ? 1 : 0;
+    if (enabled) {
+      this.autofireFlags[idx].add(key);
+    } else {
+      this.autofireFlags[idx].delete(key);
+    }
+    const storageKey = idx === 0 ? AUTOFIRE_STORAGE_P1 : AUTOFIRE_STORAGE_P2;
+    try { localStorage.setItem(storageKey, JSON.stringify([...this.autofireFlags[idx]])); } catch { /* quota */ }
+  }
+
+  /**
+   * Get autofire flags for a player.
+   */
+  getAutofireFlags(player: number): Set<AutofireKey> {
+    return new Set(this.autofireFlags[player === 1 ? 1 : 0]);
+  }
+
+  /**
    * Update all I/O port bytes on the bus in one call.
    * Call this once per frame before the 68000 runs.
    */
-  updateBusPorts(ioPorts: Uint8Array): void {
-    // Bus layout (matching MAME cps1.cpp):
-    //   0x800000-0x800007 = IN1 → ioPorts[0..7]
-    //     byte 0: P1 directions + buttons 1-3
-    //     byte 1: P1 buttons 4-6
-    //     byte 2: P2 directions + buttons 1-3
-    //     byte 3: P2 buttons 4-6
-    //   0x800018-0x80001F = system/DIP → ioPorts[8..15]
-    //     byte 8: coins, starts, service
-
+  updateBusPorts(ioPorts: Uint8Array, cpsbRegs?: Uint8Array): void {
+    this.autofireCounter++;
     // IN1 at 0x800000-0x800007 (MAME: map(0x800000, 0x800007).portr("IN1"))
-    // IN1 is a 16-bit port: P1 = bits 0-7 (low byte), P2 = bits 8-15 (high byte)
-    // 68000 big-endian: byte at even address = high byte, odd = low byte
-    // MAME mirrors the same 16-bit value across all 4 word positions.
+    // 16-bit port: P2 = high byte (even addr), P1 = low byte (odd addr)
+    // Mirrored across 4 word positions.
     const p2Lo = this.readPort(2); // P2 directions + buttons 1-3
     const p1Lo = this.readPort(0); // P1 directions + buttons 1-3
     ioPorts[0] = p2Lo;  // 0x800000 (high byte = P2)
@@ -206,9 +275,17 @@ export class InputManager {
     ioPorts[7] = p1Lo;  // 0x800007 mirror
 
     // System inputs at 0x800018 (via cps1_dsw_r):
-    // Returns (IN0 << 8) | 0xFF — IN0 at even address (high byte)
     ioPorts[8] = this.readPort(4);  // coins, starts, service (high byte)
     ioPorts[9] = 0xFF;              // low byte = 0xFF
+
+    // Extra buttons (4-6 / kicks) → CPS-B register at offset 0x36 (addr 0x800176)
+    // MAME: cps1_in2_r / cps_b_r reads this as 16-bit: P2 high | P1 low
+    if (cpsbRegs) {
+      const p1Hi = this.readPort(1); // P1 buttons 4-6
+      const p2Hi = this.readPort(3); // P2 buttons 4-6
+      cpsbRegs[0x36] = p2Hi;  // high byte = P2 kicks
+      cpsbRegs[0x37] = p1Hi;  // low byte = P1 kicks
+    }
   }
 
   /**
@@ -304,44 +381,42 @@ export class InputManager {
 
   // ── Private: read port logic ──────────────────────────────────────────────
 
+  /** Returns true if a button should register as pressed (respects autofire). */
+  private isPressed(player: number, key: AutofireKey, raw: boolean): boolean {
+    if (!raw) return false;
+    if (this.autofireFlags[player === 1 ? 1 : 0].has(key)) {
+      return Math.floor(this.autofireCounter / AUTOFIRE_PERIOD) % 2 === 0;
+    }
+    return true;
+  }
+
   /**
    * Read the low byte of INx (directions + buttons 1-3).
    * Active-LOW: start with 0xFF, clear bits for pressed buttons.
    */
   private readPlayerLow(player: number): number {
     let value = 0xFF;
-    const m = this.mappings[player === 1 ? 1 : 0];
+    const idx = player === 1 ? 1 : 0;
+    const m = this.mappings[idx];
+    const gm = this.gamepadMappings[idx];
     const gp = this.getGamepad(player);
 
-    // Bit 0: Right
-    if (this.keyState.has(m.right) || this.isGamepadRight(gp)) {
-      value &= ~(1 << 0);
-    }
-    // Bit 1: Left
-    if (this.keyState.has(m.left) || this.isGamepadLeft(gp)) {
-      value &= ~(1 << 1);
-    }
-    // Bit 2: Down
-    if (this.keyState.has(m.down) || this.isGamepadDown(gp)) {
-      value &= ~(1 << 2);
-    }
-    // Bit 3: Up
-    if (this.keyState.has(m.up) || this.isGamepadUp(gp)) {
-      value &= ~(1 << 3);
-    }
-    // Bit 4: Button 1 (LP)
-    if (this.keyState.has(m.button1) || this.isGamepadButton(gp, GP_BUTTON_A)) {
+    // Directions (no autofire)
+    if (this.keyState.has(m.right) || this.isGamepadRight(gp, gm)) value &= ~(1 << 0);
+    if (this.keyState.has(m.left) || this.isGamepadLeft(gp, gm))   value &= ~(1 << 1);
+    if (this.keyState.has(m.down) || this.isGamepadDown(gp, gm))   value &= ~(1 << 2);
+    if (this.keyState.has(m.up) || this.isGamepadUp(gp, gm))       value &= ~(1 << 3);
+
+    // Buttons 1-3 (autofire-aware)
+    if (this.isPressed(player, "button1", this.keyState.has(m.button1) || this.isGamepadButton(gp, gm.button1))) {
       value &= ~(1 << 4);
     }
-    // Bit 5: Button 2 (MP)
-    if (this.keyState.has(m.button2) || this.isGamepadButton(gp, GP_BUTTON_B)) {
+    if (this.isPressed(player, "button2", this.keyState.has(m.button2) || this.isGamepadButton(gp, gm.button2))) {
       value &= ~(1 << 5);
     }
-    // Bit 6: Button 3 (HP)
-    if (this.keyState.has(m.button3) || this.isGamepadButton(gp, GP_BUTTON_X)) {
+    if (this.isPressed(player, "button3", this.keyState.has(m.button3) || this.isGamepadButton(gp, gm.button3))) {
       value &= ~(1 << 6);
     }
-    // Bit 7: unused — stays 1
 
     return value;
   }
@@ -352,22 +427,20 @@ export class InputManager {
    */
   private readPlayerHigh(player: number): number {
     let value = 0xFF;
-    const m = this.mappings[player === 1 ? 1 : 0];
+    const idx = player === 1 ? 1 : 0;
+    const m = this.mappings[idx];
+    const gm = this.gamepadMappings[idx];
     const gp = this.getGamepad(player);
 
-    // Bit 0: Button 4 (LK)
-    if (this.keyState.has(m.button4) || this.isGamepadButton(gp, GP_BUTTON_Y)) {
+    if (this.isPressed(player, "button4", this.keyState.has(m.button4) || this.isGamepadButton(gp, gm.button4))) {
       value &= ~(1 << 0);
     }
-    // Bit 1: Button 5 (MK)
-    if (this.keyState.has(m.button5) || this.isGamepadButton(gp, GP_BUTTON_LB)) {
+    if (this.isPressed(player, "button5", this.keyState.has(m.button5) || this.isGamepadButton(gp, gm.button5))) {
       value &= ~(1 << 1);
     }
-    // Bit 2: Button 6 (HK)
-    if (this.keyState.has(m.button6) || this.isGamepadButton(gp, GP_BUTTON_RB)) {
+    if (this.isPressed(player, "button6", this.keyState.has(m.button6) || this.isGamepadButton(gp, gm.button6))) {
       value &= ~(1 << 2);
     }
-    // Bits 3-7: unused — stay 1
 
     return value;
   }
@@ -382,30 +455,69 @@ export class InputManager {
     // P1 mappings for coin/start P1, P2 mappings for coin/start P2
     const m1 = this.mappings[0];
     const m2 = this.mappings[1];
+    const gm1 = this.gamepadMappings[0];
+    const gm2 = this.gamepadMappings[1];
     const gp1 = this.getGamepad(0);
     const gp2 = this.getGamepad(1);
 
     // Bit 0: Coin 1
-    if (this.keyState.has(m1.coin) || this.isGamepadButton(gp1, GP_SELECT)) {
+    if (this.keyState.has(m1.coin) || this.isGamepadButton(gp1, gm1.coin)) {
       value &= ~(1 << 0);
     }
     // Bit 1: Coin 2
-    if (this.keyState.has(m2.coin) || this.isGamepadButton(gp2, GP_SELECT)) {
+    if (this.keyState.has(m2.coin) || this.isGamepadButton(gp2, gm2.coin)) {
       value &= ~(1 << 1);
     }
     // Bit 2: Service — not mapped
     // Bit 3: Unknown
     // Bit 4: Start 1
-    if (this.keyState.has(m1.start) || this.isGamepadButton(gp1, GP_START)) {
+    if (this.keyState.has(m1.start) || this.isGamepadButton(gp1, gm1.start)) {
       value &= ~(1 << 4);
     }
     // Bit 5: Start 2
-    if (this.keyState.has(m2.start) || this.isGamepadButton(gp2, GP_START)) {
+    if (this.keyState.has(m2.start) || this.isGamepadButton(gp2, gm2.start)) {
       value &= ~(1 << 5);
     }
     // Bits 6-7: unused — stay 1
 
     return value;
+  }
+
+  // ── Private: localStorage helpers ────────────────────────────────────────
+
+  private loadGamepadMapping(key: string): GamepadMapping {
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Record<string, unknown>;
+        // Validate all expected keys are numbers
+        const keys: (keyof GamepadMapping)[] = [
+          "up", "down", "left", "right",
+          "button1", "button2", "button3", "button4", "button5", "button6",
+          "start", "coin",
+        ];
+        for (const k of keys) {
+          if (typeof parsed[k] !== "number") return { ...DEFAULT_GP_MAPPING };
+        }
+        return parsed as unknown as GamepadMapping;
+      }
+    } catch { /* corrupted data */ }
+    return { ...DEFAULT_GP_MAPPING };
+  }
+
+  private loadAutofire(key: string): Set<AutofireKey> {
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        const arr = JSON.parse(raw) as unknown[];
+        const valid = new Set<AutofireKey>();
+        for (const v of arr) {
+          if (AUTOFIRE_KEYS.includes(v as AutofireKey)) valid.add(v as AutofireKey);
+        }
+        return valid;
+      }
+    } catch { /* corrupted data */ }
+    return new Set();
   }
 
   // ── Private: gamepad helpers ──────────────────────────────────────────────
@@ -416,32 +528,30 @@ export class InputManager {
     return btn !== undefined && btn.pressed;
   }
 
-  private isGamepadUp(gp: Gamepad | null): boolean {
+  private isGamepadUp(gp: Gamepad | null, gm: GamepadMapping): boolean {
     if (gp === null) return false;
-    // D-pad button
-    if (this.isGamepadButton(gp, GP_DPAD_UP)) return true;
-    // Left stick Y axis (negative = up)
+    if (this.isGamepadButton(gp, gm.up)) return true;
     const axis = gp.axes[1];
     return axis !== undefined && axis < -AXIS_THRESHOLD;
   }
 
-  private isGamepadDown(gp: Gamepad | null): boolean {
+  private isGamepadDown(gp: Gamepad | null, gm: GamepadMapping): boolean {
     if (gp === null) return false;
-    if (this.isGamepadButton(gp, GP_DPAD_DOWN)) return true;
+    if (this.isGamepadButton(gp, gm.down)) return true;
     const axis = gp.axes[1];
     return axis !== undefined && axis > AXIS_THRESHOLD;
   }
 
-  private isGamepadLeft(gp: Gamepad | null): boolean {
+  private isGamepadLeft(gp: Gamepad | null, gm: GamepadMapping): boolean {
     if (gp === null) return false;
-    if (this.isGamepadButton(gp, GP_DPAD_LEFT)) return true;
+    if (this.isGamepadButton(gp, gm.left)) return true;
     const axis = gp.axes[0];
     return axis !== undefined && axis < -AXIS_THRESHOLD;
   }
 
-  private isGamepadRight(gp: Gamepad | null): boolean {
+  private isGamepadRight(gp: Gamepad | null, gm: GamepadMapping): boolean {
     if (gp === null) return false;
-    if (this.isGamepadButton(gp, GP_DPAD_RIGHT)) return true;
+    if (this.isGamepadButton(gp, gm.right)) return true;
     const axis = gp.axes[0];
     return axis !== undefined && axis > AXIS_THRESHOLD;
   }
