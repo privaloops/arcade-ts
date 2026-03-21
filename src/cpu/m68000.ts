@@ -155,6 +155,8 @@ export class M68000 {
 
   // Address error flag — set during readFromAddr/writeToAddr, checked by step()
   private addressError: boolean = false;
+  // Override for frame PC in data-access address errors (used by MOVE predecrement dest)
+  private addressErrorFramePC: number = -1;
 
   // Instruction tracer
   private _traceLog: string[] = [];
@@ -236,6 +238,7 @@ export class M68000 {
 
     // Reset address error flag
     this.addressError = false;
+    this.addressErrorFramePC = -1;
 
     // Fetch and decode
     this.opcode = this.prefetchRead();
@@ -449,29 +452,47 @@ export class M68000 {
     this.stopped = false;
   }
 
-  private raiseAddressError(address: number, isWrite: boolean = false): void {
+  private raiseAddressError(address: number, isWrite: boolean = false, isInstruction: boolean = false): void {
     const oldSR = this.sr;
     this.setSupervisorMode(true);
     this.sr &= ~(1 << SR_T);
 
     // Address error stack frame (14 bytes, 68000 format):
     // Push order (high addr first):
-    //   PC (long) — PC minus 2 (last prefetch word consumed)
+    //   PC (long)
     //   SR (word) — status before exception
     //   IR (word) — instruction register (current opcode)
     //   Access address (long) — the faulting address
     //   Access info (word) — opcode upper bits + R/W + I/N + function code
-    this.pushLong((this.pc - 2) & 0xFFFFFFFF);
+    let framePC: number;
+    if (isInstruction) {
+      framePC = (address - 4) & 0xFFFFFFFF;
+    } else if (this.addressErrorFramePC >= 0) {
+      framePC = this.addressErrorFramePC;
+      this.addressErrorFramePC = -1;
+    } else {
+      framePC = (this.pc - 2) & 0xFFFFFFFF;
+    }
+    this.pushLong(framePC);
     this.pushWord(oldSR);
     this.pushWord(this.opcode);
     this.pushLong(address);
 
     // Info word: upper 11 bits from opcode, lower 5 bits = R/W + I/N + FC
-    const fc = this.isSupervisor() ? 5 : 1; // supervisor data / user data
+    const sup = (oldSR & 0x2000) !== 0;
+    let fc: number;
+    let inBit: number;
+    if (isInstruction) {
+      fc = sup ? 6 : 2;   // supervisor program / user program
+      inBit = 0x08;        // bit 3: I/N = 1 (instruction)
+    } else {
+      fc = sup ? 5 : 1;   // supervisor data / user data
+      inBit = 0x00;        // bit 3: I/N = 0 (data)
+    }
     const fcWord = (this.opcode & 0xFFE0) |
       (isWrite ? 0 : 0x10) |  // bit 4: R/W (1=read, 0=write)
-      0x00 |                    // bit 3: I/N (0=data access)
-      fc;                       // bits 2-0: function code
+      inBit |
+      fc;
     this.pushWord(fcWord);
 
     this.pc = this.bus.read32(VEC_ADDRESS_ERROR * 4);
@@ -484,7 +505,7 @@ export class M68000 {
   private checkOddPC(addr: number): boolean {
     if (addr & 1) {
       this.addressError = true;
-      this.raiseAddressError(addr);
+      this.raiseAddressError(addr, false, true);
       return true;
     }
     return false;
@@ -819,6 +840,40 @@ export class M68000 {
         this.flagX = this.flagC;
         break;
     }
+  }
+
+  /** Flags for SUBX/ADDX — uses original src (not src+X) for V flag */
+  private setSubXFlags(src: number, dst: number, result: number, size: number): void {
+    if (this.addressError) return;
+    const msb = size === 1 ? 0x80 : size === 2 ? 0x8000 : 0x80000000;
+    const mask = size === 1 ? 0xFF : size === 2 ? 0xFFFF : 0xFFFFFFFF;
+    const s = size === 4 ? src >>> 0 : src & mask;
+    const d = size === 4 ? dst >>> 0 : dst & mask;
+    const r = size === 4 ? result >>> 0 : result & mask;
+    this.flagN = (r & msb) !== 0;
+    this.flagZ = r === 0;
+    // V uses original src (not src+X) to correctly detect signed overflow
+    this.flagV = (((s ^ d) & (r ^ d)) & msb) !== 0;
+    // C = borrow occurred: dst < src + X (full precision, no wrapping)
+    this.flagC = result < 0;
+    this.flagX = this.flagC;
+  }
+
+  private setAddXFlags(src: number, dst: number, result: number, size: number): void {
+    if (this.addressError) return;
+    const msb = size === 1 ? 0x80 : size === 2 ? 0x8000 : 0x80000000;
+    const mask = size === 1 ? 0xFF : size === 2 ? 0xFFFF : 0xFFFFFFFF;
+    const limit = size === 1 ? 0x100 : size === 2 ? 0x10000 : 0x100000000;
+    const s = size === 4 ? src >>> 0 : src & mask;
+    const d = size === 4 ? dst >>> 0 : dst & mask;
+    const r = size === 4 ? result >>> 0 : result & mask;
+    this.flagN = (r & msb) !== 0;
+    this.flagZ = r === 0;
+    // V uses original src (not src+X) to correctly detect signed overflow
+    this.flagV = ((~(s ^ d) & (r ^ d)) & msb) !== 0;
+    // C = carry occurred: result >= limit
+    this.flagC = result >= limit;
+    this.flagX = this.flagC;
   }
 
   private setSubFlags(src: number, dst: number, result: number, size: number): void {
@@ -1240,6 +1295,7 @@ export class M68000 {
 
     // Read source
     const val = this.readEA(srcMode, srcReg, size);
+    if (this.addressError) return;
 
     // MOVEA: destination is address register
     if (dstMode === EA_ADDR_REG) {
@@ -1254,21 +1310,54 @@ export class M68000 {
       return;
     }
 
+    // Set flags before write (MOVE, not MOVEA) — on 68000 hardware,
+    // flags are set from the source value before the destination write.
+    // If the write triggers an address error, the frame captures updated flags.
+    this.setLogicFlags(val, size);
+
+    // For predecrement and modes with extension words, the 68000 address error
+    // frame PC reflects the state after source EA resolution (= this.pc now),
+    // not this.pc - 2 which is the default for data access errors.
+    if (dstMode === EA_ADDR_DEC || dstMode === EA_ADDR_DISP || dstMode === EA_ADDR_IDX ||
+        (dstMode === EA_OTHER && (dstReg === EA_ABS_W || dstReg === EA_ABS_L))) {
+      this.addressErrorFramePC = this.pc;
+    }
+
     // Write destination
     if (dstMode === EA_DATA_REG) {
       this.writeEA(dstMode, dstReg, size, val);
     } else if (dstMode === EA_ADDR_DEC) {
-      // -(An) destination: predecrement
+      // -(An) destination: predecrement before write
+      // For long, 68000 writes as two words: first low word at An-2,
+      // then high word at An-4. Address error after first -2 leaves An
+      // only decremented by 2.
       let dec = size;
       if (size === 1 && dstReg === 7) dec = 2;
-      this.a[dstReg] = (this.a[dstReg]! - dec) | 0;
-      this.writeToAddr(this.a[dstReg]! & 0xFFFFFF, size, val);
+      if (size === 4) {
+        // Long: write low word first at An-2
+        this.a[dstReg] = (this.a[dstReg]! - 2) | 0;
+        this.writeToAddr(this.a[dstReg]!, 2, val & 0xFFFF);
+        if (this.addressError) return;
+        // Then high word at An-4
+        this.a[dstReg] = (this.a[dstReg]! - 2) | 0;
+        this.writeToAddr(this.a[dstReg]!, 2, (val >>> 16) & 0xFFFF);
+      } else {
+        this.a[dstReg] = (this.a[dstReg]! - dec) | 0;
+        this.writeToAddr(this.a[dstReg]!, size, val);
+      }
+    } else if (dstMode === EA_ADDR_INC) {
+      // (An)+ destination: write first, then postincrement only if no error
+      const addr = this.a[dstReg]!;
+      this.writeToAddr(addr, size, val);
+      if (!this.addressError) {
+        let inc = size;
+        if (size === 1 && dstReg === 7) inc = 2;
+        this.a[dstReg] = (this.a[dstReg]! + inc) | 0;
+      }
     } else {
       this.writeEA(dstMode, dstReg, size, val);
     }
 
-    // Set flags (MOVE, not MOVEA)
-    this.setLogicFlags(val, size);
     this.cycles += 4;
   }
 
@@ -1717,22 +1806,55 @@ export class M68000 {
 
     const mask = this.readImm16();
 
+    if (mask === 0) {
+      // Empty mask: 68000 still performs a dummy word read at the EA.
+      // This can trigger address errors for odd addresses.
+      let addr: number;
+      if (mode === EA_ADDR_DEC) {
+        addr = (this.a[reg]! - 2) | 0;
+      } else if (mode === EA_ADDR_INC) {
+        addr = this.a[reg]!;
+      } else {
+        addr = this.getControlEA(mode, reg);
+      }
+      this.readFromAddr(addr, 2); // dummy word read
+      if (this.addressError) {
+        // For postincrement, An is still updated by 2 on address error
+        if (mode === EA_ADDR_INC) {
+          this.a[reg] = (this.a[reg]! + 2) | 0;
+        }
+        return;
+      }
+      if (mode === EA_ADDR_INC) {
+        this.a[reg] = (this.a[reg]! + 2) | 0;
+      } else if (mode === EA_ADDR_DEC) {
+        this.a[reg] = addr;
+      }
+      this.cycles += 8;
+      return;
+    }
+
     if (dir === 0) {
       // Register to memory
       if (mode === EA_ADDR_DEC) {
         // -(An): registers stored in reverse order, mask is reversed
+        // 68000 writes long values as two words: first low word, then high word.
         let addr = this.a[reg]!;
         for (let i = 15; i >= 0; i--) {
           if ((mask & (1 << (15 - i))) !== 0) {
-            addr -= size;
-            if (i < 8) {
-              // D0-D7
-              if (size === 2) this.bus.write16(addr & 0xFFFFFF, this.d[i]! & 0xFFFF);
-              else this.bus.write32(addr & 0xFFFFFF, this.d[i]! >>> 0);
+            const val = i < 8 ? this.d[i]! : this.a[i - 8]!;
+            if (size === 2) {
+              addr = (addr - 2) | 0;
+              this.writeToAddr(addr, 2, val & 0xFFFF);
+              if (this.addressError) return;
             } else {
-              // A0-A7
-              if (size === 2) this.bus.write16(addr & 0xFFFFFF, this.a[i - 8]! & 0xFFFF);
-              else this.bus.write32(addr & 0xFFFFFF, this.a[i - 8]! >>> 0);
+              // Long: write low word first, then high word
+              addr = (addr - 2) | 0;
+              this.writeToAddr(addr, 2, val & 0xFFFF);
+              if (this.addressError) return;
+              addr = (addr - 2) | 0;
+              this.writeToAddr(addr, 2, (val >>> 16) & 0xFFFF);
+              if (this.addressError) return;
             }
           }
         }
@@ -1741,14 +1863,18 @@ export class M68000 {
         let addr = this.getControlEA(mode, reg);
         for (let i = 0; i < 16; i++) {
           if ((mask & (1 << i)) !== 0) {
-            if (i < 8) {
-              if (size === 2) this.bus.write16(addr & 0xFFFFFF, this.d[i]! & 0xFFFF);
-              else this.bus.write32(addr & 0xFFFFFF, this.d[i]! >>> 0);
+            const val = i < 8 ? this.d[i]! : this.a[i - 8]!;
+            if (size === 2) {
+              this.writeToAddr(addr, 2, val & 0xFFFF);
+              if (this.addressError) return;
+              addr += 2;
             } else {
-              if (size === 2) this.bus.write16(addr & 0xFFFFFF, this.a[i - 8]! & 0xFFFF);
-              else this.bus.write32(addr & 0xFFFFFF, this.a[i - 8]! >>> 0);
+              this.writeToAddr(addr, 2, (val >>> 16) & 0xFFFF);
+              if (this.addressError) return;
+              this.writeToAddr((addr + 2) | 0, 2, val & 0xFFFF);
+              if (this.addressError) return;
+              addr += 4;
             }
-            addr += size;
           }
         }
       }
@@ -1763,12 +1889,19 @@ export class M68000 {
 
       for (let i = 0; i < 16; i++) {
         if ((mask & (1 << i)) !== 0) {
+          const val = this.readFromAddr(addr, size);
+          if (this.addressError) {
+            // On address error during MOVEM postincrement, the 68000
+            // still updates An to reflect the attempted read position + 2
+            if (mode === EA_ADDR_INC) {
+              this.a[reg] = (addr + 2) | 0;
+            }
+            return;
+          }
           if (i < 8) {
-            if (size === 2) this.d[i] = signExtend16(this.bus.read16(addr & 0xFFFFFF));
-            else this.d[i] = this.bus.read32(addr & 0xFFFFFF) | 0;
+            this.d[i] = size === 2 ? signExtend16(val) : val | 0;
           } else {
-            if (size === 2) this.a[i - 8] = signExtend16(this.bus.read16(addr & 0xFFFFFF));
-            else this.a[i - 8] = this.bus.read32(addr & 0xFFFFFF) | 0;
+            this.a[i - 8] = size === 2 ? signExtend16(val) : val | 0;
           }
           addr += size;
         }
@@ -1789,8 +1922,15 @@ export class M68000 {
 
   private opLINK(): void {
     const reg = this.opcode & 7;
-    this.pushLong(this.a[reg]!);
-    this.a[reg] = this.a[7]!;
+    if (reg === 7) {
+      // LINK A7 special case: A7 is decremented first, then the
+      // decremented value is written to the stack (68000 quirk)
+      this.a[7] = (this.a[7]! - 4) | 0;
+      this.bus.write32(this.a[7]! & 0xFFFFFF, this.a[7]! >>> 0);
+    } else {
+      this.pushLong(this.a[reg]!);
+      this.a[reg] = this.a[7]!;
+    }
     const disp = signExtend16(this.readImm16());
     this.a[7] = (this.a[7]! + disp) | 0;
     this.cycles += 16;
@@ -2028,7 +2168,9 @@ export class M68000 {
         this.cycles += 14;
       } else {
         // Branch
-        this.pc = (this.pc - 2 + disp) & 0xFFFFFFFF;
+        const target = (this.pc - 2 + disp) & 0xFFFFFFFF;
+        this.pc = target;
+        if (this.checkOddPC(target)) return;
         this.prefetchFill();
         this.cycles += 10;
       }
@@ -2228,6 +2370,7 @@ export class M68000 {
 
   private opDIVU(dataReg: number, mode: number, reg: number): void {
     const divisor = this.readEA(mode, reg, 2) & 0xFFFF;
+    if (this.addressError) return;
     const dividend = this.d[dataReg]! >>> 0;
 
     if (divisor === 0) {
@@ -2258,6 +2401,7 @@ export class M68000 {
 
   private opDIVS(dataReg: number, mode: number, reg: number): void {
     const divisor = signExtend16(this.readEA(mode, reg, 2) & 0xFFFF);
+    if (this.addressError) return;
     const dividend = this.d[dataReg]! | 0;
 
     if (divisor === 0) {
@@ -2350,23 +2494,49 @@ export class M68000 {
       const dst = this.readEA(EA_DATA_REG, dstReg, size);
       const result = dst - src - x;
       this.writeEA(EA_DATA_REG, dstReg, size, result);
-      this.setSubFlags(src + x, dst, result, size);
+      this.setSubXFlags(src, dst, result, size);
       // Z unchanged if result is 0
       const clipped = size === 1 ? clip8(result) : size === 2 ? clip16(result) : clip32(result);
       if (clipped === 0) this.flagZ = oldZ;
       this.cycles += (size === 4 ? 8 : 4);
     } else {
-      // -(An)
-      const srcAddr = (this.a[srcReg]! - size) & 0xFFFFFF;
-      this.a[srcReg] = (this.a[srcReg]! - size) | 0;
-      const dstAddr = (this.a[dstReg]! - size) & 0xFFFFFF;
-      this.a[dstReg] = (this.a[dstReg]! - size) | 0;
-
+      // Source predecrement and read
+      const srcDec = (size === 1 && srcReg === 7) ? 2 : size;
+      if (size === 4) {
+        this.a[srcReg] = (this.a[srcReg]! - 2) | 0;
+        if (this.a[srcReg]! & 1) {
+          this.addressError = true;
+          this.raiseAddressError(this.a[srcReg]!);
+          return;
+        }
+        this.a[srcReg] = (this.a[srcReg]! - 2) | 0;
+      } else {
+        this.a[srcReg] = (this.a[srcReg]! - srcDec) | 0;
+      }
+      const srcAddr = this.a[srcReg]!;
       const src = this.readFromAddr(srcAddr, size);
+      if (this.addressError) return;
+
+      // Dest predecrement and read (only if source read succeeded)
+      const dstDec = (size === 1 && dstReg === 7) ? 2 : size;
+      if (size === 4) {
+        this.a[dstReg] = (this.a[dstReg]! - 2) | 0;
+        if (this.a[dstReg]! & 1) {
+          this.addressError = true;
+          this.raiseAddressError(this.a[dstReg]!);
+          return;
+        }
+        this.a[dstReg] = (this.a[dstReg]! - 2) | 0;
+      } else {
+        this.a[dstReg] = (this.a[dstReg]! - dstDec) | 0;
+      }
+      const dstAddr = this.a[dstReg]!;
       const dst = this.readFromAddr(dstAddr, size);
+      if (this.addressError) return;
+
       const result = dst - src - x;
       this.writeToAddr(dstAddr, size, result);
-      this.setSubFlags(src + x, dst, result, size);
+      this.setSubXFlags(src, dst, result, size);
       const clipped = size === 1 ? clip8(result) : size === 2 ? clip16(result) : clip32(result);
       if (clipped === 0) this.flagZ = oldZ;
       this.cycles += (size === 4 ? 30 : 18);
@@ -2448,13 +2618,18 @@ export class M68000 {
     const srcInc = (size === 1 && srcReg === 7) ? 2 : size;
     const dstInc = (size === 1 && dstReg === 7) ? 2 : size;
 
-    const srcAddr = this.a[srcReg]! & 0xFFFFFF;
+    // Read source: postincrement, then read
+    const srcAddr = this.a[srcReg]!;
     this.a[srcReg] = (this.a[srcReg]! + srcInc) | 0;
-    const dstAddr = this.a[dstReg]! & 0xFFFFFF;
-    this.a[dstReg] = (this.a[dstReg]! + dstInc) | 0;
-
     const src = this.readFromAddr(srcAddr, size);
+    if (this.addressError) return;
+
+    // Read dest: postincrement, then read
+    const dstAddr = this.a[dstReg]!;
+    this.a[dstReg] = (this.a[dstReg]! + dstInc) | 0;
     const dst = this.readFromAddr(dstAddr, size);
+    if (this.addressError) return;
+
     const result = dst - src;
     this.setCmpFlags(src, dst, result, size);
     this.cycles += (size === 4 ? 20 : 12);
@@ -2589,6 +2764,7 @@ export class M68000 {
 
   private opMULU(dataReg: number, mode: number, reg: number): void {
     const src = this.readEA(mode, reg, 2) & 0xFFFF;
+    if (this.addressError) return;
     const dst = this.d[dataReg]! & 0xFFFF;
     const result = (src * dst) >>> 0;
     this.d[dataReg] = result | 0;
@@ -2602,6 +2778,7 @@ export class M68000 {
 
   private opMULS(dataReg: number, mode: number, reg: number): void {
     const src = signExtend16(this.readEA(mode, reg, 2) & 0xFFFF);
+    if (this.addressError) return;
     const dst = signExtend16(this.d[dataReg]! & 0xFFFF);
     const result = Math.imul(src, dst);
     this.d[dataReg] = result | 0;
@@ -2677,21 +2854,51 @@ export class M68000 {
       const dst = this.readEA(EA_DATA_REG, dstReg, size);
       const result = dst + src + x;
       this.writeEA(EA_DATA_REG, dstReg, size, result);
-      this.setAddFlags(src + x, dst, result, size);
+      this.setAddXFlags(src, dst, result, size);
       const clipped = size === 1 ? clip8(result) : size === 2 ? clip16(result) : clip32(result);
       if (clipped === 0) this.flagZ = oldZ;
       this.cycles += (size === 4 ? 8 : 4);
     } else {
-      const srcAddr = (this.a[srcReg]! - size) & 0xFFFFFF;
-      this.a[srcReg] = (this.a[srcReg]! - size) | 0;
-      const dstAddr = (this.a[dstReg]! - size) & 0xFFFFFF;
-      this.a[dstReg] = (this.a[dstReg]! - size) | 0;
-
+      // Source predecrement and read
+      // For long/word, 68000 decrements by 2 per word access.
+      // If first word triggers address error, only 2 is decremented.
+      const srcDec = (size === 1 && srcReg === 7) ? 2 : size;
+      if (size === 4) {
+        this.a[srcReg] = (this.a[srcReg]! - 2) | 0;
+        // Check if first word access would trigger address error
+        if (this.a[srcReg]! & 1) {
+          this.addressError = true;
+          this.raiseAddressError(this.a[srcReg]!);
+          return;
+        }
+        this.a[srcReg] = (this.a[srcReg]! - 2) | 0;
+      } else {
+        this.a[srcReg] = (this.a[srcReg]! - srcDec) | 0;
+      }
+      const srcAddr = this.a[srcReg]!;
       const src = this.readFromAddr(srcAddr, size);
+      if (this.addressError) return;
+
+      // Dest predecrement and read (only if source read succeeded)
+      const dstDec = (size === 1 && dstReg === 7) ? 2 : size;
+      if (size === 4) {
+        this.a[dstReg] = (this.a[dstReg]! - 2) | 0;
+        if (this.a[dstReg]! & 1) {
+          this.addressError = true;
+          this.raiseAddressError(this.a[dstReg]!);
+          return;
+        }
+        this.a[dstReg] = (this.a[dstReg]! - 2) | 0;
+      } else {
+        this.a[dstReg] = (this.a[dstReg]! - dstDec) | 0;
+      }
+      const dstAddr = this.a[dstReg]!;
       const dst = this.readFromAddr(dstAddr, size);
+      if (this.addressError) return;
+
       const result = dst + src + x;
       this.writeToAddr(dstAddr, size, result);
-      this.setAddFlags(src + x, dst, result, size);
+      this.setAddXFlags(src, dst, result, size);
       const clipped = size === 1 ? clip8(result) : size === 2 ? clip16(result) : clip32(result);
       if (clipped === 0) this.flagZ = oldZ;
       this.cycles += (size === 4 ? 30 : 18);
