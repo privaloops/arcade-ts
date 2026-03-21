@@ -77,17 +77,23 @@ document.querySelectorAll<HTMLInputElement>('input[name="renderer"]').forEach(ra
 // Resize DOM renderer to fit container
 function resizeDomScreen(): void {
   if (!gameScreen) return;
-  // In TATE mode, getBoundingClientRect returns post-rotation dimensions.
-  // Use the CSS width/height directly (384x224) instead.
+  // In TATE mode, use native dimensions (CSS handles rotation)
   if (canvasWrapper.classList.contains("tate")) {
     gameScreen.resize(384, 224);
     return;
+  }
+  // In fullscreen, use the wrapper's client dimensions (not getBoundingClientRect)
+  if (document.fullscreenElement || document.body.classList.contains("pseudo-fullscreen")) {
+    const w = canvasWrapper.clientWidth;
+    const h = canvasWrapper.clientHeight;
+    if (w > 0 && h > 0) { gameScreen.resize(w, h); return; }
   }
   const { width, height } = domScreen.getBoundingClientRect();
   if (width > 0 && height > 0) gameScreen.resize(width, height);
 }
 
 new ResizeObserver(resizeDomScreen).observe(domScreen);
+document.addEventListener("fullscreenchange", () => setTimeout(resizeDomScreen, 50));
 
 // ── Emulator instance ────────────────────────────────────────────────────────
 
