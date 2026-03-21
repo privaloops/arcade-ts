@@ -19,17 +19,18 @@
 // ---------------------------------------------------------------------------
 
 import { YM2151_SAMPLE_RATE, OKI6295_SAMPLE_RATE, QSOUND_SAMPLE_RATE } from '../constants';
+import { LinearResampler } from './resampler';
 
 /** Ring buffer capacity in stereo sample pairs */
-const RING_BUFFER_SAMPLES = 4096;
+export const RING_BUFFER_SAMPLES = 8192;
 
 /** Byte offsets inside the SharedArrayBuffer */
-const SAB_WRITE_PTR_OFFSET = 0; // Int32, in samples
-const SAB_READ_PTR_OFFSET = 4; // Int32, in samples
-const SAB_DATA_OFFSET = 8; // Float32 data starts here
+export const SAB_WRITE_PTR_OFFSET = 0; // Int32, in samples
+export const SAB_READ_PTR_OFFSET = 4; // Int32, in samples
+export const SAB_DATA_OFFSET = 8; // Float32 data starts here
 
 /** Total SharedArrayBuffer size in bytes */
-const SAB_BYTE_LENGTH = SAB_DATA_OFFSET + RING_BUFFER_SAMPLES * 2 * 4;
+export const SAB_BYTE_LENGTH = SAB_DATA_OFFSET + RING_BUFFER_SAMPLES * 2 * 4;
 
 // ---------------------------------------------------------------------------
 // Worklet processor source (inlined as string, loaded via Blob URL)
@@ -46,7 +47,7 @@ const WORKLET_PROCESSOR_SOURCE = /* javascript */ `
 const SAB_WRITE_PTR_OFFSET = 0;
 const SAB_READ_PTR_OFFSET  = 4;
 const SAB_DATA_OFFSET      = 8;
-const RING_BUFFER_SAMPLES  = 4096;
+const RING_BUFFER_SAMPLES  = 8192;
 
 class AudioRingBufferProcessor extends AudioWorkletProcessor {
   /** @type {SharedArrayBuffer | null} */
@@ -126,57 +127,6 @@ class AudioRingBufferProcessor extends AudioWorkletProcessor {
 
 registerProcessor('audio-ring-buffer-processor', AudioRingBufferProcessor);
 `;
-
-// ---------------------------------------------------------------------------
-// LinearResampler
-// ---------------------------------------------------------------------------
-
-/**
- * Simple linear interpolation resampler.
- * Converts a mono stream from `inputRate` to `outputRate`.
- */
-class LinearResampler {
-  private readonly ratio: number;
-  private phase = 0;
-  private prevSample = 0;
-
-  constructor(
-    private readonly inputRate: number,
-    private readonly outputRate: number,
-  ) {
-    this.ratio = inputRate / outputRate;
-  }
-
-  /**
-   * Resample `input` (length `numInputSamples`) into `output`.
-   * Returns the number of output samples written.
-   */
-  resample(
-    input: Float32Array,
-    numInputSamples: number,
-    output: Float32Array,
-  ): number {
-    let outIdx = 0;
-
-    while (this.phase < numInputSamples) {
-      const idx = Math.floor(this.phase);
-      const frac = this.phase - idx;
-
-      const s0 = idx === 0 ? this.prevSample : (input[idx - 1] ?? 0);
-      const s1 = input[idx] ?? 0;
-
-      output[outIdx++] = s0 + frac * (s1 - s0);
-      this.phase += this.ratio;
-    }
-
-    // Save the last input sample for the next call (cross-buffer interpolation)
-    this.prevSample = input[numInputSamples - 1] ?? 0;
-    // Carry over the fractional phase
-    this.phase -= numInputSamples;
-
-    return outIdx;
-  }
-}
 
 // ---------------------------------------------------------------------------
 // RingBuffer (main-thread writer)
@@ -510,6 +460,11 @@ export class AudioOutput {
   /** Whether `init()` has been called and completed successfully. */
   isInitialized(): boolean {
     return this._initialized;
+  }
+
+  /** Expose the SharedArrayBuffer for use by the audio worker. */
+  getSAB(): SharedArrayBuffer | null {
+    return this.sab;
   }
 
   /**

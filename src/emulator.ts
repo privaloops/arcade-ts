@@ -102,6 +102,12 @@ export class Emulator {
   private z80BusQSound: Z80BusQSound | null = null;
   private qsIrqAccum = 0; // accumulator for 250Hz Z80 IRQ timer
 
+  // Audio worker (standard CPS1 path only)
+  private audioWorker: Worker | null = null;
+  private audioWorkerReady = false;
+  private pendingSoundLatches: number[] = [];
+  private pendingSoundLatches2: number[] = [];
+
   // Audio scratch buffers (allocated once, reused per frame)
   private ymBufferL: Float32Array;
   private ymBufferR: Float32Array;
@@ -159,14 +165,22 @@ export class Emulator {
       return this.oki6295 !== null ? this.oki6295.read() : 0;
     });
 
-    // Wire sound latch: immediate forwarding from 68000 bus to Z80 bus.
-    // The latch does NOT trigger a Z80 IRQ (confirmed via MAME).
-    // The Z80 polls the latch at 0xF008 during the YM2151 Timer A ISR.
+    // Wire sound latch: forward from 68000 bus.
+    // When audio worker is active, accumulate and flush periodically.
+    // Otherwise, forward directly to Z80 bus (QSound or fallback).
     this.bus.setSoundLatchCallback((value: number) => {
-      this.z80Bus.setSoundLatch(value);
+      if (this.audioWorkerReady) {
+        this.pendingSoundLatches.push(value);
+      } else {
+        this.z80Bus.setSoundLatch(value);
+      }
     });
     this.bus.setSoundLatch2Callback((value: number) => {
-      this.z80Bus.setSoundLatch2(value);
+      if (this.audioWorkerReady) {
+        this.pendingSoundLatches2.push(value);
+      } else {
+        this.z80Bus.setSoundLatch2(value);
+      }
     });
 
     // Wire up IRQ acknowledge: when the 68000 processes an interrupt,
@@ -182,6 +196,7 @@ export class Emulator {
   async loadRom(file: File): Promise<void> {
     // Stop any running emulation and reset state
     this.stop();
+    this.terminateAudioWorker();
     this.audioOutput.suspend();
     this.frameCount = 0;
     this.m68kErrorCount = 0;
@@ -285,6 +300,9 @@ export class Emulator {
       this.z80Bus.setOkiWriteCallback((value: number) => {
         this.oki6295!.write(value);
       });
+
+      // Try to create audio worker for off-main-thread audio processing
+      await this.initAudioWorker(romSet.audioRom, romSet.okiRom);
     }
 
     this.romLoaded = true;
@@ -316,6 +334,7 @@ export class Emulator {
       cancelAnimationFrame(this.animFrameId);
       this.animFrameId = 0;
     }
+    this.terminateAudioWorker();
   }
 
   pause(): void {
@@ -469,10 +488,16 @@ export class Emulator {
   }
 
   /** Suspend audio (e.g. when paused). */
-  suspendAudio(): void { this.audioOutput.suspend(); }
+  suspendAudio(): void {
+    this.audioOutput.suspend();
+    this.audioWorker?.postMessage({ type: 'suspend' });
+  }
 
   /** Resume audio (e.g. when unpaused). */
-  resumeAudio(): void { this.audioOutput.resume(); }
+  resumeAudio(): void {
+    this.audioOutput.resume();
+    this.audioWorker?.postMessage({ type: 'resume' });
+  }
 
   // ── Cleanup ───────────────────────────────────────────────────────────────
 
@@ -567,6 +592,89 @@ export class Emulator {
     }
   }
 
+  /** Create audio worker for off-main-thread standard audio processing. */
+  private async initAudioWorker(audioRom: Uint8Array, okiRom: Uint8Array): Promise<void> {
+    if (typeof Worker === 'undefined') return;
+
+    // Ensure audio is initialized so the SAB exists
+    await this.audioOutput.init();
+    const sab = this.audioOutput.getSAB();
+    if (!sab) return; // No SAB = no SharedArrayBuffer support, skip worker
+
+    try {
+      this.audioWorker = new Worker(
+        new URL('./audio/audio-worker.ts', import.meta.url),
+        { type: 'module' },
+      );
+
+      // Wait for 'ready' from worker
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error('Audio worker init timeout'));
+        }, 10000);
+
+        this.audioWorker!.onmessage = (e) => {
+          if (e.data.type === 'ready') {
+            clearTimeout(timeout);
+            this.audioWorkerReady = true;
+            console.log('Audio worker ready — Z80+YM2151+OKI running off main thread');
+            resolve();
+          }
+        };
+
+        this.audioWorker!.onerror = (e) => {
+          clearTimeout(timeout);
+          console.warn('Audio worker error, falling back to main thread:', e.message);
+          this.terminateAudioWorker();
+          resolve(); // Don't reject — fallback to inline
+        };
+
+        // Send init with Transferable buffers (zero-copy)
+        const audioRomCopy = audioRom.slice();
+        const okiRomCopy = okiRom.slice();
+        this.audioWorker!.postMessage(
+          {
+            type: 'init',
+            audioRom: audioRomCopy.buffer,
+            okiRom: okiRomCopy.buffer,
+            sab,
+            sampleRate: this.audioOutput.getSampleRate(),
+          },
+          [audioRomCopy.buffer, okiRomCopy.buffer],
+        );
+      });
+    } catch (e) {
+      console.warn('Audio worker creation failed, using main thread:', e);
+      this.terminateAudioWorker();
+    }
+  }
+
+  /** Flush accumulated sound latches to the audio worker. */
+  private flushSoundLatches(): void {
+    if (!this.audioWorkerReady || !this.audioWorker) return;
+    if (this.pendingSoundLatches.length === 0 && this.pendingSoundLatches2.length === 0) return;
+
+    this.audioWorker.postMessage({
+      type: 'latch',
+      latches: this.pendingSoundLatches.splice(0),
+      latches2: this.pendingSoundLatches2.length > 0
+        ? this.pendingSoundLatches2.splice(0)
+        : undefined,
+    });
+  }
+
+  /** Terminate the audio worker and reset state. */
+  private terminateAudioWorker(): void {
+    if (this.audioWorker) {
+      this.audioWorker.postMessage({ type: 'terminate' });
+      this.audioWorker.terminate();
+      this.audioWorker = null;
+    }
+    this.audioWorkerReady = false;
+    this.pendingSoundLatches.length = 0;
+    this.pendingSoundLatches2.length = 0;
+  }
+
   /** Generate audio samples for one frame (QSound or standard YM2151+OKI path). */
   private generateAudio(): void {
     if (this.isQSound) {
@@ -577,7 +685,13 @@ export class Emulator {
       return;
     }
 
-    // Standard CPS1: run Z80 full frame with interleaved YM2151 clocking
+    // Audio worker runs autonomously — just flush pending latches
+    if (this.audioWorkerReady) {
+      this.flushSoundLatches();
+      return;
+    }
+
+    // Fallback: inline processing (worker not available)
     this.z80Bus.advanceSoundLatch();
     let z80Cycles = 0;
     let opmAccum = 0;
