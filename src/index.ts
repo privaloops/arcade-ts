@@ -25,6 +25,7 @@ const dropZone = getElement<HTMLDivElement>("drop-zone");
 const statusEl = getElement<HTMLParagraphElement>("status");
 const fileInput = getElement<HTMLInputElement>("file-input");
 const controlsEl = getElement<HTMLDivElement>("controls");
+const canvasWrapper = getElement<HTMLDivElement>("canvas-wrapper");
 const gamepadStatusEl = getElement<HTMLSpanElement>("gamepad-status");
 
 function getRendererMode(): "canvas" | "dom" {
@@ -82,21 +83,15 @@ function resizeDomScreen(): void {
     gameScreen.resize(384, 224);
     return;
   }
-  // In fullscreen, use viewport dimensions directly
-  if (document.fullscreenElement || document.body.classList.contains("pseudo-fullscreen")) {
-    const w = window.innerWidth;
-    const h = window.innerHeight;
-    if (w > 0 && h > 0) { gameScreen.resize(w, h); return; }
-  }
-  const { width, height } = domScreen.getBoundingClientRect();
-  if (width > 0 && height > 0) gameScreen.resize(width, height);
+  // Use the canvas wrapper's dimensions (works in both normal and fullscreen)
+  const w = canvasWrapper.clientWidth;
+  const h = canvasWrapper.clientHeight;
+  if (w > 0 && h > 0) gameScreen.resize(w, h);
 }
 
-new ResizeObserver(resizeDomScreen).observe(domScreen);
-document.addEventListener("fullscreenchange", () => {
-  setTimeout(resizeDomScreen, 100);
-  setTimeout(resizeDomScreen, 300);
-});
+// Re-layout on resize and fullscreen changes
+new ResizeObserver(resizeDomScreen).observe(canvasWrapper);
+document.addEventListener("fullscreenchange", resizeDomScreen);
 
 // ── Emulator instance ────────────────────────────────────────────────────────
 
@@ -244,7 +239,6 @@ window.addEventListener("keydown", (e) => {
 // ── TATE mode ────────────────────────────────────────────────────────────────
 
 const tateToggle = getElement<HTMLInputElement>("tate-toggle");
-const canvasWrapper = getElement<HTMLDivElement>("canvas-wrapper");
 
 tateToggle.addEventListener("change", () => {
   canvasWrapper.classList.toggle("tate", tateToggle.checked);
