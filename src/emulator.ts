@@ -16,14 +16,18 @@ import { M68000, CpuState } from "./cpu/m68000";
 import { Z80, Z80State } from "./cpu/z80";
 import { Bus } from "./memory/bus";
 import { Z80Bus } from "./memory/z80-bus";
+import { Z80BusQSound } from "./memory/z80-bus-qsound";
 import { Renderer, FRAMEBUFFER_SIZE } from "./video/renderer";
 import { WebGLRenderer } from "./video/renderer-webgl";
 import { CPS1Video } from "./video/cps1-video";
 import { InputManager } from "./input/input";
 import { loadRomFromZip, RomSet } from "./memory/rom-loader";
 import { NukedOPMWasm, initOPMWasm } from "./audio/nuked-opm-wasm";
+import { QSoundWasm, initQSoundWasm } from "./audio/qsound-wasm";
 import { OKI6295 } from "./audio/oki6295";
 import { AudioOutput } from "./audio/audio-output";
+import { decodeKabuki } from "./memory/kabuki";
+import { EEPROM93C46 } from "./memory/eeprom-93c46";
 
 // ── Timing constants (from MAME cps1.h) ─────────────────────────────────────
 //
@@ -50,6 +54,7 @@ const M68K_CYCLES_PER_FRAME = Math.round(M68K_CLOCK / FRAME_RATE); // ~167 700
 const M68K_CYCLES_PER_SCANLINE = Math.round(M68K_CYCLES_PER_FRAME / CPS_VTOTAL); // ~640
 const Z80_CYCLES_PER_FRAME = Math.round(Z80_CLOCK / FRAME_RATE);   // ~60 040
 const VBLANK_IRQ_LEVEL = 2;           // CPS1 VBlank = 68000 IRQ level 2 (IPL1)
+const QSOUND_SAMPLE_RATE = 24038;    // QSound native rate: 60 MHz / 2 / 1248
 
 // ── Emulator state snapshot (for save state / rollback) ─────────────────────
 
@@ -80,12 +85,20 @@ export class Emulator {
   // Audio chips
   private ym2151!: NukedOPMWasm;
   private oki6295: OKI6295 | null = null;
+  private qsound: QSoundWasm | null = null;
   private audioOutput: AudioOutput;
+
+  // QSound state
+  private isQSound = false;
+  private z80BusQSound: Z80BusQSound | null = null;
+  private qsIrqAccum = 0; // accumulator for 250Hz Z80 IRQ timer
 
   // Audio scratch buffers (allocated once, reused per frame)
   private ymBufferL: Float32Array;
   private ymBufferR: Float32Array;
   private okiBuffer: Float32Array;
+  private qsBufferL: Float32Array;
+  private qsBufferR: Float32Array;
 
   // Framebuffer produced by video layer (384x224 RGBA).
   private readonly framebuffer: Uint8Array;
@@ -118,6 +131,8 @@ export class Emulator {
     this.ymBufferL = new Float32Array(1024);
     this.ymBufferR = new Float32Array(1024);
     this.okiBuffer = new Float32Array(256);
+    this.qsBufferL = new Float32Array(1024);
+    this.qsBufferR = new Float32Array(1024);
 
     // Wire Z80 bus → YM2151 chip (uses late binding since ym2151 is initialized async)
     this.z80Bus.setYm2151AddressWriteCallback((value: number) => {
@@ -167,17 +182,8 @@ export class Emulator {
 
     const romSet: RomSet = await loadRomFromZip(file);
 
-    // Initialize Nuked OPM WASM (first call loads the module, subsequent calls are no-ops)
-    await initOPMWasm();
-    if (!this.ym2151) {
-      this.ym2151 = new NukedOPMWasm();
-      this.ym2151.setTimerCallback(() => { this.z80.setIrqLine(true); });
-      this.ym2151.setIrqClearCallback(() => { this.z80.setIrqLine(false); });
-      this.ym2151.setExternalTimerMode(true);
-    }
-    this.ym2151.reset();
+    this.isQSound = romSet.qsound;
     this.bus.loadProgramRom(romSet.programRom);
-    this.z80Bus.loadAudioRom(romSet.audioRom);
 
     // Apply CPS-B ID for this game
     if (romSet.cpsBConfig.idOffset >= 0) {
@@ -194,11 +200,83 @@ export class Emulator {
       romSet.gfxMapper,
     );
 
-    // Create OKI6295 with its ROM data and wire to Z80 bus
-    this.oki6295 = new OKI6295(romSet.okiRom);
-    this.z80Bus.setOkiWriteCallback((value: number) => {
-      this.oki6295!.write(value);
-    });
+    if (romSet.qsound) {
+      // ── QSound path (CPS1.5: Dino, Punisher, WoF, Slammasters) ──────
+
+      // 1. Init QSound WASM
+      await initQSoundWasm();
+      this.qsound = new QSoundWasm();
+      this.qsound.reset();
+
+      // 2. Load DSP ROM and sample ROM
+      if (romSet.qsoundDspRom) {
+        this.qsound.loadDspRom(romSet.qsoundDspRom);
+      }
+      this.qsound.loadSampleRom(romSet.okiRom); // "oki" field is QSound PCM data
+
+      // 3. Kabuki-decrypt the Z80 audio ROM
+      const audioRomCopy = new Uint8Array(romSet.audioRom);
+      const opcodeRom = decodeKabuki(audioRomCopy, romSet.name);
+
+      // 4. Create QSound Z80 bus and wire it
+      this.z80BusQSound = new Z80BusQSound();
+      this.z80BusQSound.loadAudioRom(audioRomCopy); // data-decoded
+      if (opcodeRom) {
+        this.z80BusQSound.loadOpcodeRom(opcodeRom);
+      }
+
+      // Wire QSound DSP callbacks
+      const qs = this.qsound;
+      this.z80BusQSound.setQsoundWriteCallback((offset, data) => {
+        qs.write(offset, data);
+      });
+      this.z80BusQSound.setQsoundReadCallback(() => {
+        return qs.read();
+      });
+
+      // 5. Switch Z80 to QSound bus
+      this.z80.setBus(this.z80BusQSound);
+
+      // 6. Wire shared RAM and EEPROM into 68K bus
+      this.bus.setQsoundSharedRam(
+        this.z80BusQSound.getSharedRam1(),
+        this.z80BusQSound.getSharedRam2(),
+      );
+      const eeprom = new EEPROM93C46();
+      this.bus.setEeprom(eeprom);
+
+      // 7. Reset QSound IRQ accumulator
+      this.qsIrqAccum = 0;
+      this.oki6295 = null;
+
+    } else {
+      // ── Standard CPS1 path (YM2151 + OKI6295) ───────────────────────
+
+      // Clear QSound state from previous load
+      this.qsound = null;
+      this.z80BusQSound = null;
+      this.bus.setQsoundSharedRam(null, null);
+
+      // Initialize Nuked OPM WASM
+      await initOPMWasm();
+      if (!this.ym2151) {
+        this.ym2151 = new NukedOPMWasm();
+        this.ym2151.setTimerCallback(() => { this.z80.setIrqLine(true); });
+        this.ym2151.setIrqClearCallback(() => { this.z80.setIrqLine(false); });
+        this.ym2151.setExternalTimerMode(true);
+      }
+      this.ym2151.reset();
+      this.z80Bus.loadAudioRom(romSet.audioRom);
+
+      // Switch Z80 back to standard bus (in case previous game was QSound)
+      this.z80.setBus(this.z80Bus);
+
+      // Create OKI6295 with its ROM data and wire to Z80 bus
+      this.oki6295 = new OKI6295(romSet.okiRom);
+      this.z80Bus.setOkiWriteCallback((value: number) => {
+        this.oki6295!.write(value);
+      });
+    }
 
     this.romLoaded = true;
 
@@ -257,12 +335,15 @@ export class Emulator {
   // ── Save state / restore ──────────────────────────────────────────────────
 
   saveState(): EmulatorState {
+    const z80WorkRam = this.z80BusQSound
+      ? this.z80BusQSound.getWorkRam()
+      : this.z80Bus.getWorkRam();
     return {
       m68kState: this.m68000.getState(),
       z80State: this.z80.getState(),
       workRam: new Uint8Array(this.bus.getWorkRam()),
       vram: new Uint8Array(this.bus.getVram()),
-      z80WorkRam: new Uint8Array(this.z80Bus.getWorkRam()),
+      z80WorkRam: new Uint8Array(z80WorkRam),
       soundLatch: new Uint8Array(this.bus.getSoundLatch()),
       cpsaRegisters: new Uint8Array(this.bus.getCpsaRegisters()),
       cpsbRegisters: new Uint8Array(this.bus.getCpsbRegisters()),
@@ -275,7 +356,10 @@ export class Emulator {
     this.z80.setState(state.z80State);
     this.bus.getWorkRam().set(state.workRam);
     this.bus.getVram().set(state.vram);
-    this.z80Bus.getWorkRam().set(state.z80WorkRam);
+    const z80WorkRam = this.z80BusQSound
+      ? this.z80BusQSound.getWorkRam()
+      : this.z80Bus.getWorkRam();
+    z80WorkRam.set(state.z80WorkRam);
     this.bus.getSoundLatch().set(state.soundLatch);
     this.bus.getCpsaRegisters().set(state.cpsaRegisters);
     this.bus.getCpsbRegisters().set(state.cpsbRegisters);
@@ -407,13 +491,14 @@ export class Emulator {
     // The VBlank is asserted but never serviced until the game lowers the mask.
     // This is exactly how the real hardware works.
 
+    // QSound 250Hz IRQ timing constant (used in interleaved loop below)
+    const Z80_CYCLES_PER_IRQ_QS = Math.round(Z80_CLOCK / 250);
+    const z80CyclesPerScanline = Math.round(Z80_CYCLES_PER_FRAME / CPS_VTOTAL);
+
     let m68kCycles = 0;
     try {
       for (let scanline = 0; scanline < CPS_VTOTAL; scanline++) {
         // At VBlank (scanline 240): buffer sprites BEFORE asserting IRQ.
-        // The game's IRQ handler will update OBJ_BASE for the next frame,
-        // so we must capture the current sprite table first (matches MAME's
-        // screen_vblank_cps1 which copies m_obj to m_buffered_obj).
         if (scanline === CPS_VBLANK_LINE) {
           if (this.video) {
             this.video.bufferSprites();
@@ -429,6 +514,29 @@ export class Emulator {
         while (m68kCycles < targetCycles) {
           m68kCycles += this.m68000.step();
         }
+
+        // QSound: interleave Z80 per scanline so shared RAM is visible in real-time
+        if (this.isQSound) {
+          let z80Done = 0;
+          try {
+            while (z80Done < z80CyclesPerScanline) {
+              const cyc = this.z80.step();
+              z80Done += cyc;
+
+              // 250Hz periodic IRQ timer (edge-triggered pulse)
+              this.qsIrqAccum += cyc;
+              if (this.qsIrqAccum >= Z80_CYCLES_PER_IRQ_QS) {
+                this.qsIrqAccum -= Z80_CYCLES_PER_IRQ_QS;
+                this.z80.requestInterrupt();
+              }
+            }
+          } catch (e) {
+            this.z80ErrorCount++;
+            if (this.z80ErrorCount <= 5 || this.z80ErrorCount % 600 === 0) {
+              console.error(`Z80 error #${this.z80ErrorCount} at frame ${this.frameCount}:`, e);
+            }
+          }
+        }
       }
     } catch (e) {
       this.m68kErrorCount++;
@@ -437,54 +545,62 @@ export class Emulator {
       }
     }
 
-    // 4. Advance sound latch queue: feed the next queued command to the Z80.
-    //    This emulates MAME's synchronize() which ensures the Z80 sees each
-    //    command the 68K wrote, even when multiple are written per frame.
-    this.z80Bus.advanceSoundLatch();
+    if (this.isQSound) {
+      // ── QSound audio: generate samples and push to output ────────────
+      if (this.qsound && this.audioOutput.isInitialized()) {
+        const qsSamplesPerFrame = Math.ceil(QSOUND_SAMPLE_RATE / FRAME_RATE);
+        if (this.qsBufferL.length < qsSamplesPerFrame) {
+          this.qsBufferL = new Float32Array(qsSamplesPerFrame * 2);
+          this.qsBufferR = new Float32Array(qsSamplesPerFrame * 2);
+        }
+        this.qsound.generateSamples(this.qsBufferL, this.qsBufferR, qsSamplesPerFrame);
+        this.audioOutput.pushQSoundSamples(this.qsBufferL, this.qsBufferR, qsSamplesPerFrame);
+      }
+    } else {
+      // ── Standard CPS1 audio path ────────────────────────────────────
 
-    // 5. Run Z80 with interleaved YM2151 clocking.
-    //
-    // Nuked OPM WASM: clockCycles() clocks the chip and collects samples.
-    // Prescale of 2: one OPM_Clock = 2 Z80 T-states.
-    let z80Cycles = 0;
-    let opmAccum = 0;
-    try {
-      while (z80Cycles < Z80_CYCLES_PER_FRAME) {
-        const cyc = this.z80.step();
-        z80Cycles += cyc;
-        opmAccum += cyc;
-        const opmClocks = opmAccum >> 1;
-        opmAccum &= 1;
-        if (opmClocks > 0) {
-          this.ym2151.clockCycles(opmClocks);
+      // Advance sound latch queue
+      this.z80Bus.advanceSoundLatch();
+
+      // Run Z80 with interleaved YM2151 clocking.
+      // Prescale of 2: one OPM_Clock = 2 Z80 T-states.
+      let z80Cycles = 0;
+      let opmAccum = 0;
+      try {
+        while (z80Cycles < Z80_CYCLES_PER_FRAME) {
+          const cyc = this.z80.step();
+          z80Cycles += cyc;
+          opmAccum += cyc;
+          const opmClocks = opmAccum >> 1;
+          opmAccum &= 1;
+          if (opmClocks > 0) {
+            this.ym2151.clockCycles(opmClocks);
+          }
+        }
+      } catch (e) {
+        this.z80ErrorCount++;
+        if (this.z80ErrorCount <= 5 || this.z80ErrorCount % 600 === 0) {
+          console.error(`Z80 error #${this.z80ErrorCount} at frame ${this.frameCount}:`, e);
         }
       }
-    } catch (e) {
-      this.z80ErrorCount++;
-      if (this.z80ErrorCount <= 5 || this.z80ErrorCount % 600 === 0) {
-        console.error(`Z80 error #${this.z80ErrorCount} at frame ${this.frameCount}:`, e);
-      }
-    }
 
-    // 5. Generate audio samples for this frame and push to output.
-    //    Timers are already advanced above, so generateSamples only
-    //    produces audio waveforms (no timer advancement).
-    {
-      const ymSamplesPerFrame = Math.ceil(this.ym2151.getSampleRate() / FRAME_RATE);
-      this.ym2151.generateSamples(this.ymBufferL, this.ymBufferR, ymSamplesPerFrame);
+      // Generate audio samples
+      {
+        const ymSamplesPerFrame = Math.ceil(this.ym2151.getSampleRate() / FRAME_RATE);
+        this.ym2151.generateSamples(this.ymBufferL, this.ymBufferR, ymSamplesPerFrame);
 
-      let okiSamplesPerFrame = 0;
-      if (this.oki6295 !== null) {
-        okiSamplesPerFrame = Math.ceil(this.oki6295.getSampleRate() / FRAME_RATE);
-        this.oki6295.generateSamples(this.okiBuffer, okiSamplesPerFrame);
-      }
+        let okiSamplesPerFrame = 0;
+        if (this.oki6295 !== null) {
+          okiSamplesPerFrame = Math.ceil(this.oki6295.getSampleRate() / FRAME_RATE);
+          this.oki6295.generateSamples(this.okiBuffer, okiSamplesPerFrame);
+        }
 
-      // Push to audio output if initialized
-      if (this.audioOutput.isInitialized()) {
-        this.audioOutput.pushEmulatorSamples(
-          this.ymBufferL, this.ymBufferR, ymSamplesPerFrame,
-          this.okiBuffer, okiSamplesPerFrame,
-        );
+        if (this.audioOutput.isInitialized()) {
+          this.audioOutput.pushEmulatorSamples(
+            this.ymBufferL, this.ymBufferR, ymSamplesPerFrame,
+            this.okiBuffer, okiSamplesPerFrame,
+          );
+        }
       }
     }
 
