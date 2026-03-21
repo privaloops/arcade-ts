@@ -269,26 +269,36 @@
       /* Controls reference — shown when game is running */
       #controls {
         display: none;
-        font-size: 0.95rem;
-        color: #ddd;
-        text-align: center;
-        line-height: 2;
-        letter-spacing: 0.05em;
+        gap: 8px;
+        justify-content: center;
+        flex-wrap: wrap;
       }
 
       #controls.visible {
-        display: block;
+        display: flex;
       }
 
-      #controls kbd {
-        display: inline-block;
-        border: 1px solid #888;
-        border-radius: 3px;
-        padding: 1px 6px;
-        color: #fff;
-        font-family: inherit;
-        font-size: inherit;
-        line-height: 1.6;
+      .ctrl-btn {
+        background: #1a1a1a;
+        border: 1px solid #555;
+        color: #f0f0f0;
+        font-family: "Courier New", Courier, monospace;
+        font-size: 0.85rem;
+        font-weight: bold;
+        padding: 6px 14px;
+        cursor: pointer;
+        border-radius: 4px;
+        letter-spacing: 0.05em;
+      }
+
+      .ctrl-btn:hover {
+        border-color: #ff1a50;
+        color: #ff1a50;
+      }
+
+      .ctrl-btn.active {
+        border-color: #ff1a50;
+        color: #ff1a50;
       }
 
       /* Legal disclaimer */
@@ -328,7 +338,7 @@
         #status { font-size: 0.85rem; }
       }
       /* Gamepad config modal */
-      #gamepad-modal-overlay {
+      #gamepad-modal-overlay, #keyboard-modal-overlay, #dip-modal-overlay {
         display: none;
         position: fixed;
         inset: 0;
@@ -338,11 +348,11 @@
         justify-content: center;
       }
 
-      #gamepad-modal-overlay.open {
+      #gamepad-modal-overlay.open, #keyboard-modal-overlay.open, #dip-modal-overlay.open {
         display: flex;
       }
 
-      #gamepad-modal {
+      #gamepad-modal, #keyboard-modal, #dip-modal {
         background: #181818;
         border: 1px solid #444;
         border-radius: 8px;
@@ -353,7 +363,11 @@
         color: #f0f0f0;
       }
 
-      #gamepad-modal h2 {
+      .modal-wide {
+        max-width: 750px !important;
+      }
+
+      #gamepad-modal h2, #keyboard-modal h2, #dip-modal h2 {
         font-size: 1.4rem;
         color: #ff1a50;
         text-transform: uppercase;
@@ -362,7 +376,24 @@
         text-align: center;
       }
 
-      #gamepad-modal .gp-row {
+      .modal-2col {
+        display: flex;
+        gap: 24px;
+      }
+
+      .modal-col {
+        flex: 1;
+      }
+
+      .modal-col-title {
+        font-size: 1rem;
+        color: #ff1a50;
+        text-align: center;
+        margin-bottom: 10px;
+        letter-spacing: 0.1em;
+      }
+
+      .gp-row {
         display: flex;
         justify-content: space-between;
         align-items: center;
@@ -370,20 +401,20 @@
         border-bottom: 1px solid #333;
       }
 
-      #gamepad-modal .gp-label {
+      .gp-label {
         font-size: 1.1rem;
         font-weight: bold;
         color: #f0f0f0;
         min-width: 100px;
       }
 
-      #gamepad-modal .gp-right {
+      .gp-right {
         display: flex;
         align-items: center;
         gap: 12px;
       }
 
-      #gamepad-modal .gp-btn {
+      .gp-btn {
         background: #222;
         border: 1px solid #555;
         color: #ff1a50;
@@ -397,12 +428,12 @@
         border-radius: 4px;
       }
 
-      #gamepad-modal .gp-btn:hover {
+      .gp-btn:hover {
         border-color: #ff1a50;
         background: #2a2a2a;
       }
 
-      #gamepad-modal .gp-btn.listening {
+      .gp-btn.listening {
         color: #ff0;
         border-color: #ff0;
         animation: blink 0.6s infinite;
@@ -413,7 +444,7 @@
       }
 
       /* Autofire toggle */
-      #gamepad-modal .gp-autofire {
+      .gp-autofire {
         font-size: 0.95rem;
         font-weight: bold;
         color: #999;
@@ -424,25 +455,25 @@
         user-select: none;
       }
 
-      #gamepad-modal .gp-autofire input {
+      .gp-autofire input {
         accent-color: #ff1a50;
         width: 16px;
         height: 16px;
         cursor: pointer;
       }
 
-      #gamepad-modal .gp-autofire.active {
+      .gp-autofire.active {
         color: #ff1a50;
       }
 
-      #gamepad-modal .gp-actions {
+      .gp-actions {
         display: flex;
         gap: 12px;
         justify-content: center;
         margin-top: 22px;
       }
 
-      #gamepad-modal .gp-actions button {
+      .gp-actions button {
         background: #222;
         border: 1px solid #555;
         color: #f0f0f0;
@@ -455,7 +486,7 @@
         border-radius: 4px;
       }
 
-      #gamepad-modal .gp-actions button:hover {
+      .gp-actions button:hover {
         border-color: #ff1a50;
         color: #ff1a50;
       }
@@ -594,18 +625,15 @@
       </div>
 
       <div id="controls">
-        <kbd>Arrows</kbd> Move
-        <span id="btn-labels"><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> LP/MP/HP
-        <kbd>Z</kbd><kbd>X</kbd><kbd>C</kbd> LK/MK/HK</span>
-        <kbd>5</kbd> Coin
-        <kbd>1</kbd> Start
-        <kbd>P</kbd> Pause
-        <kbd>M</kbd> Mute
-        <kbd>F</kbd> Fullscreen
-        <kbd>Esc</kbd> Quit
-        <button id="config-btn" style="margin-left:10px;background:#1a1a1a;border:1px solid #555;color:#ff1a50;font-family:inherit;font-size:0.95rem;font-weight:bold;padding:4px 12px;cursor:pointer;vertical-align:middle;border-radius:3px;">CONFIG</button>
-        <kbd>S</kbd> Save
-        <kbd>L</kbd> Load
+        <button id="config-btn" class="ctrl-btn">JOYPAD</button>
+        <button id="keyboard-btn" class="ctrl-btn">KEYBOARD</button>
+        <button id="save-btn" class="ctrl-btn">SAVE</button>
+        <button id="load-btn-ss" class="ctrl-btn">LOAD</button>
+        <button id="pause-btn" class="ctrl-btn">PAUSE</button>
+        <button id="mute-btn" class="ctrl-btn">MUTE</button>
+        <button id="fullscreen-btn" class="ctrl-btn">FULL</button>
+        <button id="dip-btn" class="ctrl-btn">DIP SW</button>
+        <button id="quit-btn" class="ctrl-btn" style="color:#ff1a50;">QUIT</button>
       </div>
 
       <div id="savestate-modal-overlay">
@@ -619,12 +647,51 @@
       </div>
 
       <div id="gamepad-modal-overlay">
-        <div id="gamepad-modal">
-          <h2>Gamepad Config (P1)</h2>
-          <div id="gp-mapping-list"></div>
+        <div id="gamepad-modal" class="modal-wide">
+          <h2>Joypad Config</h2>
+          <div class="modal-2col">
+            <div class="modal-col">
+              <h3 class="modal-col-title">Player 1</h3>
+              <div id="gp-mapping-list-p1"></div>
+            </div>
+            <div class="modal-col">
+              <h3 class="modal-col-title">Player 2</h3>
+              <div id="gp-mapping-list-p2"></div>
+            </div>
+          </div>
           <div class="gp-actions">
-            <button id="gp-reset-btn">RESET</button>
+            <button id="gp-reset-btn">RESET ALL</button>
             <button id="gp-close-btn">CLOSE</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="dip-modal-overlay">
+        <div id="dip-modal">
+          <h2>DIP Switches</h2>
+          <div id="dip-list"></div>
+          <div class="gp-actions">
+            <button id="dip-close-btn">CLOSE</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="keyboard-modal-overlay">
+        <div id="keyboard-modal" class="modal-wide">
+          <h2>Keyboard Config</h2>
+          <div class="modal-2col">
+            <div class="modal-col">
+              <h3 class="modal-col-title">Player 1</h3>
+              <div id="kb-mapping-list-p1"></div>
+            </div>
+            <div class="modal-col">
+              <h3 class="modal-col-title">Player 2</h3>
+              <div id="kb-mapping-list-p2"></div>
+            </div>
+          </div>
+          <div class="gp-actions">
+            <button id="kb-reset-btn">RESET ALL</button>
+            <button id="kb-close-btn">CLOSE</button>
           </div>
         </div>
       </div>

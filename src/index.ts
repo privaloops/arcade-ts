@@ -9,8 +9,9 @@ import { CPS1_PARENT_GAMES, ROT270_GAMES } from "./game-catalog";
 import { FrameStateExtractor } from "./video/frame-state";
 import { SpriteSheetManager } from "./video/sprite-sheet";
 import { GameScreen } from "./video/GameScreen";
-import { DEFAULT_GP_MAPPING, type GamepadMapping, type AutofireKey } from "./input/input";
+import { DEFAULT_GP_MAPPING, DEFAULT_P1_MAPPING, DEFAULT_P2_MAPPING, type GamepadMapping, type KeyMapping, type AutofireKey } from "./input/input";
 import { getSlotInfo, getNumSlots } from "./save-state";
+import { getDipDef, bankToIndex, type DipSwitchDef } from "./dip-switches";
 
 function getElement<T extends HTMLElement>(id: string): T {
   const el = document.getElementById(id);
@@ -135,18 +136,57 @@ window.addEventListener("gamepaddisconnected", () => {
 
 // ── Keyboard shortcuts ──────────────────────────────────────────────────────
 
-// Detect AZERTY and update control labels
-window.addEventListener("keydown", function detectLayout(e) {
-  // On AZERTY, physical KeyQ produces "a", physical KeyA produces "q"
-  if (e.code === "KeyQ" && e.key === "a") {
-    const labels = document.getElementById("btn-labels");
-    if (labels) {
-      labels.innerHTML = '<kbd>Q</kbd><kbd>S</kbd><kbd>D</kbd> LP/MP/HP ' +
-        '<kbd>W</kbd><kbd>X</kbd><kbd>C</kbd> LK/MK/HK';
-    }
+// ── Control bar buttons ──────────────────────────────────────────────────
+
+const pauseBtn = getElement<HTMLButtonElement>("pause-btn");
+const muteBtn = getElement<HTMLButtonElement>("mute-btn");
+const fullscreenBtn = getElement<HTMLButtonElement>("fullscreen-btn");
+const saveBtnCtrl = getElement<HTMLButtonElement>("save-btn");
+const loadBtnCtrl = getElement<HTMLButtonElement>("load-btn-ss");
+const keyboardBtn = getElement<HTMLButtonElement>("keyboard-btn");
+
+pauseBtn.addEventListener("click", () => {
+  if (emulator.isRunning()) {
+    emulator.pause();
+    emulator.suspendAudio();
+    pauseBtn.textContent = "RESUME";
+    pauseBtn.classList.add("active");
+    setStatus("Paused");
+  } else if (emulator.isPaused()) {
+    emulator.resume();
+    if (!muted) emulator.resumeAudio();
+    pauseBtn.textContent = "PAUSE";
+    pauseBtn.classList.remove("active");
+    setStatus("Running");
   }
-  window.removeEventListener("keydown", detectLayout);
-}, { once: true });
+});
+
+muteBtn.addEventListener("click", () => {
+  muted = !muted;
+  if (muted) { emulator.suspendAudio(); muteBtn.classList.add("active"); setStatus("Muted"); }
+  else { emulator.resumeAudio(); muteBtn.classList.remove("active"); setStatus("Running"); }
+});
+
+fullscreenBtn.addEventListener("click", toggleFullscreen);
+saveBtnCtrl.addEventListener("click", () => openSsModal("save"));
+loadBtnCtrl.addEventListener("click", () => openSsModal("load"));
+
+const quitBtn = getElement<HTMLButtonElement>("quit-btn");
+quitBtn.addEventListener("click", () => {
+  if (document.fullscreenElement) void document.exitFullscreen();
+  emulator.stop();
+  emulator.suspendAudio();
+  dropZone.classList.remove("hidden");
+  canvas.style.visibility = "hidden";
+  domScreen.style.display = "none";
+  gameScreen = null;
+  controlsEl.classList.remove("visible");
+  pauseBtn.textContent = "PAUSE";
+  pauseBtn.classList.remove("active");
+  setStatus("");
+});
+
+const dipBtn = getElement<HTMLButtonElement>("dip-btn");
 
 let muted = false;
 
@@ -155,32 +195,31 @@ window.addEventListener("keydown", (e) => {
   if (key === "m") {
     // M = Mute / Unmute
     muted = !muted;
-    if (muted) { emulator.suspendAudio(); setStatus("Muted"); }
-    else { emulator.resumeAudio(); setStatus("Running"); }
+    if (muted) { emulator.suspendAudio(); muteBtn.classList.add("active"); setStatus("Muted"); }
+    else { emulator.resumeAudio(); muteBtn.classList.remove("active"); setStatus("Running"); }
   } else if (key === "p") {
     // P = Pause / Resume
     if (emulator.isRunning()) {
       emulator.pause();
       emulator.suspendAudio();
-      setStatus("Paused (P to resume)");
-    } else {
+      pauseBtn.textContent = "RESUME";
+      pauseBtn.classList.add("active");
+      setStatus("Paused");
+    } else if (emulator.isPaused()) {
       emulator.resume();
       if (!muted) emulator.resumeAudio();
+      pauseBtn.textContent = "PAUSE";
+      pauseBtn.classList.remove("active");
       setStatus("Running");
     }
   } else if (e.code === "Escape") {
-    // Escape = Stop game, show game selector
-    if (document.fullscreenElement) {
-      void document.exitFullscreen();
-    }
-    emulator.stop();
-    emulator.suspendAudio();
-    dropZone.classList.remove("hidden");
-    canvas.style.visibility = "hidden";
-    domScreen.style.display = "none";
-    gameScreen = null;
-    controlsEl.classList.remove("visible");
-    setStatus("");
+    // Escape = close modals or exit fullscreen
+    if (ssOverlay.classList.contains("open")) { closeSsModal(); }
+    else if (gpOverlay.classList.contains("open")) { closeGpModal(); }
+    else if (kbOverlay.classList.contains("open")) { closeKbModal(); }
+    else if (dipOverlay.classList.contains("open")) { closeDipModal(); }
+    else if (document.fullscreenElement) { void document.exitFullscreen(); }
+    else if (document.body.classList.contains("pseudo-fullscreen")) { document.body.classList.remove("pseudo-fullscreen"); }
   } else if (key === "f") {
     // F = Toggle fullscreen
     toggleFullscreen();
@@ -269,6 +308,9 @@ async function handleRomFile(file: File): Promise<void> {
     canvasWrapper.classList.toggle("tate", isTate);
     tateToggle.checked = isTate;
 
+    // Restore saved DIP switches before starting
+    loadDipFromStorage(emulator.getGameName(), emulator.getIoPorts());
+
     emulator.start();
     setStatus(`Running: ${file.name} (${mode}${isTate ? ', TATE' : ''})`);
   } catch (err) {
@@ -337,7 +379,8 @@ loadBtn.addEventListener("click", async () => {
 
 const configBtn = getElement<HTMLButtonElement>("config-btn");
 const gpOverlay = getElement<HTMLDivElement>("gamepad-modal-overlay");
-const gpMappingList = getElement<HTMLDivElement>("gp-mapping-list");
+const gpMappingListP1 = getElement<HTMLDivElement>("gp-mapping-list-p1");
+const gpMappingListP2 = getElement<HTMLDivElement>("gp-mapping-list-p2");
 const gpResetBtn = getElement<HTMLButtonElement>("gp-reset-btn");
 const gpCloseBtn = getElement<HTMLButtonElement>("gp-close-btn");
 
@@ -368,15 +411,16 @@ const GP_CONFIG_ROWS: { key: MappingKey; label: string }[] = [
 
 let listeningKey: MappingKey | null = null;
 let listeningBtn: HTMLButtonElement | null = null;
+let listeningPlayer = 0;
 let listenRafId = 0;
 
 const AUTOFIRE_ELIGIBLE: Set<string> = new Set(["button1", "button2", "button3", "button4", "button5", "button6"]);
 
-function renderGpModal(): void {
+function renderGpColumn(player: number, container: HTMLDivElement): void {
   const input = emulator.getInputManager();
-  const mapping = input.getGamepadMapping(0);
-  const autofireFlags = input.getAutofireFlags(0);
-  gpMappingList.innerHTML = "";
+  const mapping = input.getGamepadMapping(player);
+  const autofireFlags = input.getAutofireFlags(player);
+  container.innerHTML = "";
 
   for (const row of GP_CONFIG_ROWS) {
     const div = document.createElement("div");
@@ -392,10 +436,9 @@ function renderGpModal(): void {
     const btn = document.createElement("button");
     btn.className = "gp-btn";
     btn.textContent = gpBtnName(mapping[row.key]);
-    btn.addEventListener("click", () => startListening(row.key, btn));
+    btn.addEventListener("click", () => startListening(row.key, btn, player));
     right.appendChild(btn);
 
-    // Autofire checkbox (only for action buttons)
     if (AUTOFIRE_ELIGIBLE.has(row.key)) {
       const afKey = row.key as AutofireKey;
       const afLabel = document.createElement("label");
@@ -405,7 +448,7 @@ function renderGpModal(): void {
       cb.type = "checkbox";
       cb.checked = autofireFlags.has(afKey);
       cb.addEventListener("change", () => {
-        input.setAutofire(0, afKey, cb.checked);
+        input.setAutofire(player, afKey, cb.checked);
         afLabel.classList.toggle("active", cb.checked);
       });
 
@@ -416,17 +459,22 @@ function renderGpModal(): void {
 
     div.appendChild(label);
     div.appendChild(right);
-    gpMappingList.appendChild(div);
+    container.appendChild(div);
   }
 }
 
-function startListening(key: MappingKey, btn: HTMLButtonElement): void {
-  // Cancel previous listening
+function renderGpModal(): void {
+  renderGpColumn(0, gpMappingListP1);
+  renderGpColumn(1, gpMappingListP2);
+}
+
+function startListening(key: MappingKey, btn: HTMLButtonElement, player: number = 0): void {
   if (listeningBtn) listeningBtn.classList.remove("listening");
   cancelAnimationFrame(listenRafId);
 
   listeningKey = key;
   listeningBtn = btn;
+  listeningPlayer = player;
   btn.textContent = "Press...";
   btn.classList.add("listening");
 
@@ -460,9 +508,9 @@ function captureButton(index: number): void {
   if (!listeningKey || !listeningBtn) return;
 
   const input = emulator.getInputManager();
-  const mapping = input.getGamepadMapping(0);
+  const mapping = input.getGamepadMapping(listeningPlayer);
   mapping[listeningKey] = index;
-  input.setGamepadMapping(0, mapping);
+  input.setGamepadMapping(listeningPlayer, mapping);
 
   listeningBtn.textContent = gpBtnName(index);
   listeningBtn.classList.remove("listening");
@@ -491,10 +539,11 @@ gpOverlay.addEventListener("click", (e) => {
 
 gpResetBtn.addEventListener("click", () => {
   const input = emulator.getInputManager();
-  input.setGamepadMapping(0, { ...DEFAULT_GP_MAPPING });
-  // Clear all autofire flags
-  for (const key of AUTOFIRE_ELIGIBLE) {
-    input.setAutofire(0, key as AutofireKey, false);
+  for (const p of [0, 1]) {
+    input.setGamepadMapping(p, { ...DEFAULT_GP_MAPPING });
+    for (const key of AUTOFIRE_ELIGIBLE) {
+      input.setAutofire(p, key as AutofireKey, false);
+    }
   }
   renderGpModal();
 });
@@ -627,12 +676,218 @@ window.addEventListener("keydown", (e) => {
 window.addEventListener("keydown", (e) => {
   if (!emulator.isRunning() && !emulator.isPaused()) return;
   // Don't trigger when a modal is open
-  if (gpOverlay.classList.contains("open") || ssOverlay.classList.contains("open")) return;
+  if (gpOverlay.classList.contains("open") || ssOverlay.classList.contains("open") || kbOverlay.classList.contains("open")) return;
 
   if (e.key.toLowerCase() === "s" && !e.ctrlKey && !e.metaKey) {
     openSsModal("save");
   } else if (e.key.toLowerCase() === "l" && !e.ctrlKey && !e.metaKey) {
     openSsModal("load");
   }
+});
+
+// ── Keyboard config modal ─────────────────────────────────────────────────
+
+const kbOverlay = getElement<HTMLDivElement>("keyboard-modal-overlay");
+const kbMappingListP1 = getElement<HTMLDivElement>("kb-mapping-list-p1");
+const kbMappingListP2 = getElement<HTMLDivElement>("kb-mapping-list-p2");
+const kbResetBtn = getElement<HTMLButtonElement>("kb-reset-btn");
+const kbCloseBtn = getElement<HTMLButtonElement>("kb-close-btn");
+
+type KbMappingKey = keyof KeyMapping;
+
+const KB_CONFIG_ROWS: { key: KbMappingKey; label: string }[] = [
+  { key: "up",      label: "Up" },
+  { key: "down",    label: "Down" },
+  { key: "left",    label: "Left" },
+  { key: "right",   label: "Right" },
+  { key: "button1", label: "Button 1" },
+  { key: "button2", label: "Button 2" },
+  { key: "button3", label: "Button 3" },
+  { key: "button4", label: "Button 4" },
+  { key: "button5", label: "Button 5" },
+  { key: "button6", label: "Button 6" },
+  { key: "start",   label: "Start" },
+  { key: "coin",    label: "Coin" },
+];
+
+let kbListeningKey: KbMappingKey | null = null;
+let kbListeningBtn: HTMLButtonElement | null = null;
+let kbListeningPlayer = 0;
+
+function keyCodeLabel(code: string): string {
+  if (code.startsWith("Key")) return code.slice(3);
+  if (code.startsWith("Digit")) return code.slice(5);
+  if (code.startsWith("Arrow")) return code.slice(5);
+  if (code === "Enter") return "Enter";
+  if (code === "Space") return "Space";
+  if (code === "Escape") return "Esc";
+  return code;
+}
+
+function renderKbColumn(player: number, container: HTMLDivElement): void {
+  const mapping = emulator.getInputManager().getKeyMapping(player);
+  container.innerHTML = "";
+
+  for (const row of KB_CONFIG_ROWS) {
+    const div = document.createElement("div");
+    div.className = "gp-row";
+
+    const label = document.createElement("span");
+    label.className = "gp-label";
+    label.textContent = row.label;
+
+    const right = document.createElement("div");
+    right.className = "gp-right";
+
+    const btn = document.createElement("button");
+    btn.className = "gp-btn";
+    btn.textContent = keyCodeLabel(mapping[row.key]);
+    btn.addEventListener("click", () => startKbListening(row.key, btn, player));
+    right.appendChild(btn);
+
+    div.appendChild(label);
+    div.appendChild(right);
+    container.appendChild(div);
+  }
+}
+
+function renderKbModal(): void {
+  renderKbColumn(0, kbMappingListP1);
+  renderKbColumn(1, kbMappingListP2);
+}
+
+function startKbListening(key: KbMappingKey, btn: HTMLButtonElement, player: number): void {
+  if (kbListeningBtn) kbListeningBtn.classList.remove("listening");
+  kbListeningKey = key;
+  kbListeningBtn = btn;
+  kbListeningPlayer = player;
+  btn.textContent = "Press...";
+  btn.classList.add("listening");
+}
+
+// Capture keyboard input when listening
+window.addEventListener("keydown", (e) => {
+  if (!kbListeningKey || !kbListeningBtn) return;
+  e.preventDefault();
+  e.stopPropagation();
+
+  const input = emulator.getInputManager();
+  const mapping = input.getKeyMapping(kbListeningPlayer);
+  mapping[kbListeningKey] = e.code;
+  input.setKeyMapping(kbListeningPlayer, mapping);
+
+  kbListeningBtn.textContent = keyCodeLabel(e.code);
+  kbListeningBtn.classList.remove("listening");
+  kbListeningKey = null;
+  kbListeningBtn = null;
+}, true); // capture phase to intercept before other handlers
+
+function openKbModal(): void {
+  renderKbModal();
+  kbOverlay.classList.add("open");
+}
+
+function closeKbModal(): void {
+  if (kbListeningBtn) kbListeningBtn.classList.remove("listening");
+  kbListeningKey = null;
+  kbListeningBtn = null;
+  kbOverlay.classList.remove("open");
+}
+
+keyboardBtn.addEventListener("click", openKbModal);
+kbCloseBtn.addEventListener("click", closeKbModal);
+kbOverlay.addEventListener("click", (e) => {
+  if (e.target === kbOverlay) closeKbModal();
+});
+
+kbResetBtn.addEventListener("click", () => {
+  const input = emulator.getInputManager();
+  input.setKeyMapping(0, { ...DEFAULT_P1_MAPPING });
+  input.setKeyMapping(1, { ...DEFAULT_P2_MAPPING });
+  renderKbModal();
+});
+
+// ── DIP switch modal ──────────────────────────────────────────────────────
+
+const dipOverlay = getElement<HTMLDivElement>("dip-modal-overlay");
+const dipList = getElement<HTMLDivElement>("dip-list");
+const dipCloseBtn = getElement<HTMLButtonElement>("dip-close-btn");
+
+function saveDipToStorage(gameName: string, ioPorts: Uint8Array): void {
+  const data = { a: ioPorts[10], b: ioPorts[12], c: ioPorts[14] };
+  try { localStorage.setItem(`cps1-dip-${gameName}`, JSON.stringify(data)); } catch { /* quota */ }
+}
+
+function loadDipFromStorage(gameName: string, ioPorts: Uint8Array): void {
+  try {
+    const raw = localStorage.getItem(`cps1-dip-${gameName}`);
+    if (!raw) return;
+    const data = JSON.parse(raw) as Record<string, number>;
+    if (typeof data["a"] === "number") ioPorts[10] = data["a"];
+    if (typeof data["b"] === "number") ioPorts[12] = data["b"];
+    if (typeof data["c"] === "number") ioPorts[14] = data["c"];
+  } catch { /* corrupted */ }
+}
+
+function renderDipModal(): void {
+  const gameName = emulator.getGameName();
+  const def = getDipDef(gameName);
+  const ioPorts = emulator.getIoPorts();
+  dipList.innerHTML = "";
+
+  // Info message
+  const info = document.createElement("div");
+  info.style.cssText = "font-size:0.8rem;color:#888;text-align:center;margin-bottom:12px;";
+  info.textContent = "Changes take effect after reloading the game.";
+  dipList.appendChild(info);
+
+  for (const sw of def.switches) {
+    const ioIdx = bankToIndex(sw.bank);
+    const currentByte = ioPorts[ioIdx]!;
+    const currentVal = currentByte & sw.mask;
+
+    const div = document.createElement("div");
+    div.className = "gp-row";
+
+    const label = document.createElement("span");
+    label.className = "gp-label";
+    label.textContent = sw.name;
+
+    const select = document.createElement("select");
+    select.style.cssText = "background:#222;border:1px solid #555;color:#f0f0f0;font-family:inherit;font-size:0.85rem;padding:4px 8px;border-radius:3px;cursor:pointer;";
+
+    for (const opt of sw.options) {
+      const option = document.createElement("option");
+      option.value = String(opt.value);
+      option.textContent = opt.label;
+      if (opt.value === currentVal) option.selected = true;
+      select.appendChild(option);
+    }
+
+    select.addEventListener("change", () => {
+      const newVal = parseInt(select.value, 10);
+      ioPorts[ioIdx] = (ioPorts[ioIdx]! & ~sw.mask) | newVal;
+      saveDipToStorage(gameName, ioPorts);
+    });
+
+    div.appendChild(label);
+    div.appendChild(select);
+    dipList.appendChild(div);
+  }
+}
+
+function openDipModal(): void {
+  renderDipModal();
+  dipOverlay.classList.add("open");
+}
+
+function closeDipModal(): void {
+  dipOverlay.classList.remove("open");
+}
+
+dipBtn.addEventListener("click", openDipModal);
+dipCloseBtn.addEventListener("click", closeDipModal);
+dipOverlay.addEventListener("click", (e) => {
+  if (e.target === dipOverlay) closeDipModal();
 });
 

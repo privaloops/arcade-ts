@@ -53,7 +53,7 @@ export interface KeyMapping {
 
 // ── Default key mappings ────────────────────────────────────────────────────
 
-const DEFAULT_P1_MAPPING: KeyMapping = {
+export const DEFAULT_P1_MAPPING: KeyMapping = {
   up: "ArrowUp",
   down: "ArrowDown",
   left: "ArrowLeft",
@@ -68,7 +68,7 @@ const DEFAULT_P1_MAPPING: KeyMapping = {
   coin: "Digit5",
 };
 
-const DEFAULT_P2_MAPPING: KeyMapping = {
+export const DEFAULT_P2_MAPPING: KeyMapping = {
   up: "KeyI",
   down: "KeyK",
   left: "KeyJ",
