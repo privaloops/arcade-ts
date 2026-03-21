@@ -835,11 +835,19 @@ function renderDipModal(): void {
   const ioPorts = emulator.getIoPorts();
   dipList.innerHTML = "";
 
-  // Info message
+  // Info message (hidden until a change is made)
   const info = document.createElement("div");
-  info.style.cssText = "font-size:0.8rem;color:#888;text-align:center;margin-bottom:12px;";
-  info.textContent = "Changes take effect after reloading the game.";
+  info.style.cssText = "font-size:0.85rem;color:#ff1a50;text-align:center;margin-bottom:12px;display:none;";
+  info.textContent = "Reload the game for changes to take effect.";
   dipList.appendChild(info);
+
+  if (def.switches.length === 0) {
+    const empty = document.createElement("div");
+    empty.style.cssText = "font-size:0.9rem;color:#666;text-align:center;padding:20px 0;";
+    empty.textContent = "No DIP switches for this game.";
+    dipList.appendChild(empty);
+    return;
+  }
 
   for (const sw of def.switches) {
     const ioIdx = bankToIndex(sw.bank);
@@ -868,6 +876,7 @@ function renderDipModal(): void {
       const newVal = parseInt(select.value, 10);
       ioPorts[ioIdx] = (ioPorts[ioIdx]! & ~sw.mask) | newVal;
       saveDipToStorage(gameName, ioPorts);
+      info.style.display = "block";
     });
 
     div.appendChild(label);
