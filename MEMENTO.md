@@ -20,8 +20,8 @@ Et l'idée folle : un renderer DOM où **chaque sprite est un `<div>`**, le jeu 
 | J2 | 18 mars 2026 | 36 | Audio Nuked OPM, WASM, multi-jeu, UI complète, mobile |
 | J3 | 19 mars 2026 | 22 | DOM renderer, React puis vanilla, tests Tom Harte |
 | J4 | 20 mars 2026 | 19 | QSound, Kabuki, TATE mode, batch OPM |
-| J5 | 21 mars 2026 | 5 | Debug QSound audio pipeline (WIP) |
-| **Total** | **5 jours** | **104 commits** | **~18 500 lignes TS, ~28K insertions source** |
+| J5 | 21 mars 2026 | 1 (squashé) | QSound audio fonctionne ! Bug Z80 préfixe opcode trouvé via MAME debugger |
+| **Total** | **5 jours** | **100 commits** | **~20 000 lignes TS+C, ~30K insertions source** |
 
 ---
 
@@ -211,19 +211,37 @@ Pour les jeux verticaux (1941, Varth, Mercs...), auto-rotation CSS du canvas à 
 
 ---
 
-## Jour 5 — Le mur QSound audio (21 mars, en cours)
+## Jour 5 — De "pas de son" à "ça marche l'ami" (21 mars)
 
-### Le debug pipeline QSound
+### La chasse au bug QSound : 12 heures de debug
 
-L'audio QSound est le chantier en cours. Le pipeline est en place mais silencieux :
+Session marathon de debugging de l'audio QSound. Le pipeline était silencieux malgré tout étant en place. Chronologie de la chasse :
 
-1. `fe21a0a` — Le Z80 ne reçoit pas les commandes du 68000 (sound latch non connecté pour le bus QSound)
-2. `8d36dc0` — Le Z80 écrit dans les registres QSound mais toutes les valeurs sont zéro
-3. `35f0ac2` — Interleave CPU 68000/Z80 (les deux tournaient séquentiellement par frame), implémentation EEPROM 93C46 complète, wake hack pour le Z80
-4. `5ae1bd5` — **Percée** : un bypass direct produit du son. Le pipeline DSP fonctionne, c'est le séquençage Z80 qui ne route pas correctement les données
-5. `c28a668` — Investigation ISR : la routine d'interruption capture la commande mais ne stocke que des données minimales
+1. **Pipeline vérifié** — Le QSound DSP HLE produit du son en écrivant les registres directement (bypass). Le problème est côté Z80.
+2. **EEPROM 93C46** — Implémentation du protocole série (CS/CLK/DI/DO). Sans EEPROM, le 68K ne génère pas de commandes son (le jeu est en mode "factory reset").
+3. **Interleave CPU** — Passage de l'exécution séquentielle (68K puis Z80) à l'interleave par scanline (comme MAME). Le 68K et le Z80 voient les écritures shared RAM en temps réel.
+4. **Wake hack** — Tentative de réveiller le Z80 quand le 68K poste une commande. Le Z80 se réveille mais efface tout (code de clear). L'ISR n'a pas le temps de capturer la commande.
+5. **Le bypass direct** — Écriture directe des registres QSound quand le 68K envoie une commande → du son ! Le pipeline DSP fonctionne de bout en bout.
+6. **Traçage Z80** — Le Z80 atteint la subroutine QSound write (0x0A1B) 6000+ fois, mais DE=0x0000 pour tous les paramètres de voix.
 
-Le problème semble être dans le timing d'interleave des CPU et/ou la communication Z80 → QSound DSP.
+### Le coup de grâce : MAME debugger
+
+Après des heures de traçage manuel, l'utilisateur propose d'utiliser MAME en mode debug. **En 2 minutes**, la comparaison des traces révèle le bug :
+
+```
+MAME:  0001: im   1     ← Mode d'interruption 1
+Notre: 0001: im   0     ← Mode d'interruption 0 (!!)
+```
+
+**Cause racine** : les instructions Z80 préfixées (CB, ED, DD, FD) lisaient le second byte d'opcode depuis la **DATA ROM** au lieu de l'**OPCODE ROM**. Avec le chiffrement Kabuki (qui décode opcodes et données différemment), `ED 56` (IM 1) était décodé comme `ED 66` (IM 0, un miroir de `ED 46`).
+
+En IM 0, le Z80 n'appelait jamais l'ISR à 0x0038. L'ISR ne capturait jamais les commandes son. Les voix QSound n'étaient jamais configurées. Silence total.
+
+**Fix : 3 lignes changées** — `fetchByte()` → `fetchOpcode()` dans `execCB()`, `execED()`, `execDDFD()`.
+
+### Leçon
+
+> On a passé 12 heures à tracer manuellement le Z80, tenter des hacks (wake, bypass, force ready flag), instrumenter chaque étape du pipeline. Le bug était un `fetchByte` au lieu de `fetchOpcode` dans 3 méthodes. MAME debugger l'a trouvé en 2 minutes en comparant la trace de boot.
 
 ---
 
@@ -253,6 +271,8 @@ Le problème semble être dans le timing d'interleave des CPU et/ou la communica
 
 5. **Signed vs unsigned** — Le bug Nuked OPM (`~level & 0xffff`) est le plus critique : une seule ligne qui change la sémantique signée du C vers unsigned en JavaScript, rendant des canaux entiers silencieux.
 
+6. **Opcode vs data space** — Le bug Z80 `fetchByte` vs `fetchOpcode` pour les préfixes CB/ED/DD/FD. Avec le chiffrement Kabuki, lire le second byte d'opcode depuis le mauvais espace mémoire change l'instruction décodée (IM 1 → IM 0). Trouvé uniquement via comparaison avec MAME debugger.
+
 ### Pivots architecturaux
 
 | Quand | De | Vers | Pourquoi |
@@ -261,7 +281,8 @@ Le problème semble être dans le timing d'interleave des CPU et/ou la communica
 | J2 | Nuked OPM TS | Nuked OPM WASM | Performance (58% → 33% CPU) |
 | J3 | React DOM renderer | Vanilla TS DOM | React over-engineered pour 60fps full-refresh |
 | J3 | Full DOM renderer | Hybrid canvas+DOM | Trop de tiles DOM pour les scroll layers |
-| J4 | YM2151 only | + QSound HLE | Nécessaire pour les jeux CPS1.5 (Dino, Punisher...) |
+| J4-5 | YM2151 only | + QSound HLE WASM | Nécessaire pour les jeux CPS1.5 (Dino, Punisher...) |
+| J5 | 68K puis Z80 séquentiel | Interleave par scanline | Communication shared RAM nécessite timing concurrent |
 
 ### Ce que Claude fait bien dans ce contexte
 
@@ -296,8 +317,10 @@ Le problème semble être dans le timing d'interleave des CPU et/ou la communica
 | Composants hardware émulés | 7 (M68000, Z80, YM2151, OKI6295, QSound, CPS-A, CPS-B) |
 | Renderers | 3 (WebGL2, Canvas 2D, DOM hybrid) |
 | Réécriture audio YM2151 | 3 versions (custom → Nuked OPM TS → Nuked OPM WASM) |
-| Bug le plus vicieux | `~level & 0xffff` (1 ligne, canaux silencieux) |
+| Bug le plus vicieux | `fetchByte` au lieu de `fetchOpcode` dans CB/ED/DD/FD (3 lignes, QSound muet) |
+| Bug le plus sournois | `~level & 0xffff` (1 ligne, canaux YM2151 silencieux) |
 | Bug le plus fréquent (catégorie) | Byte order / endianness (5+ occurrences) |
+| Temps de debug le plus long | QSound audio (~12h) — résolu en 2min via MAME debugger |
 
 ---
 
@@ -422,15 +445,25 @@ c9910f5  wip: QSound audio pipeline (no sound yet)
 d7ccce6  feat: TATE mode — auto-rotate for vertical CPS1 games
 ```
 
-### Jour 5 — 21 mars 2026 (5 commits, en cours)
+### Jour 5 — 21 mars 2026 (1 commit squashé, 17 WIP condensés)
 
 ```
-fe21a0a  wip: QSound audio debugging — pipeline works, 68K not sending commands
-8d36dc0  wip: QSound audio — Z80 writes QSound regs but all zeros
-35f0ac2  feat: interleaved CPUs + EEPROM 93C46 + wake hack
-5ae1bd5  feat: QSound audio pipeline working — direct bypass produces sound!
-c28a668  wip: QSound audio ISR investigation — ISR captures command but stores minimal data
+9772e5a  feat: QSound audio support + OPM batch clocking + UI improvements ← QSOUND AUDIO WORKS
 ```
+
+Ce commit squash regroupe :
+- QSound HLE WASM (port MAME, 22KB)
+- Z80 bus QSound (shared RAM, DSP I/O, 250Hz IRQ)
+- Kabuki Z80 decryption (4 jeux + clones)
+- EEPROM 93C46 serial protocol
+- Interleaved 68K/Z80 per scanline
+- QSound audio resampling (24038 Hz → 48kHz)
+- Auto-generate GFX mapper ranges
+- Audio ROM region fix (0x28000)
+- **Fix critique : fetchByte→fetchOpcode pour CB/ED/DD/FD**
+- Game selector + archive.org download
+- TATE mode (ROT270)
+- OPM batch clocking (seuil 16)
 
 ---
 
@@ -457,4 +490,4 @@ c28a668  wip: QSound audio ISR investigation — ISR captures command but stores
 ---
 
 *Dernière mise à jour : 21 mars 2026*
-*À compléter avec les sessions suivantes.*
+*QSound audio fonctionnel — Dino et Punisher jouables avec son.*
