@@ -93,6 +93,31 @@
         transition: transform 0.3s ease;
       }
 
+      /* CRT effect overlay */
+      #canvas-wrapper.crt {
+        border-radius: 12px;
+        overflow: hidden;
+        box-shadow: inset 0 0 60px rgba(0,0,0,0.4), 0 0 20px rgba(0,0,0,0.6);
+      }
+
+      #canvas-wrapper.crt::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        z-index: 9999;
+        pointer-events: none;
+        /* 224 scanlines: each line = 1/224th of container height */
+        background: repeating-linear-gradient(
+          to bottom,
+          transparent,
+          transparent 50%,
+          rgba(0,0,0,0.3) 50%,
+          rgba(0,0,0,0.3) 100%
+        );
+        background-size: 100% calc(100% / 224);
+        border-radius: 12px;
+      }
+
       #canvas-wrapper.tate {
         aspect-ratio: 224 / 384;
         max-width: 224px;
@@ -697,6 +722,7 @@
         <button id="pause-btn" class="ctrl-btn">PAUSE</button>
         <button id="mute-btn" class="ctrl-btn">MUTE</button>
         <button id="fullscreen-btn" class="ctrl-btn">FULL</button>
+        <button id="crt-btn" class="ctrl-btn">CRT</button>
         <button id="dip-btn" class="ctrl-btn">DIP SW</button>
         <button id="quit-btn" class="ctrl-btn" style="color:#ff1a50;">QUIT</button>
       </div>

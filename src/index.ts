@@ -190,6 +190,18 @@ fullscreenBtn.addEventListener("click", toggleFullscreen);
 saveBtnCtrl.addEventListener("click", () => openSsModal("save"));
 loadBtnCtrl.addEventListener("click", () => openSsModal("load"));
 
+const crtBtn = getElement<HTMLButtonElement>("crt-btn");
+crtBtn.addEventListener("click", () => {
+  canvasWrapper.classList.toggle("crt");
+  crtBtn.classList.toggle("active");
+  try { localStorage.setItem("cps1-crt", canvasWrapper.classList.contains("crt") ? "1" : "0"); } catch {}
+});
+// Restore CRT preference
+if (localStorage.getItem("cps1-crt") === "1") {
+  canvasWrapper.classList.add("crt");
+  crtBtn.classList.add("active");
+}
+
 const quitBtn = getElement<HTMLButtonElement>("quit-btn");
 quitBtn.addEventListener("click", () => {
   if (document.fullscreenElement) void document.exitFullscreen();
