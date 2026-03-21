@@ -407,6 +407,9 @@ export class Emulator {
   /** Get the current game name (set at ROM load time). */
   getGameName(): string { return this.gameName; }
 
+  /** Expose I/O ports for DIP switch configuration. */
+  getIoPorts(): Uint8Array { return this.bus.getIoPorts(); }
+
   // ── Save State ──────────────────────────────────────────────────────────
 
   /** Save complete emulator state to a localStorage slot. */
