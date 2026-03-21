@@ -11,8 +11,7 @@
 // @ts-ignore — Emscripten-generated ESM module loader
 import createQSound from '../../wasm/qsound.mjs';
 
-/** QSound native sample rate: 60 MHz / 2 / 1248 = 24038 Hz */
-const QSOUND_SAMPLE_RATE = 24038;
+import { QSOUND_SAMPLE_RATE } from '../constants';
 
 interface QSoundModule {
   _qs_init(): void;

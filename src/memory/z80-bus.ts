@@ -34,10 +34,8 @@ export class Z80Bus implements Z80BusInterface {
 
   // YM2151 interface
   private ym2151Register: number;
-  private ym2151Data: number;
 
   // OKI6295 interface
-  private okiCommand: number;
   private okiStatus: number;
 
   // Callbacks for chip communication
@@ -56,8 +54,6 @@ export class Z80Bus implements Z80BusInterface {
     this.soundLatch2Value = 0xFF;
     this.soundLatch2Queue = [];
     this.ym2151Register = 0;
-    this.ym2151Data = 0;
-    this.okiCommand = 0;
     this.okiStatus = 0;
     this.onYm2151Write = null;
     this.onYm2151AddressWrite = null;
@@ -240,7 +236,6 @@ export class Z80Bus implements Z80BusInterface {
 
     // 0xF001 : YM2151 data write
     if (address === 0xF001) {
-      this.ym2151Data = value;
       if (this.onYm2151Write !== null) {
         this.onYm2151Write(this.ym2151Register, value);
       }
@@ -249,7 +244,6 @@ export class Z80Bus implements Z80BusInterface {
 
     // 0xF002 : OKI6295 command
     if (address === 0xF002) {
-      this.okiCommand = value;
       if (this.onOkiWrite !== null) {
         this.onOkiWrite(value);
       }

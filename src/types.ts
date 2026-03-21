@@ -12,6 +12,12 @@ export interface BusInterface {
   write32(address: number, value: number): void;
 }
 
+/** Renderer interface — implemented by Canvas 2D, WebGL2, and DOM renderers */
+export interface RendererInterface {
+  render(framebuffer: Uint8Array): void;
+  drawText(text: string, x: number, y: number): void;
+}
+
 /** Z80 bus interface (byte access + I/O ports) */
 export interface Z80BusInterface {
   read(address: number): number;

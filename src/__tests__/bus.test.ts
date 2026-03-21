@@ -48,16 +48,25 @@ describe('Bus address decoding', () => {
     expect(bus.read8(0x800173)).toBe(0x01); // low byte
   });
 
-  it('sound latch callback fires on write', () => {
+  it('sound latch callback fires on odd-address write', () => {
+    const bus = new Bus();
+    let received = -1;
+    bus.setSoundLatchCallback((v) => { received = v; });
+    // The 68000 writes a word to 0x800180; the callback fires on the low byte (odd address)
+    bus.write8(0x800181, 0x55);
+    expect(received).toBe(0x55);
+  });
+
+  it('sound latch callback does NOT fire on even-address write', () => {
     const bus = new Bus();
     let received = -1;
     bus.setSoundLatchCallback((v) => { received = v; });
     bus.write8(0x800180, 0x55);
-    expect(received).toBe(0x55);
+    expect(received).toBe(-1); // callback not triggered
   });
 
-  it('returns 0 for unmapped reads', () => {
+  it('returns 0xFF for unmapped reads (open bus)', () => {
     const bus = new Bus();
-    expect(bus.read8(0x400000)).toBe(0);
+    expect(bus.read8(0x400000)).toBe(0xFF);
   });
 });

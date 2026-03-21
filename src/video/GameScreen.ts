@@ -15,8 +15,7 @@ import type { FrameStateExtractor } from './frame-state';
 import type { SpriteSheetManager } from './sprite-sheet';
 import type { CPS1Video } from './cps1-video';
 
-const SCREEN_WIDTH = 384;
-const SCREEN_HEIGHT = 224;
+import { SCREEN_WIDTH, SCREEN_HEIGHT } from '../constants';
 const MAX_SPRITES = 256;
 const LAYER_OBJ = 0;
 
@@ -29,6 +28,8 @@ export class GameScreen {
   private readonly spritePool: HTMLDivElement[] = [];
   private readonly fbBehind: Uint8Array;
   private readonly fbFront: Uint8Array;
+  private readonly imgBehind: ImageData;
+  private readonly imgFront: ImageData;
 
   private video: CPS1Video | null = null;
   private extractor: FrameStateExtractor | null = null;
@@ -68,6 +69,10 @@ export class GameScreen {
     this.canvasBehind.style.cssText = 'position:absolute;inset:0;z-index:0;image-rendering:pixelated;';
     this.ctxBehind = this.canvasBehind.getContext('2d')!;
     this.fbBehind = new Uint8Array(SCREEN_WIDTH * SCREEN_HEIGHT * 4);
+    this.imgBehind = new ImageData(
+      new Uint8ClampedArray(this.fbBehind.buffer as ArrayBuffer),
+      SCREEN_WIDTH, SCREEN_HEIGHT,
+    );
 
     // Sprite container
     const spriteContainer = document.createElement('div');
@@ -87,6 +92,10 @@ export class GameScreen {
     this.canvasFront.style.cssText = 'position:absolute;inset:0;z-index:2;image-rendering:pixelated;pointer-events:none;';
     this.ctxFront = this.canvasFront.getContext('2d')!;
     this.fbFront = new Uint8Array(SCREEN_WIDTH * SCREEN_HEIGHT * 4);
+    this.imgFront = new ImageData(
+      new Uint8ClampedArray(this.fbFront.buffer as ArrayBuffer),
+      SCREEN_WIDTH, SCREEN_HEIGHT,
+    );
 
     this.inner.appendChild(this.canvasBehind);
     this.inner.appendChild(spriteContainer);
@@ -127,18 +136,12 @@ export class GameScreen {
 
     // Render behind layers
     this.video.renderScrollLayers(behindIds, this.fbBehind);
-    this.ctxBehind.putImageData(
-      new ImageData(new Uint8ClampedArray(this.fbBehind.buffer as ArrayBuffer), SCREEN_WIDTH, SCREEN_HEIGHT),
-      0, 0,
-    );
+    this.ctxBehind.putImageData(this.imgBehind, 0, 0);
 
     // Render front layers
     if (frontIds.length > 0) {
       this.video.renderScrollLayers(frontIds, this.fbFront);
-      this.ctxFront.putImageData(
-        new ImageData(new Uint8ClampedArray(this.fbFront.buffer as ArrayBuffer), SCREEN_WIDTH, SCREEN_HEIGHT),
-        0, 0,
-      );
+      this.ctxFront.putImageData(this.imgFront, 0, 0);
       this.canvasFront.style.display = '';
     } else {
       this.canvasFront.style.display = 'none';

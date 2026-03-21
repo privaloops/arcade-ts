@@ -18,9 +18,7 @@ import type { CpsBConfig, GfxMapperConfig } from '../memory/rom-loader';
 // Constants
 // ---------------------------------------------------------------------------
 
-const SCREEN_WIDTH = 384;
-const SCREEN_HEIGHT = 224;
-const FRAMEBUFFER_SIZE = SCREEN_WIDTH * SCREEN_HEIGHT * 4;
+import { SCREEN_WIDTH, SCREEN_HEIGHT, FRAMEBUFFER_SIZE } from '../constants';
 
 // Visible area offsets (from MAME cps1.h)
 // The CPS1 generates a 512x262 raster; the visible window is 64..447 x 16..239.
@@ -128,6 +126,17 @@ interface GfxRange {
   start: number;
   end: number;
   bank: number;
+}
+
+/** Config needed by the DOM renderer to create a FrameStateExtractor */
+export interface VideoConfig {
+  graphicsRom: Uint8Array;
+  mapperTable: GfxRange[];
+  bankSizes: [number, number, number, number];
+  layerCtrlOffset: number;
+  enableScroll1: number;
+  enableScroll2: number;
+  enableScroll3: number;
 }
 
 function gfxromBankMapper(type: number, code: number, mapperTable: GfxRange[], bankSizes: number[], bankBases: number[]): number {
@@ -922,6 +931,19 @@ export class CPS1Video {
     if (copyLen > 0) {
       this.objBuffer.set(this.vram.subarray(objBase, objBase + copyLen));
     }
+  }
+
+  /** Expose internal config needed by the DOM renderer (FrameStateExtractor). */
+  getVideoConfig(): VideoConfig {
+    return {
+      graphicsRom: this.graphicsRom,
+      mapperTable: this.mapperTable,
+      bankSizes: this.bankSizes as [number, number, number, number],
+      layerCtrlOffset: this.layerCtrlOffset,
+      enableScroll1: this.enableScroll1,
+      enableScroll2: this.enableScroll2,
+      enableScroll3: this.enableScroll3,
+    };
   }
 
   renderFrame(framebuffer: Uint8Array): void {
