@@ -50,7 +50,6 @@ function setupDomRenderer(): void {
   );
   gameScreen = new GameScreen(domScreen);
   gameScreen.setComponents(video, extractor, sheets, bufs.vram);
-  resizeDomScreen();
   emulator.setVblankCallback(() => extractor.bufferSprites());
   emulator.setRenderCallback(() => { gameScreen?.updateFrame(); });
 }
@@ -76,22 +75,7 @@ document.querySelectorAll<HTMLInputElement>('input[name="renderer"]').forEach(ra
 });
 
 // Resize DOM renderer to fit container
-function resizeDomScreen(): void {
-  if (!gameScreen) return;
-  // In TATE mode, use native dimensions (CSS handles rotation)
-  if (canvasWrapper.classList.contains("tate")) {
-    gameScreen.resize(384, 224);
-    return;
-  }
-  // Use the canvas wrapper's dimensions (works in both normal and fullscreen)
-  const w = canvasWrapper.clientWidth;
-  const h = canvasWrapper.clientHeight;
-  if (w > 0 && h > 0) gameScreen.resize(w, h);
-}
-
-// Re-layout on resize and fullscreen changes
-new ResizeObserver(resizeDomScreen).observe(canvasWrapper);
-document.addEventListener("fullscreenchange", resizeDomScreen);
+// DOM renderer auto-resizes via its own ResizeObserver (see GameScreen).
 
 // ── Emulator instance ────────────────────────────────────────────────────────
 

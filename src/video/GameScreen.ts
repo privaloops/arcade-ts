@@ -57,9 +57,10 @@ export class GameScreen {
       width: ${SCREEN_WIDTH}px;
       height: ${SCREEN_HEIGHT}px;
       position: absolute;
-      top: 50%; left: 50%;
-      transform: translate(-50%, -50%) scale(${scale});
+      inset: 0;
+      margin: auto;
       transform-origin: center;
+      scale: 1;
     `;
 
     // Canvas for scroll layers BEHIND sprites
@@ -102,6 +103,9 @@ export class GameScreen {
     this.inner.appendChild(this.canvasFront);
     this.root.appendChild(this.inner);
     parent.appendChild(this.root);
+
+    // Auto-resize when parent changes size (fullscreen, window resize, etc.)
+    new ResizeObserver(() => this.resize()).observe(this.root);
   }
 
   setComponents(
@@ -205,11 +209,12 @@ export class GameScreen {
     }
   }
 
-  resize(width: number, height: number): void {
-    const scaleX = width / SCREEN_WIDTH;
-    const scaleY = height / SCREEN_HEIGHT;
-    this.scale = Math.min(scaleX, scaleY);
-    this.inner.style.transform = `translate(-50%, -50%) scale(${this.scale})`;
+  resize(_width?: number, _height?: number): void {
+    const w = this.root.clientWidth;
+    const h = this.root.clientHeight;
+    if (w <= 0 || h <= 0) return;
+    this.scale = Math.min(w / SCREEN_WIDTH, h / SCREEN_HEIGHT);
+    this.inner.style.scale = String(this.scale);
   }
 
   destroy(): void {
