@@ -187,16 +187,15 @@ muteBtn.addEventListener("click", () => {
 saveBtnCtrl.addEventListener("click", () => openSsModal("save"));
 loadBtnCtrl.addEventListener("click", () => openSsModal("load"));
 
-const crtBtn = getElement<HTMLButtonElement>("crt-btn");
-crtBtn.addEventListener("click", () => {
-  canvasWrapper.classList.toggle("crt");
-  crtBtn.classList.toggle("active");
-  try { localStorage.setItem("cps1-crt", canvasWrapper.classList.contains("crt") ? "1" : "0"); } catch {}
+// CRT toggle (in Config > Display tab)
+const crtToggle = getElement<HTMLInputElement>("crt-toggle");
+crtToggle.addEventListener("change", () => {
+  canvasWrapper.classList.toggle("crt", crtToggle.checked);
+  try { localStorage.setItem("cps1-crt", crtToggle.checked ? "1" : "0"); } catch {}
 });
-// Restore CRT preference
 if (localStorage.getItem("cps1-crt") === "1") {
   canvasWrapper.classList.add("crt");
-  crtBtn.classList.add("active");
+  crtToggle.checked = true;
 }
 
 const quitBtn = getElement<HTMLButtonElement>("quit-btn");
@@ -209,12 +208,12 @@ quitBtn.addEventListener("click", () => {
   domScreen.style.display = "none";
   gameScreen = null;
   controlsEl.classList.remove("visible");
-  pauseBtn.textContent = "PAUSE";
+  pauseBtn.textContent = "Pause";
   pauseBtn.classList.remove("active");
+  loadBtn.disabled = !gameSelect.value;
   setStatus("");
 });
 
-const dipBtn = getElement<HTMLButtonElement>("dip-btn");
 
 let muted = false;
 
@@ -244,7 +243,6 @@ window.addEventListener("keydown", (e) => {
     // Escape = close modals first, then exit fullscreen
     if (ssOverlay.classList.contains("open")) { closeSsModal(); }
     else if (ctrlOverlay.classList.contains("open")) { closeControlsModal(); }
-    else if (dipOverlay.classList.contains("open")) { closeDipModal(); }
     else if (document.body.classList.contains("pseudo-fullscreen")) { document.body.classList.remove("pseudo-fullscreen"); }
     // Note: browser handles Escape→exit fullscreen automatically, we can't prevent it
   } else if (key === "f") {
@@ -431,8 +429,12 @@ const ctrlResetBtn = getElement<HTMLButtonElement>("controls-reset-btn");
 const ctrlCloseBtn = getElement<HTMLButtonElement>("controls-close-btn");
 const tabJoypad = getElement<HTMLButtonElement>("tab-joypad");
 const tabKeyboard = getElement<HTMLButtonElement>("tab-keyboard");
+const tabDisplay = getElement<HTMLButtonElement>("tab-display");
+const tabDip = getElement<HTMLButtonElement>("tab-dip");
 const tabJoypadContent = getElement<HTMLDivElement>("tab-joypad-content");
 const tabKeyboardContent = getElement<HTMLDivElement>("tab-keyboard-content");
+const tabDisplayContent = getElement<HTMLDivElement>("tab-display-content");
+const tabDipContent = getElement<HTMLDivElement>("tab-dip-content");
 
 const GP_BUTTON_NAMES: Record<number, string> = {
   0: "A", 1: "B", 2: "X", 3: "Y",
@@ -568,15 +570,25 @@ function captureButton(index: number): void {
   listeningBtn = null;
 }
 
-function switchTab(tab: "joypad" | "keyboard"): void {
-  tabJoypadContent.style.display = tab === "joypad" ? "" : "none";
-  tabKeyboardContent.style.display = tab === "keyboard" ? "" : "none";
-  tabJoypad.classList.toggle("active", tab === "joypad");
-  tabKeyboard.classList.toggle("active", tab === "keyboard");
+type ConfigTab = "joypad" | "keyboard" | "display" | "dip";
+const configTabs: { btn: HTMLButtonElement; content: HTMLDivElement; name: ConfigTab }[] = [
+  { btn: tabJoypad, content: tabJoypadContent, name: "joypad" },
+  { btn: tabKeyboard, content: tabKeyboardContent, name: "keyboard" },
+  { btn: tabDisplay, content: tabDisplayContent, name: "display" },
+  { btn: tabDip, content: tabDipContent, name: "dip" },
+];
+
+function switchTab(tab: ConfigTab): void {
+  for (const t of configTabs) {
+    t.content.style.display = t.name === tab ? "" : "none";
+    t.btn.classList.toggle("active", t.name === tab);
+  }
+  if (tab === "dip") renderDipList();
 }
 
-tabJoypad.addEventListener("click", () => switchTab("joypad"));
-tabKeyboard.addEventListener("click", () => switchTab("keyboard"));
+for (const t of configTabs) {
+  t.btn.addEventListener("click", () => switchTab(t.name));
+}
 
 function openControlsModal(): void {
   renderGpModal();
@@ -864,11 +876,9 @@ window.addEventListener("keydown", (e) => {
 }, true); // capture phase to intercept before other handlers
 
 
-// ── DIP switch modal ──────────────────────────────────────────────────────
+// ── DIP switches (inside Config > DIP tab) ───────────────────────────────
 
-const dipOverlay = getElement<HTMLDivElement>("dip-modal-overlay");
 const dipList = getElement<HTMLDivElement>("dip-list");
-const dipCloseBtn = getElement<HTMLButtonElement>("dip-close-btn");
 
 function saveDipToStorage(gameName: string, ioPorts: Uint8Array): void {
   const data = { a: ioPorts[10], b: ioPorts[12], c: ioPorts[14] };
@@ -886,25 +896,24 @@ function loadDipFromStorage(gameName: string, ioPorts: Uint8Array): void {
   } catch { /* corrupted */ }
 }
 
-function renderDipModal(): void {
+function renderDipList(): void {
   const gameName = emulator.getGameName();
   const def = getDipDef(gameName);
   const ioPorts = emulator.getIoPorts();
   dipList.innerHTML = "";
 
-  // Reload button (hidden until a change is made) — appended at the end
   const reloadBtn = document.createElement("button");
   reloadBtn.className = "ctrl-btn";
   reloadBtn.style.cssText = "display:none;margin:14px auto 0;color:#ff1a50;border-color:#ff1a50;";
-  reloadBtn.textContent = "RELOAD GAME";
+  reloadBtn.textContent = "Reload Game";
   reloadBtn.addEventListener("click", () => {
-    closeDipModal();
+    closeControlsModal();
     if (lastRomFile) void handleRomFile(lastRomFile);
   });
 
   if (def.switches.length === 0) {
     const empty = document.createElement("div");
-    empty.style.cssText = "font-size:0.9rem;color:#666;text-align:center;padding:20px 0;";
+    empty.style.cssText = "font-size:0.85rem;color:#444;text-align:center;padding:20px 0;";
     empty.textContent = "No DIP switches for this game.";
     dipList.appendChild(empty);
     return;
@@ -923,7 +932,7 @@ function renderDipModal(): void {
     label.textContent = sw.name;
 
     const select = document.createElement("select");
-    select.style.cssText = "background:#222;border:1px solid #555;color:#f0f0f0;font-family:inherit;font-size:0.85rem;padding:4px 8px;border-radius:3px;cursor:pointer;";
+    select.style.cssText = "background:#1a1a1a;border:1px solid #333;color:#ccc;font-family:inherit;font-size:0.8rem;padding:4px 8px;border-radius:3px;cursor:pointer;";
 
     for (const opt of sw.options) {
       const option = document.createElement("option");
@@ -947,19 +956,4 @@ function renderDipModal(): void {
 
   dipList.appendChild(reloadBtn);
 }
-
-function openDipModal(): void {
-  renderDipModal();
-  showOverlay(dipOverlay);
-}
-
-function closeDipModal(): void {
-  hideOverlay(dipOverlay);
-}
-
-dipBtn.addEventListener("click", openDipModal);
-dipCloseBtn.addEventListener("click", closeDipModal);
-dipOverlay.addEventListener("click", (e) => {
-  if (e.target === dipOverlay) closeDipModal();
-});
 

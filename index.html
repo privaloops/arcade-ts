@@ -5,14 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="description" content="Arcade.ts — CPS1 arcade machine emulator running entirely in the browser. TypeScript, WebGL2, Web Audio. Zero dependencies." />
+    <meta property="og:title" content="Arcade.ts" />
+    <meta property="og:description" content="CPS1 arcade emulator in the browser — TypeScript + WebGL2 + WASM" />
+    <meta property="og:type" content="website" />
     <link rel="manifest" href="/manifest.json" />
     <title>Arcade.ts</title>
     <style>
-      *, *::before, *::after {
-        box-sizing: border-box;
-        margin: 0;
-        padding: 0;
-      }
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
       html, body {
         height: 100%;
@@ -21,9 +21,9 @@
       }
 
       body {
-        background: #000;
+        background: #0a0a0a;
         color: #fff;
-        font-family: "Courier New", Courier, monospace;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
         display: flex;
         flex-direction: column;
         align-items: center;
@@ -37,63 +37,64 @@
         display: flex;
         flex-direction: column;
         align-items: center;
-        gap: 16px;
+        gap: 14px;
         width: 100%;
-        max-width: 800px;
-        padding: 16px;
+        max-width: 820px;
+        padding: 12px 16px;
       }
 
+      /* ── Header ────────────────────────────────────────── */
       header {
-        text-align: center;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 16px;
+        width: 100%;
       }
 
       header h1 {
-        font-size: 2rem;
-        letter-spacing: 0.3em;
+        font-family: "Courier New", Courier, monospace;
+        font-size: 1.6rem;
+        letter-spacing: 0.2em;
         text-transform: uppercase;
-        color: #e8003c;
-        text-shadow: 0 0 12px #e8003c88;
+        color: #ff1a50;
+        text-shadow: 0 0 20px #ff1a5044;
+        white-space: nowrap;
       }
 
-      header p {
-        font-size: 1rem;
-        color: #ccc;
-        letter-spacing: 0.15em;
-        margin-top: 6px;
+      header .tagline {
+        font-size: 0.8rem;
+        color: #666;
+        letter-spacing: 0.05em;
       }
 
-      #renderer-toggle {
-        margin-top: 8px;
-        font-size: 0.95rem;
-        color: #bbb;
-        display: flex;
-        gap: 16px;
-        justify-content: center;
-      }
-
-      #renderer-toggle label {
-        cursor: pointer;
+      header .github-link {
+        margin-left: auto;
+        color: #888;
+        text-decoration: none;
+        font-size: 0.8rem;
         display: flex;
         align-items: center;
-        gap: 3px;
+        gap: 5px;
+        transition: color 0.15s;
       }
 
-      #renderer-toggle input[type="radio"] {
-        accent-color: #e8003c;
-      }
+      header .github-link:hover { color: #ff1a50; }
 
-      /* Canvas wrapper — responsive with CPS1 aspect ratio */
+      header .github-link svg { width: 18px; height: 18px; fill: currentColor; }
+
+      /* ── Canvas wrapper ────────────────────────────────── */
       #canvas-wrapper {
         position: relative;
         width: 100%;
         max-width: 768px;
         aspect-ratio: 384 / 224;
-        background: #0a0a0a;
+        background: #000;
         border: 1px solid #1a1a1a;
-        transition: transform 0.3s ease;
+        border-radius: 4px;
       }
 
-      /* CRT effect overlay */
+      /* CRT effect */
       #canvas-wrapper.crt {
         border-radius: 12px;
         overflow: hidden;
@@ -106,532 +107,228 @@
         inset: 0;
         z-index: 9999;
         pointer-events: none;
-        /* 224 scanlines: each line = 1/224th of container height */
         background: repeating-linear-gradient(
-          to bottom,
-          transparent,
-          transparent 50%,
-          rgba(0,0,0,0.3) 50%,
-          rgba(0,0,0,0.3) 100%
+          to bottom, transparent, transparent 50%,
+          rgba(0,0,0,0.3) 50%, rgba(0,0,0,0.3) 100%
         );
         background-size: 100% calc(100% / 224);
         border-radius: 12px;
       }
 
-      #canvas-wrapper.tate {
-        aspect-ratio: 224 / 384;
-        max-width: 224px;
-      }
-
+      /* TATE */
+      #canvas-wrapper.tate { aspect-ratio: 224 / 384; max-width: 224px; }
       #canvas-wrapper.tate #screen {
-        position: absolute;
-        top: 50%;
-        left: 50%;
-        width: 384px;
-        height: 224px;
+        position: absolute; top: 50%; left: 50%;
+        width: 384px; height: 224px;
         transform: translate(-50%, -50%) rotate(-90deg);
         image-rendering: pixelated;
       }
-
       #canvas-wrapper.tate #dom-screen {
-        position: absolute;
-        top: 50%;
-        left: 50%;
-        width: 384px;
-        height: 224px;
+        position: absolute; top: 50%; left: 50%;
+        width: 384px; height: 224px;
         transform: translate(-50%, -50%) rotate(-90deg);
         overflow: hidden;
       }
 
       #screen, #dom-screen {
-        width: 100%;
-        height: 100%;
-        display: block;
+        width: 100%; height: 100%; display: block;
         image-rendering: pixelated;
-        user-select: none;
-        -webkit-user-select: none;
+        user-select: none; -webkit-user-select: none;
       }
 
-      #dom-screen {
-        display: none;
-        position: absolute;
-        inset: 0;
-        overflow: hidden;
-      }
+      #dom-screen { display: none; position: absolute; inset: 0; overflow: hidden; }
 
-      /* Native fullscreen (desktop) */
+      /* Fullscreen */
       #canvas-wrapper:fullscreen {
-        background: #000;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 100vw;
-        height: 100vh;
-        max-width: none;
-        aspect-ratio: auto;
+        background: #000; display: flex; align-items: center; justify-content: center;
+        width: 100vw; height: 100vh; max-width: none; aspect-ratio: auto;
+        border: none; border-radius: 0;
       }
-
-      #canvas-wrapper:fullscreen #screen {
-        width: 100%;
-        height: 100%;
-        object-fit: contain;
-      }
-
-      #canvas-wrapper:fullscreen #dom-screen {
-        width: 100vw;
-        height: 100vh;
-      }
+      #canvas-wrapper:fullscreen #screen { width: 100%; height: 100%; object-fit: contain; }
+      #canvas-wrapper:fullscreen #dom-screen { width: 100vw; height: 100vh; }
 
       /* TATE fullscreen */
-      #canvas-wrapper.tate:fullscreen {
-        aspect-ratio: auto;
-        max-width: none;
-        width: 100vw;
-        height: 100vh;
-      }
-
+      #canvas-wrapper.tate:fullscreen { aspect-ratio: auto; max-width: none; width: 100vw; height: 100vh; }
       #canvas-wrapper.tate:fullscreen #screen,
       #canvas-wrapper.tate:fullscreen #dom-screen {
-        position: absolute;
-        top: 50%;
-        left: 50%;
+        position: absolute; top: 50%; left: 50%;
         transform: translate(-50%, -50%) rotate(-90deg);
-        /* After -90deg rotation, width becomes visual height and vice versa.
-           We want the rotated image to fit within the viewport. */
         width: min(100vh, 100vw * (384 / 224));
         height: min(100vw, 100vh * (224 / 384));
       }
 
-      /* Pseudo-fullscreen for mobile (iOS has no Fullscreen API on canvas) */
-      body.pseudo-fullscreen {
-        padding: 0;
-      }
-      body.pseudo-fullscreen #app {
-        padding: 0;
-        gap: 0;
-        max-width: none;
-        justify-content: center;
-        height: 100vh;
-        height: 100dvh;
-      }
-      body.pseudo-fullscreen header,
-      body.pseudo-fullscreen #status,
-      body.pseudo-fullscreen #controls,
-      body.pseudo-fullscreen #legal {
-        display: none;
-      }
-      body.pseudo-fullscreen #canvas-wrapper {
-        max-width: none;
-        border: none;
-        width: 100%;
-        height: 100%;
-      }
-      body.pseudo-fullscreen #screen,
-      body.pseudo-fullscreen #dom-screen {
-        width: 100%;
-        height: 100%;
-        object-fit: contain;
-        background: #000;
+      /* Pseudo-fullscreen (iOS) */
+      body.pseudo-fullscreen { padding: 0; }
+      body.pseudo-fullscreen #app { padding: 0; gap: 0; max-width: none; justify-content: center; height: 100dvh; }
+      body.pseudo-fullscreen header, body.pseudo-fullscreen #status,
+      body.pseudo-fullscreen #controls, body.pseudo-fullscreen footer { display: none; }
+      body.pseudo-fullscreen #canvas-wrapper { max-width: none; border: none; width: 100%; height: 100%; }
+      body.pseudo-fullscreen #screen, body.pseudo-fullscreen #dom-screen {
+        width: 100%; height: 100%; object-fit: contain; background: #000;
       }
 
-      /* Drop zone — overlays canvas when no ROM is loaded */
+      /* ── Drop zone ─────────────────────────────────────── */
       #drop-zone {
-        position: absolute;
-        inset: 0;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: 12px;
-        cursor: pointer;
-        transition: background 0.15s;
+        position: absolute; inset: 0;
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        gap: 10px; cursor: pointer; transition: background 0.15s;
       }
-
-      #drop-zone.hidden {
-        display: none;
-      }
-
-      #drop-zone.drag-over {
-        background: #e8003c18;
-        outline: 2px dashed #e8003c;
-        outline-offset: -4px;
-      }
-
-      #drop-zone .icon {
-        font-size: 3rem;
-        line-height: 1;
-        filter: drop-shadow(0 0 8px #e8003c66);
-      }
+      #drop-zone.hidden { display: none; }
+      #drop-zone.drag-over { background: #ff1a5010; outline: 2px dashed #ff1a50; outline-offset: -4px; }
 
       #drop-zone .label {
-        font-size: 1.2rem;
-        letter-spacing: 0.15em;
-        color: #eee;
-        text-transform: uppercase;
+        font-family: "Courier New", monospace;
+        font-size: 1.1rem; letter-spacing: 0.15em; color: #eee; text-transform: uppercase;
+      }
+      #drop-zone .sublabel { font-size: 0.85rem; color: #999; }
+      #drop-zone .format { font-size: 0.8rem; color: #ff1a50; margin-top: 4px; }
+      #drop-zone .games { font-size: 0.75rem; color: #666; max-width: 85%; text-align: center; line-height: 1.8; }
+
+      #file-input { display: none; }
+
+      /* ── Game selector ─────────────────────────────────── */
+      #rom-controls {
+        display: flex; gap: 10px; align-items: center; justify-content: center; flex-wrap: wrap;
       }
 
-      #drop-zone .sublabel {
-        font-size: 0.95rem;
-        color: #ccc;
-        letter-spacing: 0.1em;
+      #game-select {
+        padding: 8px 12px; background: #111; color: #ccc;
+        border: 1px solid #333; font-family: inherit; font-size: 0.85rem;
+        border-radius: 4px; min-width: 240px;
       }
 
-      #drop-zone .format {
-        font-size: 0.9rem;
-        color: #ff1a50;
-        letter-spacing: 0.1em;
-        margin-top: 6px;
+      #load-btn {
+        padding: 8px 18px; background: #ff1a50; color: #fff; border: none;
+        cursor: pointer; font-family: inherit; font-size: 0.85rem; font-weight: 600;
+        letter-spacing: 0.05em; border-radius: 4px; transition: background 0.15s;
       }
+      #load-btn:hover { background: #e0153f; }
+      #load-btn:disabled { background: #333; color: #666; cursor: default; }
 
-      #drop-zone .games {
-        font-size: 0.85rem;
-        color: #bbb;
-        max-width: 85%;
-        text-align: center;
-        line-height: 1.8;
-      }
-
-      #file-input {
-        display: none;
-      }
-
-      #status {
-        font-size: 1rem;
-        color: #ccc;
-        letter-spacing: 0.1em;
-        min-height: 1.2em;
-        text-align: center;
-      }
-
-      #gamepad-status {
-        color: #0f0;
-        margin-left: 8px;
-      }
-
-      /* Controls reference — shown when game is running */
-      #controls {
-        display: none;
-        gap: 8px;
-        justify-content: center;
-        flex-wrap: wrap;
-      }
-
-      #controls.visible {
-        display: flex;
-      }
+      /* ── Control bar ───────────────────────────────────── */
+      #controls { display: none; gap: 6px; justify-content: center; flex-wrap: wrap; }
+      #controls.visible { display: flex; }
 
       .ctrl-btn {
-        background: #1a1a1a;
-        border: 1px solid #555;
-        color: #f0f0f0;
-        font-family: "Courier New", Courier, monospace;
-        font-size: 0.85rem;
-        font-weight: bold;
-        padding: 6px 14px;
-        cursor: pointer;
-        border-radius: 4px;
-        letter-spacing: 0.05em;
+        background: transparent; border: 1px solid #333; color: #999;
+        font-family: inherit; font-size: 0.75rem; font-weight: 600;
+        padding: 5px 10px; cursor: pointer; border-radius: 3px;
+        letter-spacing: 0.03em; transition: all 0.15s;
+        text-transform: uppercase;
       }
+      .ctrl-btn:hover { border-color: #ff1a50; color: #ff1a50; }
+      .ctrl-btn.active { border-color: #ff1a50; color: #ff1a50; }
 
-      .ctrl-btn:hover {
-        border-color: #ff1a50;
-        color: #ff1a50;
+      /* ── Status ────────────────────────────────────────── */
+      #status { font-size: 0.8rem; color: #666; min-height: 1em; text-align: center; }
+      #gamepad-status { color: #4a4; margin-left: 6px; }
+
+      /* ── Footer ────────────────────────────────────────── */
+      footer {
+        position: fixed; bottom: 8px; width: 100%; text-align: center;
+        font-size: 0.65rem; color: #444; letter-spacing: 0.03em;
       }
+      footer a { color: #555; text-decoration: none; }
+      footer a:hover { color: #ff1a50; }
+      footer .sep { margin: 0 6px; color: #333; }
 
-      .ctrl-btn.active {
-        border-color: #ff1a50;
-        color: #ff1a50;
-      }
-
-      /* Legal disclaimer */
-      #legal {
-        position: fixed;
-        bottom: 6px;
-        width: 100%;
-        text-align: center;
-        font-size: 0.5rem;
-        color: #777;
-        letter-spacing: 0.05em;
-      }
-
-      #legal a {
-        color: #888;
-      }
-
-      /* Mobile: smaller controls */
+      /* ── Mobile ─────────────────────────────────────────── */
       @media (max-width: 500px) {
-        #app { padding: 8px; gap: 10px; }
-        header h1 { font-size: 1.5rem; }
-        header p { font-size: 0.85rem; }
-        #controls { font-size: 0.85rem; }
-        #legal { display: none; }
+        #app { padding: 8px; gap: 8px; }
+        header h1 { font-size: 1.2rem; }
+        header .tagline { display: none; }
+        .ctrl-btn { font-size: 0.65rem; padding: 4px 8px; }
+        footer { display: none; }
       }
 
-      /* Landscape mobile: maximize canvas height */
       @media (max-height: 500px) and (orientation: landscape) {
         #app { padding: 4px; gap: 4px; }
-        header, #controls, #legal { display: none; }
-        #canvas-wrapper {
-          max-width: none;
-          height: calc(100dvh - 40px);
-          width: auto;
-          aspect-ratio: 384 / 224;
-        }
-        #status { font-size: 0.85rem; }
+        header, #controls, footer { display: none; }
+        #canvas-wrapper { max-width: none; height: calc(100dvh - 30px); width: auto; aspect-ratio: 384 / 224; }
+        #status { font-size: 0.7rem; }
       }
-      /* Gamepad config modal */
+
+      /* ── Modals ─────────────────────────────────────────── */
       #controls-modal-overlay, #dip-modal-overlay, #savestate-modal-overlay {
-        display: none;
-        position: fixed;
-        inset: 0;
-        background: rgba(0,0,0,0.9);
-        z-index: 10000;
-        align-items: center;
-        justify-content: center;
+        display: none; position: fixed; inset: 0;
+        background: rgba(0,0,0,0.92); z-index: 10000;
+        align-items: center; justify-content: center;
+      }
+      #controls-modal-overlay.open, #dip-modal-overlay.open, #savestate-modal-overlay.open { display: flex; }
+
+      #controls-modal, #dip-modal, #savestate-modal {
+        background: #141414; border: 1px solid #2a2a2a; border-radius: 8px;
+        padding: 24px 28px; max-width: 500px; max-height: 90%;
+        width: 94%; font-family: inherit; color: #eee; overflow-y: auto;
+      }
+      .modal-wide { max-width: 720px !important; }
+
+      #controls-modal h2, #dip-modal h2, #savestate-modal h2 {
+        font-family: "Courier New", monospace;
+        font-size: 1.1rem; color: #ff1a50; text-transform: uppercase;
+        letter-spacing: 0.15em; margin-bottom: 16px; text-align: center;
       }
 
-      #controls-modal-overlay.open, #dip-modal-overlay.open, #savestate-modal-overlay.open {
-        display: flex;
-      }
-
-      #controls-modal, #dip-modal {
-        background: #181818;
-        border: 1px solid #444;
-        border-radius: 8px;
-        padding: 28px 32px;
-        max-width: 500px;
-        max-height: 90%;
-        width: 94%;
-        font-family: "Courier New", Courier, monospace;
-        color: #f0f0f0;
-        overflow-y: auto;
-      }
-
-      .modal-wide {
-        max-width: 750px !important;
-      }
-
-      #controls-modal h2, #dip-modal h2 {
-        font-size: 1.4rem;
-        color: #ff1a50;
-        text-transform: uppercase;
-        letter-spacing: 0.15em;
-        margin-bottom: 20px;
-        text-align: center;
-      }
-
-      .modal-2col {
-        display: flex;
-        gap: 24px;
-      }
-
-      .modal-col {
-        flex: 1;
-      }
-
-      .modal-col-title {
-        font-size: 1rem;
-        color: #ff1a50;
-        text-align: center;
-        margin-bottom: 10px;
-        letter-spacing: 0.1em;
-      }
+      .modal-2col { display: flex; gap: 20px; }
+      .modal-col { flex: 1; }
+      .modal-col-title { font-size: 0.85rem; color: #ff1a50; text-align: center; margin-bottom: 8px; letter-spacing: 0.1em; }
 
       .gp-row {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 10px 0;
-        border-bottom: 1px solid #333;
+        display: flex; justify-content: space-between; align-items: center;
+        padding: 8px 0; border-bottom: 1px solid #1e1e1e;
       }
-
-      .gp-label {
-        font-size: 1.1rem;
-        font-weight: bold;
-        color: #f0f0f0;
-        min-width: 100px;
-      }
-
-      .gp-right {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-      }
-
+      .gp-label { font-size: 0.85rem; font-weight: 600; color: #ccc; min-width: 80px; }
+      .gp-right { display: flex; align-items: center; gap: 10px; }
       .gp-btn {
-        background: #222;
-        border: 1px solid #555;
-        color: #ff1a50;
-        font-family: inherit;
-        font-size: 1rem;
-        font-weight: bold;
-        padding: 8px 18px;
-        cursor: pointer;
-        min-width: 80px;
-        text-align: center;
-        border-radius: 4px;
+        background: #1a1a1a; border: 1px solid #333; color: #ff1a50;
+        font-family: "Courier New", monospace; font-size: 0.8rem; font-weight: bold;
+        padding: 5px 12px; cursor: pointer; min-width: 60px; text-align: center; border-radius: 3px;
       }
+      .gp-btn:hover { border-color: #ff1a50; }
+      .gp-btn.listening { color: #ff0; border-color: #ff0; animation: blink 0.6s infinite; }
+      @keyframes blink { 50% { opacity: 0.4; } }
 
-      .gp-btn:hover {
-        border-color: #ff1a50;
-        background: #2a2a2a;
-      }
+      .gp-autofire { font-size: 0.75rem; font-weight: 600; color: #555; cursor: pointer; display: flex; align-items: center; gap: 4px; user-select: none; }
+      .gp-autofire input { accent-color: #ff1a50; width: 14px; height: 14px; cursor: pointer; }
+      .gp-autofire.active { color: #ff1a50; }
 
-      .gp-btn.listening {
-        color: #ff0;
-        border-color: #ff0;
-        animation: blink 0.6s infinite;
-      }
-
-      @keyframes blink {
-        50% { opacity: 0.4; }
-      }
-
-      /* Autofire toggle */
-      .gp-autofire {
-        font-size: 0.95rem;
-        font-weight: bold;
-        color: #999;
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        gap: 5px;
-        user-select: none;
-      }
-
-      .gp-autofire input {
-        accent-color: #ff1a50;
-        width: 16px;
-        height: 16px;
-        cursor: pointer;
-      }
-
-      .gp-autofire.active {
-        color: #ff1a50;
-      }
-
-      .gp-actions {
-        display: flex;
-        gap: 12px;
-        justify-content: center;
-        margin-top: 22px;
-      }
-
+      .gp-actions { display: flex; gap: 10px; justify-content: center; margin-top: 18px; }
       .gp-actions button {
-        background: #222;
-        border: 1px solid #555;
-        color: #f0f0f0;
-        font-family: inherit;
-        font-size: 1rem;
-        font-weight: bold;
-        padding: 10px 22px;
-        cursor: pointer;
-        letter-spacing: 0.05em;
-        border-radius: 4px;
+        background: transparent; border: 1px solid #333; color: #999;
+        font-family: inherit; font-size: 0.8rem; font-weight: 600;
+        padding: 8px 18px; cursor: pointer; border-radius: 4px; transition: all 0.15s;
       }
+      .gp-actions button:hover { border-color: #ff1a50; color: #ff1a50; }
 
-      .gp-actions button:hover {
-        border-color: #ff1a50;
-        color: #ff1a50;
-      }
-
-      /* Save state modal — reuses gamepad modal overlay styles */
-      #savestate-modal {
-        background: #181818;
-        border: 1px solid #444;
-        border-radius: 8px;
-        padding: 28px 32px;
-        max-width: 500px;
-        width: 94%;
-        font-family: "Courier New", Courier, monospace;
-        color: #f0f0f0;
-      }
-
-      #savestate-modal h2 {
-        font-size: 1.4rem;
-        color: #ff1a50;
-        text-transform: uppercase;
-        letter-spacing: 0.15em;
-        margin-bottom: 20px;
-        text-align: center;
-      }
-
+      /* Save slots */
       .ss-slot {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 12px 14px;
-        margin-bottom: 8px;
-        background: #222;
-        border: 1px solid #444;
-        border-radius: 4px;
-        cursor: pointer;
+        display: flex; align-items: center; padding: 10px 12px; margin-bottom: 6px;
+        background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 4px; cursor: pointer;
+        transition: all 0.15s;
       }
+      .ss-slot:hover { border-color: #ff1a50; }
+      .ss-slot-num { font-family: "Courier New", monospace; font-size: 1rem; font-weight: bold; color: #ff1a50; min-width: 28px; }
+      .ss-slot-info { flex: 1; margin-left: 12px; font-size: 0.85rem; color: #aaa; }
+      .ss-slot-empty { color: #444; font-style: italic; }
+      .ss-slot-date { font-size: 0.7rem; color: #555; }
 
-      .ss-slot:hover {
-        border-color: #ff1a50;
-        background: #2a2a2a;
-      }
-
-      .ss-slot-num {
-        font-size: 1.1rem;
-        font-weight: bold;
-        color: #ff1a50;
-        min-width: 30px;
-      }
-
-      .ss-slot-info {
-        flex: 1;
-        margin-left: 14px;
-        font-size: 0.95rem;
-        color: #ccc;
-      }
-
-      .ss-slot-empty {
-        color: #666;
-        font-style: italic;
-      }
-
-      .ss-slot-date {
-        font-size: 0.8rem;
-        color: #888;
-      }
-
-      #savestate-modal .gp-actions {
-        display: flex;
-        gap: 12px;
-        justify-content: center;
-        margin-top: 18px;
-      }
-
-      #savestate-modal .gp-actions button {
-        background: #222;
-        border: 1px solid #555;
-        color: #f0f0f0;
-        font-family: inherit;
-        font-size: 1rem;
-        font-weight: bold;
-        padding: 10px 22px;
-        cursor: pointer;
-        border-radius: 4px;
-      }
-
-      #savestate-modal .gp-actions button:hover {
-        border-color: #ff1a50;
-        color: #ff1a50;
-      }
+      /* Settings row in controls modal */
+      .config-tabs { display: flex; justify-content: center; gap: 4px; margin-bottom: 16px; }
+      .settings-section { border-top: 1px solid #1e1e1e; margin-top: 14px; padding-top: 14px; }
+      .settings-row { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; }
+      .settings-label { font-size: 0.8rem; color: #888; }
+      .settings-row select, .settings-row input[type="checkbox"] { accent-color: #ff1a50; }
     </style>
   </head>
   <body>
     <div id="app">
       <header>
         <h1>Arcade.ts</h1>
-        <p>Arcade Machine Emulator</p>
-        <div id="renderer-toggle">
-          <label><input type="radio" name="renderer" value="canvas" checked /> Canvas</label>
-          <label><input type="radio" name="renderer" value="dom" /> DOM</label>
-          <label><input type="checkbox" id="tate-toggle" /> TATE</label>
-        </div>
+        <span class="tagline">CPS1 emulator &mdash; from scratch, in TypeScript</span>
+        <a class="github-link" href="https://github.com/user/arcade-ts" target="_blank" rel="noopener">
+          <svg viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+          GitHub
+        </a>
       </header>
 
       <div id="canvas-wrapper">
@@ -639,95 +336,101 @@
         <div id="dom-screen"></div>
 
         <div id="drop-zone">
-          <span class="label">Drop ROM ZIP here</span>
+          <span class="label">Drop ROM here</span>
           <span class="sublabel">or tap to browse</span>
-          <span class="format">MAME ROM sets (.zip)</span>
-          <span class="games">Street Fighter II &middot; Final Fight &middot; Strider &middot; Ghouls'n Ghosts &middot; Cadillacs &amp; Dinosaurs &middot; Knights of the Round &middot; Captain Commando &middot; The Punisher</span>
+          <span class="format">MAME .zip ROM sets</span>
+          <span class="games">Street Fighter II &middot; Final Fight &middot; Strider &middot; Ghouls'n Ghosts &middot; Cadillacs &amp; Dinosaurs &middot; Knights of the Round &middot; Captain Commando &middot; The Punisher &middot; and more</span>
         </div>
         <input type="file" id="file-input" accept=".zip" />
       </div>
 
+      <div id="rom-controls">
+        <select id="game-select">
+          <option value="">Select a game</option>
+        </select>
+        <button id="load-btn" disabled>LOAD</button>
+      </div>
+
+      <div id="controls">
+        <button id="controls-btn" class="ctrl-btn">Config</button>
+        <button id="save-btn" class="ctrl-btn">Save (F5)</button>
+        <button id="load-btn-ss" class="ctrl-btn">Load (F8)</button>
+        <button id="pause-btn" class="ctrl-btn">Pause (P)</button>
+        <button id="mute-btn" class="ctrl-btn">Mute (M)</button>
+        <button id="quit-btn" class="ctrl-btn" style="color:#ff1a50;">Quit</button>
+      </div>
+
+      <p id="status"><span id="gamepad-status"></span></p>
+
+      <!-- Modals -->
       <div id="savestate-modal-overlay">
         <div id="savestate-modal">
-          <h2 id="savestate-title">SAVE STATE</h2>
+          <h2 id="savestate-title">Save State</h2>
           <div id="savestate-slots"></div>
-          <div class="gp-actions">
-            <button id="ss-close-btn">CLOSE</button>
-          </div>
+          <div class="gp-actions"><button id="ss-close-btn">Close</button></div>
         </div>
       </div>
 
       <div id="controls-modal-overlay">
         <div id="controls-modal" class="modal-wide">
-          <h2>Controls</h2>
-          <div style="display:flex;justify-content:center;gap:8px;margin-bottom:16px;">
-            <button id="tab-joypad" class="ctrl-btn active">JOYPAD</button>
-            <button id="tab-keyboard" class="ctrl-btn">KEYBOARD</button>
+          <h2>Config</h2>
+          <div class="config-tabs">
+            <button id="tab-joypad" class="ctrl-btn active">Joypad</button>
+            <button id="tab-keyboard" class="ctrl-btn">Keyboard</button>
+            <button id="tab-display" class="ctrl-btn">Display</button>
+            <button id="tab-dip" class="ctrl-btn">DIP</button>
           </div>
+
           <div id="tab-joypad-content">
             <div class="modal-2col">
-              <div class="modal-col">
-                <h3 class="modal-col-title">Player 1</h3>
-                <div id="gp-mapping-list-p1"></div>
-              </div>
-              <div class="modal-col">
-                <h3 class="modal-col-title">Player 2</h3>
-                <div id="gp-mapping-list-p2"></div>
-              </div>
+              <div class="modal-col"><h3 class="modal-col-title">Player 1</h3><div id="gp-mapping-list-p1"></div></div>
+              <div class="modal-col"><h3 class="modal-col-title">Player 2</h3><div id="gp-mapping-list-p2"></div></div>
             </div>
           </div>
+
           <div id="tab-keyboard-content" style="display:none;">
             <div class="modal-2col">
-              <div class="modal-col">
-                <h3 class="modal-col-title">Player 1</h3>
-                <div id="kb-mapping-list-p1"></div>
-              </div>
-              <div class="modal-col">
-                <h3 class="modal-col-title">Player 2</h3>
-                <div id="kb-mapping-list-p2"></div>
-              </div>
+              <div class="modal-col"><h3 class="modal-col-title">Player 1</h3><div id="kb-mapping-list-p1"></div></div>
+              <div class="modal-col"><h3 class="modal-col-title">Player 2</h3><div id="kb-mapping-list-p2"></div></div>
             </div>
           </div>
+
+          <div id="tab-display-content" style="display:none;">
+            <div class="settings-row">
+              <span class="settings-label">Renderer</span>
+              <div id="renderer-toggle" style="display:flex;gap:10px;font-size:0.8rem;color:#888;">
+                <label style="cursor:pointer;display:flex;align-items:center;gap:3px;"><input type="radio" name="renderer" value="canvas" checked style="accent-color:#ff1a50;" /> Canvas</label>
+                <label style="cursor:pointer;display:flex;align-items:center;gap:3px;"><input type="radio" name="renderer" value="dom" style="accent-color:#ff1a50;" /> DOM</label>
+              </div>
+            </div>
+            <div class="settings-row">
+              <span class="settings-label">CRT Filter</span>
+              <input type="checkbox" id="crt-toggle" style="accent-color:#ff1a50;width:16px;height:16px;cursor:pointer;" />
+            </div>
+            <div class="settings-row">
+              <span class="settings-label">TATE (vertical screen)</span>
+              <input type="checkbox" id="tate-toggle" style="accent-color:#ff1a50;width:16px;height:16px;cursor:pointer;" />
+            </div>
+          </div>
+
+          <div id="tab-dip-content" style="display:none;">
+            <div id="dip-list"></div>
+          </div>
+
           <div class="gp-actions">
-            <button id="controls-reset-btn">RESET ALL</button>
-            <button id="controls-close-btn">CLOSE</button>
+            <button id="controls-reset-btn">Reset All</button>
+            <button id="controls-close-btn">Close</button>
           </div>
         </div>
       </div>
-
-      <div id="dip-modal-overlay">
-        <div id="dip-modal">
-          <h2>DIP Switches</h2>
-          <div id="dip-list"></div>
-          <div class="gp-actions">
-            <button id="dip-close-btn">CLOSE</button>
-          </div>
-        </div>
-      </div>
-
-      <div id="rom-controls" style="display:flex;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap;">
-        <select id="game-select" style="padding:10px 14px;background:#1a1a1a;color:#ff1a50;border:1px solid #555;font-family:inherit;font-size:1rem;border-radius:4px;">
-          <option value="">-- Select a CPS1 game --</option>
-        </select>
-        <button id="load-btn" style="padding:10px 22px;background:#1a1a1a;color:#ff1a50;border:1px solid #555;cursor:pointer;font-family:inherit;font-size:1.1rem;font-weight:bold;letter-spacing:0.1em;border-radius:4px;" disabled>LOAD</button>
-      </div>
-
-      <div id="controls">
-        <button id="controls-btn" class="ctrl-btn">CONTROLS</button>
-        <button id="save-btn" class="ctrl-btn">SAVE (F5)</button>
-        <button id="load-btn-ss" class="ctrl-btn">LOAD (F8)</button>
-        <button id="pause-btn" class="ctrl-btn">PAUSE</button>
-        <button id="mute-btn" class="ctrl-btn">MUTE</button>
-        <button id="crt-btn" class="ctrl-btn">CRT</button>
-        <button id="dip-btn" class="ctrl-btn">DIP SW</button>
-        <button id="quit-btn" class="ctrl-btn" style="color:#ff1a50;">QUIT</button>
-      </div>
-
-      <p id="status"><span id="gamepad-status"></span></p>
     </div>
 
-    <footer id="legal">
-      This emulator does not include any ROMs. You must provide your own legally obtained ROM files.
+    <footer>
+      No ROMs included &mdash; provide your own
+      <span class="sep">|</span>
+      <a href="https://github.com/user/arcade-ts" target="_blank" rel="noopener">GitHub</a>
+      <span class="sep">|</span>
+      Built with TypeScript + WebGL2 + WASM
     </footer>
 
     <script type="module" src="/src/index.ts"></script>
