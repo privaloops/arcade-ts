@@ -1,16 +1,20 @@
-# Building a CPS1 Arcade Emulator from Scratch in TypeScript
+# 20,000 Lines of TypeScript to Hear Ryu's Theme Again
 
-*How I went from zero to playing Street Fighter II in the browser in 5 days — and what I learned about hardware, audio, and the browser as a platform.*
+*I built a CPS1 arcade emulator from scratch in the browser — two CPUs, a mass of bugs, and a 12-hour debug session that MAME solved in 2 minutes.*
 
 ---
 
 ## The idea
 
-<!-- TES MOTS : pourquoi ce projet ? qu'est-ce qui t'a motivé ? nostalgie arcade ? défi technique ? -->
+I'm 48. For me, Double Dragon and OutRun were my first thrills in an arcade hall. Like many people of my generation, retrogaming revives that nostalgia — MAME, RetroArch and others let us live the dream: playing all those games at home without going broke.
 
-The Capcom Play System 1 powered some of the most iconic arcade games of the late 80s and early 90s: Street Fighter II, Final Fight, Ghouls'n Ghosts, Cadillacs & Dinosaurs. I wanted to see if it was possible to emulate this hardware entirely in TypeScript — not a C/C++ port compiled to WASM, but every component written from scratch in a language designed for the web.
+I've been a developer for 20 years, and I was looking for a project that would really push me. The arrival of AI in coding gave me the confidence to attempt something I'd never have tried alone: building an arcade emulator from scratch in TypeScript — a Motorola 68000 CPU, a Z80, video rendering, audio mixing, all running in a browser. The only exception: the YM2151 FM synthesis chip, which uses Nuked OPM compiled from C to WASM for cycle-accuracy. Everything else is pure TypeScript.
 
-## Day 1 — From nothing to "something is happening"
+I got sucked in. The obsession kicked in immediately. The feeling of victory when just *an image* shows up on screen — even a broken, garbled one — is something I wasn't prepared for.
+
+Not long after, Street Fighter II was running in Chrome with sound.
+
+## From nothing to "something is happening"
 
 The first commit was 8,900 lines. A complete M68000 CPU interpreter, a Z80 CPU, a memory bus, a ROM loader, a video renderer, and an input system.
 
@@ -47,9 +51,9 @@ Each fix revealed the next problem:
 
 ### The audio battle
 
-<!-- TES MOTS : décris le moment où le premier son est sorti, l'émotion -->
+When we got a game displaying more or less correctly, I thought the hard part was over. Wrong.
 
-Getting pixels on screen is satisfying. Getting sound out of the speakers is emotional.
+For someone who knew almost nothing about emulation a week ago, I assumed audio would be a formality. It wasn't. With graphics, a pixel is either right or wrong — there's no debate. Audio is different. You can *argue* about synthesis quality. Clipping is barely noticeable on speakers but screams through headphones. The same mix sounds fine in one game and terrible in another.
 
 The CPS1 audio system is its own computer: a Z80 CPU running at 3.58 MHz, connected to a Yamaha YM2151 FM synthesizer and an OKI MSM6295 ADPCM sample player. The main 68000 CPU communicates with the Z80 through a single byte — the "sound latch".
 
@@ -59,11 +63,13 @@ Three bugs stood between silence and music:
 2. **No timer interleaving** — The YM2151 timers only advanced after the Z80 finished its entire frame budget. But the Z80 music driver depends on Timer A interrupts to sequence notes. No interrupts during execution = the sequencer is frozen.
 3. **Spurious IRQs** — Every sound latch write was triggering a Z80 interrupt. The CPS1 doesn't do this — the Z80 polls the latch during its Timer A interrupt routine.
 
-<!-- TES MOTS : le moment "AUDIO WORKS" -->
+After finally getting Street Fighter II to sound right, I discovered that some later CPS1 games use an entirely different audio system — the QSound DSP, found on the so-called "CPS1.5" boards released just before the CPS2. Different chip, different Z80 bus, encrypted CPU, shared memory communication instead of a simple latch. A whole new architecture to implement.
 
-## Day 2 — Making it sound right
+Even today it's not perfect. The FM synthesis is the one component I gave up writing in TypeScript — I ended up compiling Nuked OPM, a cycle-accurate C emulation based on the actual YM2151 die-shot, to WASM. Some battles you don't need to fight twice.
 
-The sound worked, but it didn't sound *right*. The YM2151 FM synthesis is notoriously difficult to emulate — four operators per channel, feedback loops, envelope generators with precise timing.
+## Making it sound right
+
+Sound came out. Wrong sound. The YM2151 FM synthesis is notoriously difficult to emulate — four operators per channel, feedback loops, envelope generators with precise timing.
 
 After four incremental fixes (busy flag 64x too long, modulation shift missing, envelope clocking wrong, LFO not connected), I gave up on my custom implementation and ported **Nuked OPM** — a transistor-level accurate emulator based on the actual YM2151 die shot.
 
@@ -75,24 +81,28 @@ After four incremental fixes (busy flag 64x too long, modulation shift missing, 
 
 With SF2 working, generalizing to 41 games required making every hardware parameter configurable per game: CPS-B ID registers, GFX bank mapper tables, layer priority masks. All extracted from MAME's source code — 400,000 lines of C++ distilled into TypeScript data structures.
 
-## Day 3 — The DOM renderer experiment
+## The DOM renderer experiment
 
-<!-- TES MOTS : l'idée folle, pourquoi DOM ? juste pour voir ? pour le fun ? -->
+I don't know what came over me, but things were going too well. Let's make it harder.
 
-What if every sprite was an HTML `<div>`? What if the game ran inside the browser's DevTools?
+What if instead of rendering frames to a canvas, we displayed everything as DOM elements — actual HTML elements moving around the screen? After all, sprites are just rectangles with pictures. It's not *that* crazy.
 
 The first attempt used React. Components for each sprite, each scroll tile. It worked conceptually but React's virtual DOM diffing is absurd when 100% of the content changes every frame at 60fps.
 
-Stripped React. Rewrote in vanilla TypeScript with direct DOM manipulation. Scroll layers rendered in `<canvas>` (too many tiles for DOM), sprites as `<div>` elements with `<canvas>` children for pixel data.
+Stripped React. Rewrote in vanilla TypeScript with direct DOM manipulation. Scroll layers rendered in `<canvas>` (too many tiles for DOM), sprites as individual HTML elements.
+
+Surprisingly, the basic implementation came together quickly. The bugs were entertaining to look at — imagine Street Fighter II characters rendered as a mosaic of misplaced HTML elements. After a few fixes, it actually worked: every sprite on screen is a real DOM element you can inspect in DevTools. You can hover over Ryu, see his bounding box, check his position, mess with his styles.
 
 ![Final Fight in DOM mode — almost perfect](bugs/bug-18-2026-03-19.png)
 *Final Fight running in DOM mode. Every character on screen is an inspectable HTML element.*
+
+It's less performant, a bit more buggy, but as a developer — I'm sure you understand the appeal.
 
 ### Hardware-level testing
 
 Integrated Tom Harte's ProcessorTests: 16,800 test vectors for the M68000, 117,600 for the Z80. Each vector is a complete CPU state (registers, memory, flags) before and after executing a single instruction. This is how you find bugs that no game triggers but that corrupt state over thousands of frames.
 
-## Day 4 — QSound and encrypted CPUs
+## QSound and encrypted CPUs
 
 Some CPS1 games (Cadillacs & Dinosaurs, The Punisher) use a completely different audio system: the QSound DSP. And their Z80 CPUs are **encrypted** — a custom "Kabuki" Z80 that decrypts opcodes on the fly using per-game keys.
 
@@ -104,17 +114,17 @@ Without decryption, the Z80 executes garbage. With decryption but the wrong inte
 ![Ghouls'n Ghosts — sprites as white squares](bugs/bug-27-2026-03-20.png)
 *Getting closer — the background is perfect but sprites are white squares. Bank mapping works but the sprite tile lookup is off.*
 
-## Day 5 — The 12-hour debug session
+## The 12-hour debug session
 
-<!-- TES MOTS : c'est LE moment du projet. Décris l'émotion, la frustration, le soulagement -->
+I mentioned the QSound plot twist earlier. What I didn't describe is what those 12 hours felt like.
 
 QSound games had no audio. Everything was wired correctly. The DSP produced sound when fed data directly. But the Z80 never sent any data.
 
-12 hours of tracing. Adding logging to every bus write, every Z80 instruction, every QSound register. The Z80 was reaching the audio write subroutine, but all parameters were zero.
+Forward, backward, hope, disappointment, loop. I was so deep in the tunnel I didn't see the hours pass. Out of pride, I wanted to avoid relying on existing tools as much as possible — I wanted to figure it out myself.
 
-Then someone suggested: "Just run it in MAME's debugger and compare."
+12 hours. I added logging to every bus write, every Z80 instruction, every QSound register. The Z80 was reaching the audio write subroutine, but all parameters were zero. I tried hacks — wake signals, direct bypass, force ready flags. Nothing.
 
-Two minutes. That's how long it took. The MAME trace showed:
+Then I caved and opened MAME's debugger. Two minutes. The MAME trace showed:
 ```
 0001: im 1     ← Interrupt mode 1
 ```
@@ -128,11 +138,9 @@ Our trace showed:
 
 In IM 0, the Z80 never calls the interrupt service routine at 0x0038. The ISR never captures sound commands. The QSound voices are never configured. Total silence.
 
-**The fix**: 3 lines changed. `fetchByte()` → `fetchOpcode()` in three methods.
+**The fix**: three lines changed. `fetchByte()` → `fetchOpcode()` in three methods. Sound poured out of the speakers.
 
-> We spent 12 hours manually tracing the Z80, trying hacks (wake signals, direct bypass, force ready flags), instrumenting every pipeline stage. The MAME debugger found it in 2 minutes by comparing boot traces.
-
-<!-- TES MOTS : la leçon que tu en tires -->
+At some point you have to admit defeat. Even with experience and a good AI at your side, you can't challenge a project like MAME — 25 years of accumulated knowledge, hundreds of contributors who've already conquered every one of these problems. The further I go in this project, the deeper my respect for MAME grows.
 
 ## Architecture
 
@@ -162,9 +170,8 @@ The audio output uses an **AudioWorklet** reading from a **SharedArrayBuffer** r
 
 | Metric | Value |
 |--------|-------|
-| Development time | 5 days |
 | Lines of TypeScript | ~20,000 |
-| Games supported | 39 parent ROM sets |
+| Games supported | 39 parent ROM sets (~20-25 fully playable, others with varying bugs) |
 | CPU usage | ~33% on a modern Mac |
 | M68000 test vectors | 16,800 |
 | Z80 test vectors | 117,600 |
@@ -174,17 +181,17 @@ The audio output uses an **AudioWorklet** reading from a **SharedArrayBuffer** r
 
 ## What I learned
 
-<!-- TES MOTS : tes vraies leçons personnelles -->
+**Get out of the tunnel.** I know, you know, we all know: locking yourself in a debug session for hours feels necessary and inevitable. It's not. Set a timer — one hour, two hours max — then stop coding and think. I didn't do this. I burned 12 hours on a bug that MAME's debugger found in two minutes.
 
-1. **Endianness is the enemy.** The CPS1 is big-endian. JavaScript is little-endian. At least 5 bugs came from byte order confusion — pixels, planes, input ports, sprite words, decode rows.
+**Building from zero is addictive.** Seeing a single pixel appear on screen, hearing a first beep come out of your speakers — these hit different. A serotonin hit you don't get from adding a feature to an existing codebase.
 
-2. **One bit matters.** A single bitplane swap turns Ryu's face red. A single mask (`& 0xffff`) silences entire audio channels. A single fetch method (`fetchByte` vs `fetchOpcode`) makes QSound completely mute.
+**You're not smarter than everyone who came before you.** The classic side-project trap. You think you're on virgin ground, but pioneers have already walked this path — and suffered through the same problems. There's comfort in knowing you're not alone. And honestly, we shouldn't complain too much — they didn't have Claude Code.
 
-3. **MAME is the Bible.** Every time I was stuck, reading MAME's source code resolved it. 400,000 lines of C++ written over 25 years by hundreds of contributors — it's the definitive reference for arcade hardware.
+**Endianness will ruin your week.** CPS1 is big-endian. JavaScript is little-endian. Five bugs. Pixels, planes, input ports, sprite words, decode rows. Every single time I thought "no way it's a byte swap issue", it was a byte swap issue.
 
-4. **The browser is a hostile emulation environment.** User gesture requirements for AudioContext, CORS restrictions, SharedArrayBuffer requiring specific HTTP headers, fullscreen API inconsistencies, gamepad detection requiring button press — every browser API has a gotcha.
+**One bit matters.** A bitplane swap turns Ryu's face red. A mask (`& 0xffff`) silences entire channels. A fetch method (`fetchByte` vs `fetchOpcode`) makes QSound mute. That last one cost 12 hours.
 
-5. **The real hardware is elegant.** The CPS1 does scroll layers, sprites, palette animation, and stereo FM audio with two CPUs, two custom ASICs, and a handful of standard chips — all on a board the size of a paperback book. Emulating it takes 20,000 lines of TypeScript and a modern computer.
+**The real hardware is humbling.** The CPS1 does scroll layers, sprites, palette animation, and stereo FM audio with two CPUs, two custom ASICs, and a handful of standard chips — on a board the size of a paperback book. I needed 20,000 lines of TypeScript and a computer a million times more powerful to approximate what it does.
 
 ---
 
