@@ -83,16 +83,20 @@ With SF2 working, generalizing to 41 games required making every hardware parame
 
 ## Day 3 — The DOM renderer experiment
 
-<!-- TES MOTS : l'idée folle, pourquoi DOM ? juste pour voir ? pour le fun ? -->
+I don't know what came over me, but things were going too well. Let's make it harder.
 
-What if every sprite was an HTML `<div>`? What if the game ran inside the browser's DevTools?
+What if instead of rendering frames to a canvas, we displayed everything as DOM elements — actual HTML elements moving around the screen? After all, sprites are just rectangles with pictures. It's not *that* crazy.
 
 The first attempt used React. Components for each sprite, each scroll tile. It worked conceptually but React's virtual DOM diffing is absurd when 100% of the content changes every frame at 60fps.
 
-Stripped React. Rewrote in vanilla TypeScript with direct DOM manipulation. Scroll layers rendered in `<canvas>` (too many tiles for DOM), sprites as `<div>` elements with `<canvas>` children for pixel data.
+Stripped React. Rewrote in vanilla TypeScript with direct DOM manipulation. Scroll layers rendered in `<canvas>` (too many tiles for DOM), sprites as individual HTML elements.
+
+Surprisingly, the basic implementation came together quickly. The bugs were entertaining to look at — imagine Street Fighter II characters rendered as a mosaic of misplaced HTML elements. After a few fixes, it actually worked: every sprite on screen is a real DOM element you can inspect in DevTools. You can hover over Ryu, see his bounding box, check his position, mess with his styles.
 
 ![Final Fight in DOM mode — almost perfect](bugs/bug-18-2026-03-19.png)
 *Final Fight running in DOM mode. Every character on screen is an inspectable HTML element.*
+
+It's less performant, a bit more buggy, but as a developer — I'm sure you understand the appeal.
 
 ### Hardware-level testing
 
