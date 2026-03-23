@@ -663,6 +663,7 @@ let ctrlWasPaused = false;
 function openControlsModal(): void {
   renderGpModal();
   renderKbModal();
+  renderDipList();
   // Pause while config is open
   ctrlWasPaused = emulator.isPaused();
   if (!ctrlWasPaused && emulator.isRunning()) {
