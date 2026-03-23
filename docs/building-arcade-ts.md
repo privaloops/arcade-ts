@@ -6,9 +6,13 @@
 
 ## The idea
 
-<!-- TES MOTS : pourquoi ce projet ? qu'est-ce qui t'a motivé ? nostalgie arcade ? défi technique ? -->
+I'm 48. For me, Double Dragon and OutRun were my first thrills in an arcade hall. Like many people of my generation, retrogaming revives that nostalgia — MAME, RetroArch and others let us live the dream: playing all those games at home without going broke.
 
-The Capcom Play System 1 powered some of the most iconic arcade games of the late 80s and early 90s: Street Fighter II, Final Fight, Ghouls'n Ghosts, Cadillacs & Dinosaurs. I wanted to see if it was possible to emulate this hardware entirely in TypeScript — not a C/C++ port compiled to WASM, but every component written from scratch in a language designed for the web.
+I've been a developer for 20 years, and I was looking for a project that would really push me. The arrival of AI in coding gave me the confidence to attempt something I'd never have tried alone: building an arcade emulator from scratch in TypeScript — a Motorola 68000 CPU, a Z80, video rendering, audio mixing, all running in a browser. The only exception: the YM2151 FM synthesis chip, which uses Nuked OPM compiled from C to WASM for cycle-accuracy. Everything else is pure TypeScript.
+
+I got sucked in. The obsession kicked in immediately. The feeling of victory when just *an image* shows up on screen — even a broken, garbled one — is something I wasn't prepared for.
+
+Five days later, Street Fighter II was running in Chrome with sound.
 
 ## Day 1 — From nothing to "something is happening"
 
