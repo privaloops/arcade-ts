@@ -116,15 +116,15 @@ Without decryption, the Z80 executes garbage. With decryption but the wrong inte
 
 ## Day 5 — The 12-hour debug session
 
-<!-- TES MOTS : c'est LE moment du projet. Décris l'émotion, la frustration, le soulagement -->
+I mentioned the QSound plot twist earlier. What I didn't describe is what those 12 hours felt like.
 
 QSound games had no audio. Everything was wired correctly. The DSP produced sound when fed data directly. But the Z80 never sent any data.
 
+Forward, backward, hope, disappointment, loop. I was so deep in the tunnel I didn't see the hours pass. Out of pride, I wanted to avoid relying on existing tools as much as possible — I wanted to figure it out myself.
+
 12 hours of tracing. Adding logging to every bus write, every Z80 instruction, every QSound register. The Z80 was reaching the audio write subroutine, but all parameters were zero.
 
-Then someone suggested: "Just run it in MAME's debugger and compare."
-
-Two minutes. That's how long it took. The MAME trace showed:
+I caved. One run in MAME's debugger, found in 2 minutes what I'd been chasing for half a day. The MAME trace showed:
 ```
 0001: im 1     ← Interrupt mode 1
 ```
@@ -138,11 +138,9 @@ Our trace showed:
 
 In IM 0, the Z80 never calls the interrupt service routine at 0x0038. The ISR never captures sound commands. The QSound voices are never configured. Total silence.
 
-**The fix**: 3 lines changed. `fetchByte()` → `fetchOpcode()` in three methods.
+**The fix**: three lines changed. `fetchByte()` → `fetchOpcode()` in three methods. Sound poured out of the speakers.
 
-> We spent 12 hours manually tracing the Z80, trying hacks (wake signals, direct bypass, force ready flags), instrumenting every pipeline stage. The MAME debugger found it in 2 minutes by comparing boot traces.
-
-<!-- TES MOTS : la leçon que tu en tires -->
+At some point you have to admit defeat. Even with experience and a good AI at your side, you can't challenge a project like MAME — 25 years of accumulated knowledge, hundreds of contributors who've already conquered every one of these problems. The further I go in this project, the deeper my respect for MAME grows.
 
 ## Architecture
 
