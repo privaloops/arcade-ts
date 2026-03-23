@@ -188,4 +188,6 @@ The audio output uses an **AudioWorklet** reading from a **SharedArrayBuffer** r
 
 ---
 
+*Built with [Claude](https://claude.ai) as AI pair programmer — I drove the architecture, testing, and debugging, Claude helped with implementation speed.*
+
 *[Arcade.ts](https://github.com/privaloops/arcade-ts) is open source. Try the [live demo](https://arcade-ts.vercel.app) — bring your own ROMs.*
