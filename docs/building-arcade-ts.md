@@ -1,6 +1,6 @@
-# Building a CPS1 Arcade Emulator from Scratch in TypeScript
+# 20,000 Lines of TypeScript to Hear Ryu's Theme Again
 
-*How I built a CPS1 arcade emulator from scratch — and what I learned about hardware, audio, and the browser as a platform.*
+*I built a CPS1 arcade emulator from scratch in the browser — two CPUs, a mass of bugs, and a 12-hour debug session that MAME solved in 2 minutes.*
 
 ---
 
@@ -14,7 +14,7 @@ I got sucked in. The obsession kicked in immediately. The feeling of victory whe
 
 Not long after, Street Fighter II was running in Chrome with sound.
 
-## Day 1 — From nothing to "something is happening"
+## From nothing to "something is happening"
 
 The first commit was 8,900 lines. A complete M68000 CPU interpreter, a Z80 CPU, a memory bus, a ROM loader, a video renderer, and an input system.
 
@@ -67,9 +67,9 @@ After finally getting Street Fighter II to sound right, I discovered that some l
 
 Even today it's not perfect. The FM synthesis is the one component I gave up writing in TypeScript — I ended up compiling Nuked OPM, a cycle-accurate C emulation based on the actual YM2151 die-shot, to WASM. Some battles you don't need to fight twice.
 
-## Day 2 — Making it sound right
+## Making it sound right
 
-The sound worked, but it didn't sound *right*. The YM2151 FM synthesis is notoriously difficult to emulate — four operators per channel, feedback loops, envelope generators with precise timing.
+Sound came out. Wrong sound. The YM2151 FM synthesis is notoriously difficult to emulate — four operators per channel, feedback loops, envelope generators with precise timing.
 
 After four incremental fixes (busy flag 64x too long, modulation shift missing, envelope clocking wrong, LFO not connected), I gave up on my custom implementation and ported **Nuked OPM** — a transistor-level accurate emulator based on the actual YM2151 die shot.
 
@@ -81,7 +81,7 @@ After four incremental fixes (busy flag 64x too long, modulation shift missing, 
 
 With SF2 working, generalizing to 41 games required making every hardware parameter configurable per game: CPS-B ID registers, GFX bank mapper tables, layer priority masks. All extracted from MAME's source code — 400,000 lines of C++ distilled into TypeScript data structures.
 
-## Day 3 — The DOM renderer experiment
+## The DOM renderer experiment
 
 I don't know what came over me, but things were going too well. Let's make it harder.
 
@@ -102,7 +102,7 @@ It's less performant, a bit more buggy, but as a developer — I'm sure you unde
 
 Integrated Tom Harte's ProcessorTests: 16,800 test vectors for the M68000, 117,600 for the Z80. Each vector is a complete CPU state (registers, memory, flags) before and after executing a single instruction. This is how you find bugs that no game triggers but that corrupt state over thousands of frames.
 
-## Day 4 — QSound and encrypted CPUs
+## QSound and encrypted CPUs
 
 Some CPS1 games (Cadillacs & Dinosaurs, The Punisher) use a completely different audio system: the QSound DSP. And their Z80 CPUs are **encrypted** — a custom "Kabuki" Z80 that decrypts opcodes on the fly using per-game keys.
 
@@ -114,7 +114,7 @@ Without decryption, the Z80 executes garbage. With decryption but the wrong inte
 ![Ghouls'n Ghosts — sprites as white squares](bugs/bug-27-2026-03-20.png)
 *Getting closer — the background is perfect but sprites are white squares. Bank mapping works but the sprite tile lookup is off.*
 
-## Day 5 — The 12-hour debug session
+## The 12-hour debug session
 
 I mentioned the QSound plot twist earlier. What I didn't describe is what those 12 hours felt like.
 
@@ -122,9 +122,9 @@ QSound games had no audio. Everything was wired correctly. The DSP produced soun
 
 Forward, backward, hope, disappointment, loop. I was so deep in the tunnel I didn't see the hours pass. Out of pride, I wanted to avoid relying on existing tools as much as possible — I wanted to figure it out myself.
 
-12 hours of tracing. Adding logging to every bus write, every Z80 instruction, every QSound register. The Z80 was reaching the audio write subroutine, but all parameters were zero.
+12 hours. I added logging to every bus write, every Z80 instruction, every QSound register. The Z80 was reaching the audio write subroutine, but all parameters were zero. I tried hacks — wake signals, direct bypass, force ready flags. Nothing.
 
-I caved. One run in MAME's debugger, found in 2 minutes what I'd been chasing for half a day. The MAME trace showed:
+Then I caved and opened MAME's debugger. Two minutes. The MAME trace showed:
 ```
 0001: im 1     ← Interrupt mode 1
 ```
@@ -181,17 +181,17 @@ The audio output uses an **AudioWorklet** reading from a **SharedArrayBuffer** r
 
 ## What I learned
 
-1. **Get out of the tunnel.** I know, you know, we all know: locking yourself in a debug session for hours feels necessary and inevitable. It's not. You should set a timer — one hour, two hours max — then stop coding and think. Step back, look at the bigger picture. I didn't do this. I burned an entire day on a bug that MAME's debugger found in two minutes.
+**Get out of the tunnel.** I know, you know, we all know: locking yourself in a debug session for hours feels necessary and inevitable. It's not. Set a timer — one hour, two hours max — then stop coding and think. I didn't do this. I burned 12 hours on a bug that MAME's debugger found in two minutes.
 
-2. **Building from zero is addictive.** Starting a project from scratch with real technical challenges is intoxicating. Seeing a single pixel appear on screen, hearing a first beep come out of your speakers — these are massive victories. A serotonin hit you don't get from adding a feature to an existing codebase.
+**Building from zero is addictive.** Seeing a single pixel appear on screen, hearing a first beep come out of your speakers — these hit different. A serotonin hit you don't get from adding a feature to an existing codebase.
 
-3. **You're not smarter than everyone who came before you.** This is the classic side-project trap. You think you're on virgin ground, but pioneers have already walked this path — and suffered through the same problems. There's comfort in knowing you're not alone. And honestly, we shouldn't complain too much — they didn't have Claude Code.
+**You're not smarter than everyone who came before you.** The classic side-project trap. You think you're on virgin ground, but pioneers have already walked this path — and suffered through the same problems. There's comfort in knowing you're not alone. And honestly, we shouldn't complain too much — they didn't have Claude Code.
 
-4. **Endianness is the enemy.** The CPS1 is big-endian. JavaScript is little-endian. At least 5 bugs came from byte order confusion — pixels, planes, input ports, sprite words, decode rows.
+**Endianness will ruin your week.** CPS1 is big-endian. JavaScript is little-endian. Five bugs. Pixels, planes, input ports, sprite words, decode rows. Every single time I thought "no way it's a byte swap issue", it was a byte swap issue.
 
-5. **One bit matters.** A single bitplane swap turns Ryu's face red. A single mask (`& 0xffff`) silences entire audio channels. A single fetch method (`fetchByte` vs `fetchOpcode`) makes QSound completely mute.
+**One bit matters.** A bitplane swap turns Ryu's face red. A mask (`& 0xffff`) silences entire channels. A fetch method (`fetchByte` vs `fetchOpcode`) makes QSound mute. That last one cost 12 hours.
 
-6. **The real hardware is elegant.** The CPS1 does scroll layers, sprites, palette animation, and stereo FM audio with two CPUs, two custom ASICs, and a handful of standard chips — all on a board the size of a paperback book. Emulating it takes 20,000 lines of TypeScript and a modern computer.
+**The real hardware is humbling.** The CPS1 does scroll layers, sprites, palette animation, and stereo FM audio with two CPUs, two custom ASICs, and a handful of standard chips — on a board the size of a paperback book. I needed 20,000 lines of TypeScript and a computer a million times more powerful to approximate what it does.
 
 ---
 
