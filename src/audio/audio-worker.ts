@@ -121,31 +121,15 @@ function getCarrierTl(ch: number): number {
   return ymTl[ch + 24]!; // slot 3 (operator 4, offset = ch + 3*8)
 }
 
-/** Apply channel mask changes via RL (Right/Left output enable) register.
- *  Muting: write RL=0 (no L, no R output). Unmuting: restore original RL.
- *  This is cleaner than TL manipulation — no interference with volume envelope. */
+/** Apply channel mask: just update mute flags. All muting happens in the
+ *  Z80 write callback — we NEVER write to the WASM directly. */
 function applyChannelMask(mask: number): void {
-  if (mask === lastChannelMask || !ym2151) return;
+  if (mask === lastChannelMask) return;
   lastChannelMask = mask;
 
   for (let ch = 0; ch < 8; ch++) {
-    const shouldMute = (mask & (1 << ch)) === 0;
-    const wasMuted = fmMuted[ch] !== 0;
-    if (shouldMute === wasMuted) continue; // no change
-    fmMuted[ch] = shouldMute ? 1 : 0;
-
-    // Only write RL if the Z80 has initialized this register
-    if (!ymRlValid[ch]) continue;
-
-    // Write RL register (0x20+ch): bits 7-6 = R/L, bits 5-3 = FB, bits 2-0 = connect
-    // Mute: clear bits 7-6 (RL=0). Unmute: restore full original value.
-    const reg = 0x20 + ch;
-    const val = shouldMute ? (ymRlFull[ch]! & 0x3F) : ymRlFull[ch]!;
-    ym2151.writeAddress(reg);
-    ym2151.writeData(val);
+    fmMuted[ch] = (mask & (1 << ch)) === 0 ? 1 : 0;
   }
-  // Restore address latch
-  ym2151.writeAddress(lastYmAddr);
 
   if (oki6295) {
     oki6295.setVoiceMask((mask >> 8) & 0xF);
@@ -300,12 +284,17 @@ self.onmessage = async (e: MessageEvent) => {
       });
       z80Bus.setYm2151WriteCallback((register: number, data: number) => {
         updateYmShadow(register, data);
-        // If this is an RL write and the channel is muted, force RL=0
-        if (register >= 0x20 && register <= 0x27 && fmMuted[register & 7]) {
-          ym2151!.writeData(data & 0x3F); // clear RL bits (keep FB + connect)
-          return;
+
+        // Intercept writes for muted channels — modify data, never block
+        if (register >= 0x60 && register <= 0x7F && fmMuted[register & 7]) {
+          ym2151!.writeData(0x7F); // silence: max attenuation
+        } else if (register >= 0x20 && register <= 0x27 && fmMuted[register & 7]) {
+          ym2151!.writeData(data & 0x3F); // clear RL output bits
+        } else if (register === 0x08 && fmMuted[data & 7]) {
+          ym2151!.writeData(data & 0x07); // key off: clear operator bits
+        } else {
+          ym2151!.writeData(data);
         }
-        ym2151!.writeData(data);
       });
       z80Bus.setYm2151ReadStatusCallback(() => {
         return ym2151!.readStatus();
