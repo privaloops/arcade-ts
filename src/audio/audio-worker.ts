@@ -118,37 +118,21 @@ function getCarrierTl(ch: number): number {
   return ymTl[ch + 24]!; // slot 3 (operator 4, offset = ch + 3*8)
 }
 
-/** Apply channel mask changes: mute/unmute FM channels via TL and OKI via voiceMask. */
+/** Apply channel mask changes: update mute flags for FM and OKI voiceMask. */
 function applyChannelMask(mask: number): void {
   if (mask === lastChannelMask) return;
   lastChannelMask = mask;
 
-  // FM channels (bits 0-7)
+  // FM channels (bits 0-7): just update the mute flags.
+  // Muted channels have their TL writes replaced with 0x7F in the write callback.
+  // The Z80 naturally writes TL values every frame, so mute/unmute takes effect quickly.
   for (let ch = 0; ch < 8; ch++) {
-    const shouldMute = (mask & (1 << ch)) === 0;
-    if (shouldMute && !fmMuted[ch]) {
-      // Mute: write TL=0x7F to all 4 operators
-      fmMuted[ch] = 1;
-      for (let op = 0; op < 4; op++) {
-        const reg = 0x60 + ch + op * 8;
-        ym2151!.writeAddress(reg);
-        ym2151!.writeData(0x7F);
-      }
-    } else if (!shouldMute && fmMuted[ch]) {
-      // Unmute: restore TL from shadow
-      fmMuted[ch] = 0;
-      for (let op = 0; op < 4; op++) {
-        const reg = 0x60 + ch + op * 8;
-        ym2151!.writeAddress(reg);
-        ym2151!.writeData(ymTl[ch + op * 8]!);
-      }
-    }
+    fmMuted[ch] = (mask & (1 << ch)) === 0 ? 1 : 0;
   }
 
   // OKI voices (bits 8-11)
   if (oki6295) {
-    const okiMask = (mask >> 8) & 0xF;
-    oki6295.setVoiceMask(okiMask);
+    oki6295.setVoiceMask((mask >> 8) & 0xF);
   }
 }
 
@@ -296,13 +280,13 @@ self.onmessage = async (e: MessageEvent) => {
         ym2151!.writeAddress(value);
       });
       z80Bus.setYm2151WriteCallback((register: number, data: number) => {
-        // If this is a TL write and the channel is muted, shadow it but don't forward
+        updateYmShadow(register, data);
+        // If this is a TL write and the channel is muted, replace with silence
         if (register >= 0x60 && register <= 0x7F && fmMuted[register & 7]) {
-          updateYmShadow(register, data); // keep shadow up to date
-          return; // don't write to WASM — channel stays silent
+          ym2151!.writeData(0x7F); // silence this operator
+          return;
         }
         ym2151!.writeData(data);
-        updateYmShadow(register, data);
       });
       z80Bus.setYm2151ReadStatusCallback(() => {
         return ym2151!.readStatus();
