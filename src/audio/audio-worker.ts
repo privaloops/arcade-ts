@@ -100,6 +100,7 @@ let vizWriter: VizWriter | null = null;
 // Mute/Solo state
 const fmMuted = new Uint8Array(8);       // 1 = channel is muted
 let lastChannelMask = 0xFFF;             // all 12 channels audible
+let lastYmAddr = 0;                      // last address written to YM2151
 
 // YM2151 shadow register state (for visualization)
 const ymKc = new Uint8Array(8);   // Key Code per channel
@@ -151,7 +152,7 @@ function applyChannelMask(mask: number): void {
   }
 }
 
-/** Flush pending TL restores before the Z80 runs. */
+/** Flush pending TL restores before the Z80 runs. Saves/restores address latch. */
 function flushPendingRestores(): void {
   if (pendingTlRestores.length === 0 || !ym2151) return;
   for (const { reg, val } of pendingTlRestores) {
@@ -159,6 +160,8 @@ function flushPendingRestores(): void {
     ym2151.writeData(val);
   }
   pendingTlRestores.length = 0;
+  // Restore the address latch so the Z80's next data write goes to the right register
+  ym2151.writeAddress(lastYmAddr);
 }
 
 function updateYmShadow(register: number, data: number): void {
@@ -305,6 +308,7 @@ self.onmessage = async (e: MessageEvent) => {
       z80Bus.loadAudioRom(audioRom);
 
       z80Bus.setYm2151AddressWriteCallback((value: number) => {
+        lastYmAddr = value;
         ym2151!.writeAddress(value);
       });
       z80Bus.setYm2151WriteCallback((register: number, data: number) => {
