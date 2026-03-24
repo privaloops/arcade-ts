@@ -88,6 +88,12 @@ export class DebugPanel {
       this.spreadSlider.value = "0";
       if (this.spreadValue) this.spreadValue.textContent = "0";
     }
+
+    // If panel is open, ensure renderer is installed and update loop running
+    if (this.active) {
+      this.renderer.install();
+      this.startUpdateLoop();
+    }
   }
 
   destroy(): void {
