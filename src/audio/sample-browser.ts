@@ -202,13 +202,15 @@ export class SampleBrowser {
         this.emulator.updateOkiRom(rom);
         dropZone.textContent = "\u2713 Replaced";
         dropZone.classList.add("replaced");
-        // Refresh table to show new size/duration
+        this.showToast(`Sample #${phraseId} replaced`, true);
         setTimeout(() => this.refreshTable(), 1000);
       } else {
-        dropZone.textContent = "Error: ROM full";
+        dropZone.textContent = "ROM full";
+        this.showToast(`Sample #${phraseId}: ROM full`, false);
       }
     } catch (err) {
       dropZone.textContent = "Error";
+      this.showToast(`Sample #${phraseId}: import error`, false);
       console.error("Sample replace error:", err);
     }
   }
@@ -305,6 +307,7 @@ export class SampleBrowser {
     a.download = `${gameName}_samples.zip`;
     a.click();
     URL.revokeObjectURL(url);
+    this.showToast(`Exported ${this.phrases.length} samples`, true);
   }
 
   // -- Import Set (ZIP of WAVs) or individual WAVs --
@@ -356,6 +359,7 @@ export class SampleBrowser {
       this.emulator.updateOkiRom(rom);
       this.refreshTable();
     }
+    this.showToast(replaced > 0 ? `Imported ${replaced} sample${replaced > 1 ? "s" : ""}` : "No samples imported", replaced > 0);
   }
 
   private async importFromFiles(files: File[]): Promise<void> {
@@ -384,6 +388,15 @@ export class SampleBrowser {
       this.emulator.updateOkiRom(rom);
       this.refreshTable();
     }
+    this.showToast(replaced > 0 ? `Imported ${replaced} sample${replaced > 1 ? "s" : ""}` : "No samples imported", replaced > 0);
+  }
+
+  private showToast(message: string, success: boolean): void {
+    const toast = document.createElement("div");
+    toast.className = `smp-toast ${success ? "success" : "error"}`;
+    toast.textContent = message;
+    this.container.appendChild(toast);
+    setTimeout(() => toast.remove(), 3000);
   }
 
   private extractPhraseId(filename: string): number {

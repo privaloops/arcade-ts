@@ -629,9 +629,20 @@
       .smp-mic-btn:hover { border-color: #ff1a50; }
       .smp-mic-btn.recording { border-color: #ff1a50; color: #ff1a50; animation: pulse 0.5s infinite; }
       @keyframes pulse { 50% { opacity: 0.5; } }
+
+      .smp-toast {
+        position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+        padding: 8px 20px; border-radius: 4px; font-size: 0.8rem; font-weight: 600;
+        z-index: 99999; animation: toastIn 0.3s ease, toastOut 0.3s ease 2.7s;
+        pointer-events: none;
+      }
+      .smp-toast.success { background: #0a1a10; color: #4ecb71; border: 1px solid #4ecb71; }
+      .smp-toast.error { background: #1a0a10; color: #ff1a50; border: 1px solid #ff1a50; }
+      @keyframes toastIn { from { opacity: 0; transform: translateX(-50%) translateY(10px); } }
+      @keyframes toastOut { to { opacity: 0; transform: translateX(-50%) translateY(-10px); } }
     </style>
   </head>
-  <body class="dbg-active">
+  <body class="dbg-active aud-active">
     <div id="app">
       <header>
         <h1>StudioROM</h1>
@@ -648,7 +659,7 @@
           <button id="load-btn-ss" class="ctrl-btn">Load (F8)</button>
           <button id="pause-btn" class="ctrl-btn">Pause (P)</button>
           <button id="mute-btn" class="ctrl-btn">Mute (M)</button>
-          <button id="dbg-btn" class="ctrl-btn">Debug (F2)</button>
+          <button id="dbg-btn" class="ctrl-btn">Video (F2)</button>
           <button id="aud-btn" class="ctrl-btn">Audio (F3)</button>
           <button id="sample-btn" class="ctrl-btn">Samples (F4)</button>
           <button id="quit-btn" class="ctrl-btn" style="color:#ff1a50;">Quit</button>
@@ -746,7 +757,7 @@
     </footer>
 
     <div id="dbg-panel" class="dbg-panel open"></div>
-    <div id="aud-panel" class="aud-panel"></div>
+    <div id="aud-panel" class="aud-panel open"></div>
     <div id="sample-panel" class="smp-panel"></div>
     <script type="module" src="/src/index.ts"></script>
   </body>
