@@ -57,13 +57,18 @@ export class SampleBrowser {
     const header = el("div", "smp-header");
     const title = el("h2");
     title.textContent = "Samples";
+    const importBtn = el("button", "ctrl-btn smp-export") as HTMLButtonElement;
+    importBtn.textContent = "Import";
+    importBtn.title = "Import WAV files (filename must contain sample number)";
+    importBtn.addEventListener("click", () => this.importSamples());
     const exportBtn = el("button", "ctrl-btn smp-export") as HTMLButtonElement;
-    exportBtn.textContent = "Export ROM";
-    exportBtn.addEventListener("click", () => this.exportRom());
+    exportBtn.textContent = "Export";
+    exportBtn.title = "Download all samples as WAV files";
+    exportBtn.addEventListener("click", () => this.exportSamples());
     const closeBtn = el("button", "smp-close");
     closeBtn.textContent = "\u00D7";
     closeBtn.addEventListener("click", () => this.toggle());
-    header.append(title, exportBtn, closeBtn);
+    header.append(title, importBtn, exportBtn, closeBtn);
     c.appendChild(header);
 
     // Table
@@ -215,24 +220,48 @@ export class SampleBrowser {
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
-      const chunks: Blob[] = [];
+      const ctx = this.getAudioCtx();
+      const source = ctx.createMediaStreamSource(stream);
+      const sampleRate = ctx.sampleRate;
+      const duration = 3; // seconds
+      const bufferSize = Math.ceil(sampleRate * duration);
+      const pcmChunks: Float32Array[] = [];
 
       btn.textContent = "\u23F9"; // ⏹
       btn.classList.add("recording");
 
-      mediaRecorder.ondataavailable = (e) => chunks.push(e.data);
-      mediaRecorder.onstop = async () => {
+      // Use ScriptProcessorNode to capture raw PCM (works everywhere)
+      const processor = ctx.createScriptProcessor(4096, 1, 1);
+      let samplesCollected = 0;
+
+      processor.onaudioprocess = (e) => {
+        if (samplesCollected >= bufferSize) return;
+        const input = e.inputBuffer.getChannelData(0);
+        pcmChunks.push(new Float32Array(input));
+        samplesCollected += input.length;
+      };
+
+      source.connect(processor);
+      processor.connect(ctx.destination);
+
+      setTimeout(() => {
+        processor.disconnect();
+        source.disconnect();
         stream.getTracks().forEach(t => t.stop());
         btn.textContent = "...";
 
-        const blob = new Blob(chunks, { type: "audio/webm" });
-        const ctx = this.getAudioCtx();
-        const arrayBuf = await blob.arrayBuffer();
-        const audioBuf = await ctx.decodeAudioData(arrayBuf);
-        const pcm = audioBuf.getChannelData(0);
-        const adpcm = encodeSample(pcm, audioBuf.sampleRate);
+        // Concatenate PCM chunks
+        const totalSamples = Math.min(samplesCollected, bufferSize);
+        const pcm = new Float32Array(totalSamples);
+        let offset = 0;
+        for (const chunk of pcmChunks) {
+          const copy = Math.min(chunk.length, totalSamples - offset);
+          pcm.set(chunk.subarray(0, copy), offset);
+          offset += copy;
+          if (offset >= totalSamples) break;
+        }
 
+        const adpcm = encodeSample(pcm, sampleRate);
         if (replaceSampleInRom(rom, phraseId, adpcm)) {
           this.emulator.updateOkiRom(rom);
           btn.textContent = "\u2713";
@@ -245,33 +274,74 @@ export class SampleBrowser {
           btn.textContent = "\uD83C\uDFA4";
           btn.classList.remove("recording");
         }
-      };
-
-      mediaRecorder.start();
-      // Stop after 3 seconds (OKI samples are short)
-      setTimeout(() => {
-        if (mediaRecorder.state === "recording") {
-          mediaRecorder.stop();
-        }
-      }, 3000);
+      }, duration * 1000);
     } catch (err) {
       console.error("Mic recording error:", err);
       btn.textContent = "\uD83C\uDFA4";
     }
   }
 
-  // -- Export ROM --
+  // -- Export all samples as individual WAV downloads --
 
-  private exportRom(): void {
+  private exportSamples(): void {
     const rom = this.emulator.getOkiRom();
-    if (!rom) return;
-    const blob = new Blob([new Uint8Array(rom)], { type: "application/octet-stream" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${this.emulator.getGameName()}_oki.bin`;
-    a.click();
-    URL.revokeObjectURL(url);
+    if (!rom || this.phrases.length === 0) return;
+
+    const gameName = this.emulator.getGameName();
+    for (const phrase of this.phrases) {
+      const pcm = decodeSample(rom, phrase);
+      if (pcm.length === 0) continue;
+      const wav = pcmToWav(pcm, OKI_SAMPLE_RATE);
+      const blob = new Blob([wav], { type: "audio/wav" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${gameName}_sample_${String(phrase.id).padStart(2, "0")}.wav`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  // -- Import WAV files --
+
+  private importSamples(): void {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".wav,audio/*";
+    input.multiple = true;
+    input.addEventListener("change", async () => {
+      const files = input.files;
+      if (!files || files.length === 0) return;
+      const rom = this.emulator.getOkiRom();
+      if (!rom) return;
+
+      const ctx = this.getAudioCtx();
+      let replaced = 0;
+
+      for (const file of Array.from(files)) {
+        // Extract sample ID from filename: "XX.wav" or "*_sample_XX.wav"
+        const match = file.name.match(/(\d{1,3})\.wav$/i) ?? file.name.match(/sample_(\d{1,3})/i);
+        if (!match) continue;
+        const phraseId = parseInt(match[1]!, 10);
+        if (phraseId < 0 || phraseId >= 128) continue;
+
+        try {
+          const arrayBuf = await file.arrayBuffer();
+          const audioBuf = await ctx.decodeAudioData(arrayBuf);
+          const pcm = audioBuf.getChannelData(0);
+          const adpcm = encodeSample(pcm, audioBuf.sampleRate);
+          if (replaceSampleInRom(rom, phraseId, adpcm)) replaced++;
+        } catch (err) {
+          console.warn(`Failed to import ${file.name}:`, err);
+        }
+      }
+
+      if (replaced > 0) {
+        this.emulator.updateOkiRom(rom);
+        this.refreshTable();
+      }
+    });
+    input.click();
   }
 }
 
@@ -279,4 +349,46 @@ function el(tag: string, className?: string): HTMLElement {
   const e = document.createElement(tag);
   if (className) e.className = className;
   return e;
+}
+
+/** Convert Float32 PCM to WAV file bytes. */
+function pcmToWav(pcm: Float32Array, sampleRate: number): ArrayBuffer {
+  const numSamples = pcm.length;
+  const bytesPerSample = 2; // 16-bit
+  const dataSize = numSamples * bytesPerSample;
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+
+  // RIFF header
+  writeString(view, 0, "RIFF");
+  view.setUint32(4, 36 + dataSize, true);
+  writeString(view, 8, "WAVE");
+
+  // fmt chunk
+  writeString(view, 12, "fmt ");
+  view.setUint32(16, 16, true); // chunk size
+  view.setUint16(20, 1, true); // PCM format
+  view.setUint16(22, 1, true); // mono
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * bytesPerSample, true);
+  view.setUint16(32, bytesPerSample, true);
+  view.setUint16(34, 16, true); // bits per sample
+
+  // data chunk
+  writeString(view, 36, "data");
+  view.setUint32(40, dataSize, true);
+
+  // PCM samples (Float32 → Int16)
+  for (let i = 0; i < numSamples; i++) {
+    const s = Math.max(-1, Math.min(1, pcm[i]!));
+    view.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+  }
+
+  return buffer;
+}
+
+function writeString(view: DataView, offset: number, str: string): void {
+  for (let i = 0; i < str.length; i++) {
+    view.setUint8(offset + i, str.charCodeAt(i));
+  }
 }
