@@ -185,6 +185,58 @@ export class XRayPanel {
       const val = parseInt(this.spreadSlider!.value, 10);
       this.renderer.setSpread(val);
       this.spreadValue!.textContent = String(val);
+      // Disable parallax if exploded is active
+      if (val > 0 && this.renderer.isParallaxActive()) {
+        this.renderer.setParallax(false);
+        parallaxCb.checked = false;
+      }
+    });
+
+    // Parallax 2.5D section
+    const parallaxTitle = el("div", "xray-section-title");
+    parallaxTitle.textContent = "2.5D Parallax";
+    c.appendChild(parallaxTitle);
+
+    const parallaxToggleRow = el("div", "xray-toggle-row");
+    const parallaxCb = document.createElement("input");
+    parallaxCb.type = "checkbox";
+    parallaxCb.id = "xray-parallax-toggle";
+    const parallaxLabel = el("label", "xray-toggle-label") as HTMLLabelElement;
+    parallaxLabel.htmlFor = parallaxCb.id;
+    parallaxLabel.textContent = "Enable (mouse tracking)";
+    parallaxToggleRow.append(parallaxCb, parallaxLabel);
+    c.appendChild(parallaxToggleRow);
+
+    const parallaxSliderRow = el("div", "xray-slider-row");
+    const parallaxSlider = document.createElement("input");
+    parallaxSlider.type = "range";
+    parallaxSlider.min = "0";
+    parallaxSlider.max = "100";
+    parallaxSlider.value = "50";
+    const parallaxSliderVal = el("span", "xray-slider-value");
+    parallaxSliderVal.textContent = "50";
+    parallaxSliderRow.append(parallaxSlider, parallaxSliderVal);
+    c.appendChild(parallaxSliderRow);
+
+    const parallaxHint = el("div");
+    parallaxHint.style.cssText = "font-size:0.65rem;color:#444;padding:4px 0;";
+    parallaxHint.textContent = "Move mouse over the game to shift layers by depth";
+    c.appendChild(parallaxHint);
+
+    parallaxCb.addEventListener("change", () => {
+      this.renderer.setParallax(parallaxCb.checked);
+      // Disable exploded if parallax is activated
+      if (parallaxCb.checked && this.renderer.getSpread() > 0) {
+        this.renderer.setSpread(0);
+        this.spreadSlider!.value = "0";
+        this.spreadValue!.textContent = "0";
+      }
+    });
+
+    parallaxSlider.addEventListener("input", () => {
+      const val = parseInt(parallaxSlider.value, 10);
+      this.renderer.setParallaxIntensity(val);
+      parallaxSliderVal.textContent = String(val);
     });
   }
 

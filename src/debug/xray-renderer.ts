@@ -25,6 +25,26 @@ export class XRayRenderer {
   private readonly renderer: RendererInterface;
   private readonly framebuffer: Uint8Array;
 
+  // Parallax 2.5D state
+  private parallaxActive = false;
+  private parallaxIntensity = 50; // 0..100
+  private mouseX = 0; // normalized [-1, 1]
+  private mouseY = 0;
+  private smoothMouseX = 0; // lerped
+  private smoothMouseY = 0;
+  private parallaxContainer: HTMLDivElement | null = null;
+  private parallaxCanvases: HTMLCanvasElement[] = [];
+  private parallaxCtxs: CanvasRenderingContext2D[] = [];
+
+  // Depth multipliers per layer: how much parallax offset (in px at intensity=100)
+  // LAYER_OBJ=0, LAYER_SCROLL1=1, LAYER_SCROLL2=2, LAYER_SCROLL3=3
+  private static readonly PARALLAX_DEPTH: Record<number, number> = {
+    [LAYER_SCROLL3]: 10,  // far background — moves most
+    [LAYER_SCROLL2]: 5,   // main background
+    [LAYER_OBJ]: 2,       // sprites
+    [LAYER_SCROLL1]: 0,   // HUD — stays fixed
+  };
+
   // Exploded view DOM
   private explodedContainer: HTMLDivElement | null = null;
   private readonly layerCanvases: HTMLCanvasElement[] = [];
@@ -69,6 +89,7 @@ export class XRayRenderer {
   uninstall(): void {
     this.emulator.setRenderCallback(null);
     this.deactivateExploded();
+    this.deactivateParallax();
   }
 
   updateVideo(): void {
@@ -114,6 +135,33 @@ export class XRayRenderer {
     return this.explodedActive;
   }
 
+  // -- Parallax 2.5D --
+
+  setParallax(active: boolean): void {
+    if (active && !this.parallaxActive) {
+      // Deactivate exploded if active
+      if (this.explodedActive) {
+        this.deactivateExploded();
+        this.spread = 0;
+      }
+      this.activateParallax();
+    } else if (!active && this.parallaxActive) {
+      this.deactivateParallax();
+    }
+  }
+
+  isParallaxActive(): boolean {
+    return this.parallaxActive;
+  }
+
+  setParallaxIntensity(value: number): void {
+    this.parallaxIntensity = value;
+  }
+
+  getParallaxIntensity(): number {
+    return this.parallaxIntensity;
+  }
+
   // -- Render --
 
   private render(): void {
@@ -124,7 +172,9 @@ export class XRayRenderer {
       this.flashLayerId = -1;
     }
 
-    if (this.explodedActive) {
+    if (this.parallaxActive) {
+      this.renderParallax();
+    } else if (this.explodedActive) {
       this.renderExploded();
     } else {
       this.renderMasked();
@@ -352,6 +402,123 @@ export class XRayRenderer {
 
   private onDragEnd = (): void => {
     this.dragging = false;
+  };
+
+  // -- Parallax 2.5D --
+
+  private activateParallax(): void {
+    if (this.parallaxActive) return;
+    this.parallaxActive = true;
+
+    const container = document.createElement("div");
+    container.className = "parallax-container";
+    this.parallaxContainer = container;
+
+    const layerOrder = this.video?.getLayerOrder() ?? [LAYER_SCROLL3, LAYER_SCROLL2, LAYER_OBJ, LAYER_SCROLL1];
+    for (let slot = 0; slot < 4; slot++) {
+      const layerId = layerOrder[slot]!;
+
+      const cvs = document.createElement("canvas");
+      // Oversized canvas to allow parallax shift without showing edges
+      cvs.width = SCREEN_WIDTH + 24;
+      cvs.height = SCREEN_HEIGHT + 24;
+      cvs.className = "parallax-layer";
+      cvs.dataset["layerId"] = String(layerId);
+      cvs.style.zIndex = String(slot);
+      const ctx = cvs.getContext("2d")!;
+
+      container.appendChild(cvs);
+      this.parallaxCanvases[slot] = cvs;
+      this.parallaxCtxs[slot] = ctx;
+    }
+
+    this.mainCanvas.style.display = "none";
+    this.canvasWrapper.appendChild(container);
+
+    // Track mouse over the container
+    container.addEventListener("mousemove", this.onParallaxMouse);
+    container.addEventListener("mouseleave", this.onParallaxLeave);
+  }
+
+  private deactivateParallax(): void {
+    if (!this.parallaxActive) return;
+    this.parallaxActive = false;
+
+    if (this.parallaxContainer) {
+      this.parallaxContainer.removeEventListener("mousemove", this.onParallaxMouse);
+      this.parallaxContainer.removeEventListener("mouseleave", this.onParallaxLeave);
+      this.parallaxContainer.remove();
+      this.parallaxContainer = null;
+    }
+
+    this.parallaxCanvases.length = 0;
+    this.parallaxCtxs.length = 0;
+    this.smoothMouseX = 0;
+    this.smoothMouseY = 0;
+    this.mouseX = 0;
+    this.mouseY = 0;
+
+    this.mainCanvas.style.display = "";
+  }
+
+  private renderParallax(): void {
+    const video = this.video!;
+    const layerOrder = video.getLayerOrder();
+
+    // Smooth lerp towards target mouse position (0.12 = responsive but smooth)
+    this.smoothMouseX += (this.mouseX - this.smoothMouseX) * 0.12;
+    this.smoothMouseY += (this.mouseY - this.smoothMouseY) * 0.12;
+
+    const intensity = this.parallaxIntensity / 100;
+
+    for (let slot = 0; slot < 4; slot++) {
+      const layerId = layerOrder[slot]!;
+      const fb = this.layerFBs[slot]!;
+      const imgData = this.layerImgDatas[slot]!;
+      const ctx = this.parallaxCtxs[slot];
+      const cvs = this.parallaxCanvases[slot];
+      if (!ctx || !cvs) continue;
+
+      // Clear to transparent
+      fb.fill(0);
+      video.invalidatePaletteCache();
+
+      if (this.layerMask[layerId] && video.isLayerEnabled(layerId)) {
+        if (layerId === LAYER_OBJ) {
+          video.renderObjects(fb);
+        } else {
+          video.renderScrollLayer(layerId, fb);
+        }
+      }
+
+      // Upload to oversized canvas (centered with 12px margin)
+      imgData.data.set(fb);
+      ctx.clearRect(0, 0, cvs.width, cvs.height);
+      ctx.putImageData(imgData, 12, 12);
+
+      // Apply parallax offset via CSS transform
+      const depth = XRayRenderer.PARALLAX_DEPTH[layerId] ?? 0;
+      const offsetX = this.smoothMouseX * depth * intensity;
+      const offsetY = this.smoothMouseY * depth * intensity;
+      cvs.style.transform = `translate(${offsetX}px, ${offsetY}px)`;
+
+      // Update dataset for layer order changes
+      cvs.dataset["layerId"] = String(layerId);
+      cvs.style.zIndex = String(slot);
+    }
+  }
+
+  private onParallaxMouse = (e: MouseEvent): void => {
+    const rect = this.parallaxContainer!.getBoundingClientRect();
+    // Normalize to [-1, 1] from center
+    this.mouseX = ((e.clientX - rect.left) / rect.width - 0.5) * 2;
+    this.mouseY = ((e.clientY - rect.top) / rect.height - 0.5) * 2;
+  };
+
+  private onParallaxLeave = (): void => {
+    // Smoothly return to center
+    this.mouseX = 0;
+    this.mouseY = 0;
   };
 
   // -- Static info --

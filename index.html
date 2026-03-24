@@ -408,6 +408,25 @@
         text-shadow: 0 0 6px rgba(255,26,80,0.4);
         pointer-events: none; text-transform: uppercase; letter-spacing: 0.1em;
       }
+
+      /* Parallax 2.5D */
+      .parallax-container {
+        position: relative; width: 100%; aspect-ratio: 384 / 224;
+        overflow: hidden; background: #000;
+      }
+      .parallax-layer {
+        position: absolute;
+        top: -12px; left: -12px;
+        width: calc(100% + 24px); height: calc(100% + 24px);
+        image-rendering: pixelated;
+        will-change: transform;
+      }
+
+      .xray-toggle-row {
+        display: flex; align-items: center; gap: 8px; padding: 6px 0;
+      }
+      .xray-toggle-row input[type="checkbox"] { accent-color: #ff1a50; margin: 0; }
+      .xray-toggle-label { font-size: 0.85rem; font-weight: 600; color: #ccc; cursor: pointer; }
     </style>
   </head>
   <body>
