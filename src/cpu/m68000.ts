@@ -181,16 +181,6 @@ export class M68000 {
     return this._traceLog.join('\n');
   }
 
-  /** Download the trace as a text file. */
-  downloadTrace(filename: string = 'trace.log'): void {
-    const blob = new Blob([this.getTrace()], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
 
   reset(): void {
     this.sr = 0x2700;
