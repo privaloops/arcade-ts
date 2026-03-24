@@ -97,6 +97,10 @@ let intervalId: ReturnType<typeof setInterval> | null = null;
 // Visualization
 let vizWriter: VizWriter | null = null;
 
+// Mute/Solo state
+const fmMuted = new Uint8Array(8);       // 1 = channel is muted
+let lastChannelMask = 0xFFF;             // all 12 channels audible
+
 // YM2151 shadow register state (for visualization)
 const ymKc = new Uint8Array(8);   // Key Code per channel
 const ymKf = new Uint8Array(8);   // Key Fraction per channel
@@ -112,6 +116,40 @@ const ymConnect = new Uint8Array(8); // Connection/algorithm per channel
  *  We simplify: always read op4 (slot 3 = channel + 24) as the primary carrier TL. */
 function getCarrierTl(ch: number): number {
   return ymTl[ch + 24]!; // slot 3 (operator 4, offset = ch + 3*8)
+}
+
+/** Apply channel mask changes: mute/unmute FM channels via TL and OKI via voiceMask. */
+function applyChannelMask(mask: number): void {
+  if (mask === lastChannelMask) return;
+  lastChannelMask = mask;
+
+  // FM channels (bits 0-7)
+  for (let ch = 0; ch < 8; ch++) {
+    const shouldMute = (mask & (1 << ch)) === 0;
+    if (shouldMute && !fmMuted[ch]) {
+      // Mute: write TL=0x7F to all 4 operators
+      fmMuted[ch] = 1;
+      for (let op = 0; op < 4; op++) {
+        const reg = 0x60 + ch + op * 8;
+        ym2151!.writeAddress(reg);
+        ym2151!.writeData(0x7F);
+      }
+    } else if (!shouldMute && fmMuted[ch]) {
+      // Unmute: restore TL from shadow
+      fmMuted[ch] = 0;
+      for (let op = 0; op < 4; op++) {
+        const reg = 0x60 + ch + op * 8;
+        ym2151!.writeAddress(reg);
+        ym2151!.writeData(ymTl[ch + op * 8]!);
+      }
+    }
+  }
+
+  // OKI voices (bits 8-11)
+  if (oki6295) {
+    const okiMask = (mask >> 8) & 0xF;
+    oki6295.setVoiceMask(okiMask);
+  }
 }
 
 function updateYmShadow(register: number, data: number): void {
@@ -155,6 +193,11 @@ function runAudioFrame(): void {
 
   // Skip if ring buffer is nearly full (we're ahead of the AudioWorklet)
   if (ringBuffer.freeSlots < 1024) return;
+
+  // Read channel mask from main thread (mute/solo)
+  if (vizWriter) {
+    applyChannelMask(vizWriter.readChannelMask());
+  }
 
   // Advance latch queue (one command per frame)
   z80Bus.advanceSoundLatch();
@@ -253,6 +296,11 @@ self.onmessage = async (e: MessageEvent) => {
         ym2151!.writeAddress(value);
       });
       z80Bus.setYm2151WriteCallback((register: number, data: number) => {
+        // If this is a TL write and the channel is muted, shadow it but don't forward
+        if (register >= 0x60 && register <= 0x7F && fmMuted[register & 7]) {
+          updateYmShadow(register, data); // keep shadow up to date
+          return; // don't write to WASM — channel stays silent
+        }
         ym2151!.writeData(data);
         updateYmShadow(register, data);
       });

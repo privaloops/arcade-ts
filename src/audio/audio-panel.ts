@@ -32,6 +32,13 @@ export class AudioPanel {
   private readonly konEls: HTMLSpanElement[] = [];
   private readonly volBars: HTMLDivElement[] = [];
 
+  private readonly muteButtons: HTMLButtonElement[] = [];
+  private readonly soloButtons: HTMLButtonElement[] = [];
+
+  // Mute/Solo state
+  private readonly muted = new Set<number>();
+  private readonly soloed = new Set<number>();
+
   // Piano roll canvas
   private pianoCanvas: HTMLCanvasElement | null = null;
   private pianoCtx: CanvasRenderingContext2D | null = null;
@@ -61,6 +68,14 @@ export class AudioPanel {
   }
 
   onGameChange(): void {
+    // Reset mute/solo
+    this.muted.clear();
+    this.soloed.clear();
+    for (const btn of this.muteButtons) btn?.classList.remove("active");
+    for (const btn of this.soloButtons) btn?.classList.remove("active");
+    const viz = this.emulator.getVizReader();
+    if (viz) viz.setChannelMask(0xFFF);
+
     if (this.active) this.startUpdateLoop();
   }
 
@@ -170,8 +185,49 @@ export class AudioPanel {
     row.appendChild(volContainer);
     this.volBars[idx] = volBar;
 
+    // Mute button
+    const muteBtn = el("button", "aud-ms-btn") as HTMLButtonElement;
+    muteBtn.textContent = "M";
+    muteBtn.title = "Mute this channel";
+    muteBtn.addEventListener("click", () => {
+      if (this.muted.has(idx)) this.muted.delete(idx); else this.muted.add(idx);
+      muteBtn.classList.toggle("active", this.muted.has(idx));
+      this.updateChannelMask();
+    });
+    row.appendChild(muteBtn);
+    this.muteButtons[idx] = muteBtn;
+
+    // Solo button
+    const soloBtn = el("button", "aud-ms-btn aud-solo-btn") as HTMLButtonElement;
+    soloBtn.textContent = "S";
+    soloBtn.title = "Solo this channel";
+    soloBtn.addEventListener("click", () => {
+      if (this.soloed.has(idx)) this.soloed.delete(idx); else this.soloed.add(idx);
+      soloBtn.classList.toggle("active", this.soloed.has(idx));
+      this.updateChannelMask();
+    });
+    row.appendChild(soloBtn);
+    this.soloButtons[idx] = soloBtn;
+
     this.channelRows[idx] = row;
     return row;
+  }
+
+  private updateChannelMask(): void {
+    const viz = this.emulator.getVizReader();
+    if (!viz) return;
+
+    let mask = 0;
+    if (this.soloed.size > 0) {
+      // Only soloed channels are audible
+      for (const ch of this.soloed) mask |= (1 << ch);
+    } else {
+      // All non-muted channels are audible
+      mask = 0xFFF;
+      for (const ch of this.muted) mask &= ~(1 << ch);
+    }
+
+    viz.setChannelMask(mask);
   }
 
   // -- Update loop --
