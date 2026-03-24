@@ -7,6 +7,16 @@ import type { Emulator } from "../emulator";
 const LAYER_NAMES = ["Sprites", "Scroll 1", "Scroll 2", "Scroll 3"];
 const LAYER_BADGES = ["OBJ 16×16", "8×8 HUD", "16×16", "32×32"];
 
+export interface PixelInspectResult {
+  layerId: number;
+  layerName: string;
+  x: number;
+  y: number;
+  r: number;
+  g: number;
+  b: number;
+}
+
 export class XRayRenderer {
   // Layer visibility mask: [OBJ, S1, S2, S3]
   private readonly layerMask: boolean[] = [true, true, true, true];
@@ -112,6 +122,48 @@ export class XRayRenderer {
 
   isExplodedActive(): boolean {
     return this.explodedActive;
+  }
+
+  // -- Tile inspector --
+
+  /** Identify which layer owns the pixel at (x, y), front-to-back. */
+  inspectPixel(x: number, y: number): PixelInspectResult | null {
+    const video = this.video;
+    if (!video || x < 0 || y < 0 || x >= SCREEN_WIDTH || y >= SCREEN_HEIGHT) return null;
+
+    const layerOrder = video.getLayerOrder();
+    const pixelIdx = (y * SCREEN_WIDTH + x) * 4;
+    const tempFb = this.layerFBs[0]!;
+
+    // Scan front-to-back (reverse layer order)
+    for (let slot = layerOrder.length - 1; slot >= 0; slot--) {
+      const layerId = layerOrder[slot]!;
+      if (!video.isLayerEnabled(layerId)) continue;
+
+      tempFb.fill(0);
+      video.invalidatePaletteCache();
+      if (layerId === LAYER_OBJ) {
+        video.renderObjects(tempFb);
+      } else {
+        video.renderScrollLayer(layerId, tempFb);
+      }
+
+      // Check if pixel is non-transparent (alpha > 0 in ABGR packed)
+      const r = tempFb[pixelIdx]!;
+      const g = tempFb[pixelIdx + 1]!;
+      const b = tempFb[pixelIdx + 2]!;
+      const a = tempFb[pixelIdx + 3]!;
+      if (a === 0 && r === 0 && g === 0 && b === 0) continue;
+
+      return {
+        layerId,
+        layerName: LAYER_NAMES[layerId]!,
+        x, y,
+        r, g, b,
+      };
+    }
+
+    return null;
   }
 
   // -- Render --

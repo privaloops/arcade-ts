@@ -1,5 +1,6 @@
-import { XRayRenderer } from "./xray-renderer";
+import { XRayRenderer, type PixelInspectResult } from "./xray-renderer";
 import { LAYER_OBJ, LAYER_SCROLL1, LAYER_SCROLL2, LAYER_SCROLL3 } from "../video/cps1-video";
+import { SCREEN_WIDTH, SCREEN_HEIGHT } from "../constants";
 import type { Emulator } from "../emulator";
 
 // Layer display order (visual, back→front by default)
@@ -33,10 +34,20 @@ export class XRayPanel {
   private paletteInfo: HTMLDivElement | null = null;
   private palettePage = 0; // 0..5
 
+  // Tile inspector
+  private inspectorInfo: HTMLDivElement | null = null;
+  private readonly canvas: HTMLCanvasElement;
+  private inspectorClickHandler: ((e: MouseEvent) => void) | null = null;
+
+  // Sprite list & registers
+  private spriteListDiv: HTMLDivElement | null = null;
+  private registerDiv: HTMLDivElement | null = null;
+
   // Update throttle
   private updateRafId = 0;
 
   constructor(emulator: Emulator, canvas: HTMLCanvasElement) {
+    this.canvas = canvas;
     this.emulator = emulator;
     this.renderer = new XRayRenderer(emulator, canvas);
     this.container = document.getElementById("xray-panel") as HTMLDivElement;
@@ -88,6 +99,16 @@ export class XRayPanel {
     this.xrayBtn.classList.add("active");
     this.renderer.install();
     this.startUpdateLoop();
+
+    // Tile inspector: listen for clicks on the game canvas
+    this.inspectorClickHandler = (e: MouseEvent) => {
+      const rect = this.canvas.getBoundingClientRect();
+      const px = Math.floor((e.clientX - rect.left) / rect.width * SCREEN_WIDTH);
+      const py = Math.floor((e.clientY - rect.top) / rect.height * SCREEN_HEIGHT);
+      const result = this.renderer.inspectPixel(px, py);
+      this.showInspectResult(px, py, result);
+    };
+    this.canvas.addEventListener("click", this.inspectorClickHandler);
   }
 
   private close(): void {
@@ -97,6 +118,11 @@ export class XRayPanel {
     this.xrayBtn.classList.remove("active");
     this.renderer.uninstall();
     cancelAnimationFrame(this.updateRafId);
+
+    if (this.inspectorClickHandler) {
+      this.canvas.removeEventListener("click", this.inspectorClickHandler);
+      this.inspectorClickHandler = null;
+    }
   }
 
   private buildDOM(): void {
@@ -270,6 +296,36 @@ export class XRayPanel {
     palCanvas.addEventListener("mouseleave", () => {
       this.paletteInfo!.textContent = "Hover to inspect";
     });
+
+    // Tile Inspector section
+    const inspTitle = el("div", "xray-section-title");
+    inspTitle.textContent = "Tile Inspector";
+    c.appendChild(inspTitle);
+
+    const inspHint = el("div");
+    inspHint.style.cssText = "font-size:0.7rem;color:#555;padding:0 0 8px;";
+    inspHint.textContent = "Click on the game screen to inspect a pixel";
+    c.appendChild(inspHint);
+
+    this.inspectorInfo = el("div", "xray-inspector-info") as HTMLDivElement;
+    this.inspectorInfo.textContent = "No pixel selected";
+    c.appendChild(this.inspectorInfo);
+
+    // Sprite List section
+    const sprTitle = el("div", "xray-section-title");
+    sprTitle.textContent = "Sprites";
+    c.appendChild(sprTitle);
+
+    this.spriteListDiv = el("div", "xray-sprite-list") as HTMLDivElement;
+    c.appendChild(this.spriteListDiv);
+
+    // Register Viewer section
+    const regTitle = el("div", "xray-section-title");
+    regTitle.textContent = "Registers";
+    c.appendChild(regTitle);
+
+    this.registerDiv = el("div", "xray-register-view") as HTMLDivElement;
+    c.appendChild(this.registerDiv);
   }
 
   private createLayerRow(layerId: number): HTMLDivElement {
@@ -307,6 +363,22 @@ export class XRayPanel {
     // No additional bindings needed — events are bound in buildDOM
   }
 
+  private showInspectResult(px: number, py: number, result: PixelInspectResult | null): void {
+    if (!this.inspectorInfo) return;
+    if (!result) {
+      this.inspectorInfo.innerHTML = `<b>(${px}, ${py})</b> — transparent / empty`;
+      return;
+    }
+    const hex = `#${result.r.toString(16).padStart(2, "0")}${result.g.toString(16).padStart(2, "0")}${result.b.toString(16).padStart(2, "0")}`;
+    this.inspectorInfo.innerHTML =
+      `<div style="margin-bottom:4px;">` +
+        `<span style="display:inline-block;width:14px;height:14px;background:${hex};border:1px solid #333;vertical-align:middle;margin-right:6px;border-radius:2px;"></span>` +
+        `<code>${hex.toUpperCase()}</code>` +
+      `</div>` +
+      `<div>Layer: <b>${result.layerName}</b></div>` +
+      `<div>Position: <b>(${result.x}, ${result.y})</b></div>`;
+  }
+
   private renderPalette(): void {
     const ctx = this.paletteCtx;
     const video = this.emulator.getVideo();
@@ -327,6 +399,83 @@ export class XRayPanel {
         ctx.fillRect(col * CELL_W, pal * CELL_H, CELL_W, CELL_H);
       }
     }
+  }
+
+  private renderSpriteList(): void {
+    const div = this.spriteListDiv;
+    const video = this.emulator.getVideo();
+    if (!div || !video) return;
+
+    const objBuf = video.getObjBuffer();
+    const MAX = 256;
+    let html = "";
+    let count = 0;
+
+    for (let i = 0; i < MAX; i++) {
+      const off = i * 8;
+      if (off + 7 >= objBuf.length) break;
+      const colour = (objBuf[off + 6]! << 8) | objBuf[off + 7]!;
+      if ((colour & 0xFF00) === 0xFF00) break;
+
+      let sx = (objBuf[off]! << 8) | objBuf[off + 1]!;
+      let sy = (objBuf[off + 2]! << 8) | objBuf[off + 3]!;
+      const code = (objBuf[off + 4]! << 8) | objBuf[off + 5]!;
+      const pal = colour & 0x1F;
+      const flipX = (colour >> 5) & 1;
+      const flipY = (colour >> 6) & 1;
+
+      if (sx >= 512) sx -= 1024;
+      if (sy >= 512) sy -= 1024;
+      sx += 64;
+      sy += 16;
+
+      // Skip off-screen
+      if (sx < -32 || sx >= SCREEN_WIDTH + 32 || sy < -32 || sy >= SCREEN_HEIGHT + 32) continue;
+
+      const flip = (flipX ? "X" : "") + (flipY ? "Y" : "") || "--";
+      html += `<div class="xray-sprite-entry">` +
+        `<span class="xray-spr-idx">#${i}</span>` +
+        `<span class="xray-spr-code">0x${code.toString(16).padStart(4, "0").toUpperCase()}</span>` +
+        `<span class="xray-spr-pos">(${sx},${sy})</span>` +
+        `<span class="xray-spr-pal">P:${pal.toString().padStart(2, "0")}</span>` +
+        `<span class="xray-spr-flip">${flip}</span>` +
+        `</div>`;
+      count++;
+      if (count >= 32) break; // cap display for perf
+    }
+
+    div.innerHTML = html || `<div style="color:#444;font-size:0.7rem;">No sprites</div>`;
+  }
+
+  private renderRegisters(): void {
+    const div = this.registerDiv;
+    const video = this.emulator.getVideo();
+    if (!div || !video) return;
+
+    const bufs = this.emulator.getBusBuffers();
+    const cpsa = bufs.cpsaRegs;
+    const cpsb = bufs.cpsbRegs;
+
+    const readWord = (buf: Uint8Array, off: number) => (buf[off]! << 8) | buf[off + 1]!;
+
+    const scr1X = readWord(cpsa, 0x0C);
+    const scr1Y = readWord(cpsa, 0x0E);
+    const scr2X = readWord(cpsa, 0x10);
+    const scr2Y = readWord(cpsa, 0x12);
+    const scr3X = readWord(cpsa, 0x14);
+    const scr3Y = readWord(cpsa, 0x16);
+
+    const layerOrder = video.getLayerOrder();
+    const orderStr = layerOrder.map(id => LAYER_SHORT[id] ?? "?").join(" > ");
+
+    div.innerHTML =
+      `<div><span class="xray-reg-label">Scroll 1 XY</span> <code>${hex4(scr1X)} ${hex4(scr1Y)}</code></div>` +
+      `<div><span class="xray-reg-label">Scroll 2 XY</span> <code>${hex4(scr2X)} ${hex4(scr2Y)}</code></div>` +
+      `<div><span class="xray-reg-label">Scroll 3 XY</span> <code>${hex4(scr3X)} ${hex4(scr3Y)}</code></div>` +
+      `<div><span class="xray-reg-label">Layer order</span> <code>${orderStr}</code></div>` +
+      `<div><span class="xray-reg-label">S1 enabled</span> <code>${video.isLayerEnabled(LAYER_SCROLL1) ? "yes" : "no"}</code></div>` +
+      `<div><span class="xray-reg-label">S2 enabled</span> <code>${video.isLayerEnabled(LAYER_SCROLL2) ? "yes" : "no"}</code></div>` +
+      `<div><span class="xray-reg-label">S3 enabled</span> <code>${video.isLayerEnabled(LAYER_SCROLL3) ? "yes" : "no"}</code></div>`;
   }
 
   private startUpdateLoop(): void {
@@ -360,6 +509,8 @@ export class XRayPanel {
       // Update palette grid every 15 frames (~4Hz)
       if (tick % 15 === 0) {
         this.renderPalette();
+        this.renderSpriteList();
+        this.renderRegisters();
       }
 
       this.updateRafId = requestAnimationFrame(update);
@@ -373,4 +524,8 @@ function el(tag: string, className?: string): HTMLElement {
   const e = document.createElement(tag);
   if (className) e.className = className;
   return e;
+}
+
+function hex4(n: number): string {
+  return "0x" + n.toString(16).padStart(4, "0").toUpperCase();
 }
