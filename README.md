@@ -4,7 +4,7 @@
 
 > Street Fighter II, Final Fight, Cadillacs & Dinosaurs, Ghouls'n Ghosts, and 35+ more Capcom classics playable in your browser.
 
-![Arcade.ts — DOM renderer with DevTools](docs/demo.gif)
+![Arcade.ts — Debug mode: 3D exploded view of CPS1 layers](docs/demo.gif)
 
 ## Try it
 
@@ -12,7 +12,7 @@
 
 ## Why
 
-Most browser-based emulators are ports of C/C++ codebases compiled to WASM. Arcade.ts is different — every component is written from scratch in TypeScript:
+Most browser-based emulators are ports of C/C++ codebases compiled to WASM — black boxes where the rendering pipeline is invisible. Arcade.ts is different — every component is written from scratch in TypeScript, which means every layer, sprite, and palette is accessible as a JavaScript object you can inspect, toggle, and render independently:
 
 - **M68000 CPU** — full interpreter, 3000+ lines
 - **Z80 CPU** — full interpreter, 2200+ lines
@@ -23,6 +23,21 @@ Most browser-based emulators are ports of C/C++ codebases compiled to WASM. Arca
 - **Experimental DOM renderer** — every sprite is an HTML element
 
 The audio subsystem runs in a dedicated **Web Worker** with its own Z80+YM2151+OKI instances, communicating via **SharedArrayBuffer** — just like the real hardware where the audio CPU runs on its own crystal, independent from the main CPU.
+
+## Debug mode
+
+Press **F2** during gameplay to open the debug panel — the game keeps running.
+
+- **Layer toggles** — show/hide each of the 4 hardware layers independently (Scroll 1/2/3, Sprites)
+- **3D exploded view** — separate the layers in Z-space with CSS perspective, drag to rotate
+- **Flash** — highlight a single layer by dimming all others
+- **Palette viewer** — live grid of all 192 color palettes (6 pages × 32), hover for details
+- **Tile inspector** — click any pixel to identify which layer drew it
+- **Sprite list** — active sprites with tile code, position, palette, flip state
+- **Register viewer** — live CPS-A/CPS-B scroll offsets, layer order, enable states
+- **Frame-by-frame** — pause, step forward one frame at a time
+
+This is what the TypeScript approach makes uniquely possible — no WASM black-box emulator can expose its internals this way.
 
 ## Features
 
@@ -97,6 +112,7 @@ For local ROM loading, place `.zip` files in `public/roms/` — they'll appear i
 | P | Pause |
 | M | Mute |
 | F1 | Config |
+| F2 | Debug mode |
 | F5 | Save state |
 | F8 | Load state |
 | Double-click | Fullscreen |
@@ -162,6 +178,8 @@ src/
   memory/bus.ts          68K bus (memory map, I/O, CPS registers)
   memory/z80-bus.ts      Z80 bus (audio ROM, YM2151, OKI)
   memory/rom-loader.ts   MAME ZIP ROM loader
+  debug/debug-panel.ts   Debug drawer UI (F2)
+  debug/debug-renderer.ts Layer mask + 3D exploded rendering
   emulator.ts            Main loop, frame scheduling
   save-state.ts          Save/load state to localStorage
   dip-switches.ts        DIP switch definitions (from MAME)
