@@ -127,13 +127,25 @@ const configTabs: { btn: HTMLButtonElement; content: HTMLDivElement; name: Confi
   { btn: tabDisplay, content: tabDisplayContent, name: "display" },
   { btn: tabDip, content: tabDipContent, name: "dip" },
 ];
-for (const t of configTabs) {
-  t.btn.addEventListener("click", () => {
-    for (const t2 of configTabs) {
-      t2.content.style.display = t2.name === t.name ? "" : "none";
-      t2.btn.classList.toggle("active", t2.name === t.name);
-    }
-    if (t.name === "dip") renderDipList(emulator, dipList, onDipReload);
+function switchTab(index: number): void {
+  for (let i = 0; i < configTabs.length; i++) {
+    const t = configTabs[i]!;
+    const active = i === index;
+    t.content.style.display = active ? "" : "none";
+    t.btn.classList.toggle("active", active);
+    t.btn.setAttribute("aria-selected", String(active));
+    t.btn.tabIndex = active ? 0 : -1;
+  }
+  configTabs[index]!.btn.focus();
+  if (configTabs[index]!.name === "dip") renderDipList(emulator, dipList, onDipReload);
+}
+
+for (let i = 0; i < configTabs.length; i++) {
+  const t = configTabs[i]!;
+  t.btn.addEventListener("click", () => switchTab(i));
+  t.btn.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowRight") { e.preventDefault(); switchTab((i + 1) % configTabs.length); }
+    else if (e.key === "ArrowLeft") { e.preventDefault(); switchTab((i - 1 + configTabs.length) % configTabs.length); }
   });
 }
 

@@ -48,7 +48,7 @@
       </header>
 
       <div id="canvas-wrapper">
-        <canvas id="screen" width="384" height="224"></canvas>
+        <canvas id="screen" width="384" height="224" aria-label="CPS1 arcade game screen"></canvas>
         <div id="dom-screen"></div>
 
         <div id="drop-zone">
@@ -63,39 +63,39 @@
       <!-- rom-controls and status moved to header -->
 
       <!-- Modals -->
-      <div id="savestate-modal-overlay">
+      <div id="savestate-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="savestate-title">
         <div id="savestate-modal">
           <h2 id="savestate-title">Save State</h2>
           <div id="savestate-slots"></div>
-          <div class="gp-actions"><button id="ss-close-btn">Close</button></div>
+          <div class="gp-actions"><button id="ss-close-btn" aria-label="Close">Close</button></div>
         </div>
       </div>
 
-      <div id="controls-modal-overlay">
+      <div id="controls-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="config-title">
         <div id="controls-modal" class="modal-wide">
-          <h2>Config</h2>
-          <div class="config-tabs">
-            <button id="tab-joypad" class="ctrl-btn active">Joypad</button>
-            <button id="tab-keyboard" class="ctrl-btn">Keyboard</button>
-            <button id="tab-display" class="ctrl-btn">Display</button>
-            <button id="tab-dip" class="ctrl-btn">DIP</button>
+          <h2 id="config-title">Config</h2>
+          <div class="config-tabs" role="tablist">
+            <button id="tab-joypad" class="ctrl-btn active" role="tab" aria-selected="true" aria-controls="tab-joypad-content">Joypad</button>
+            <button id="tab-keyboard" class="ctrl-btn" role="tab" aria-selected="false" aria-controls="tab-keyboard-content">Keyboard</button>
+            <button id="tab-display" class="ctrl-btn" role="tab" aria-selected="false" aria-controls="tab-display-content">Display</button>
+            <button id="tab-dip" class="ctrl-btn" role="tab" aria-selected="false" aria-controls="tab-dip-content">DIP</button>
           </div>
 
-          <div id="tab-joypad-content">
+          <div id="tab-joypad-content" role="tabpanel" aria-labelledby="tab-joypad">
             <div class="modal-2col">
               <div class="modal-col"><h3 class="modal-col-title">Player 1</h3><div id="gp-mapping-list-p1"></div></div>
               <div class="modal-col"><h3 class="modal-col-title">Player 2</h3><div id="gp-mapping-list-p2"></div></div>
             </div>
           </div>
 
-          <div id="tab-keyboard-content" style="display:none;">
+          <div id="tab-keyboard-content" role="tabpanel" aria-labelledby="tab-keyboard" style="display:none;">
             <div class="modal-2col">
               <div class="modal-col"><h3 class="modal-col-title">Player 1</h3><div id="kb-mapping-list-p1"></div></div>
               <div class="modal-col"><h3 class="modal-col-title">Player 2</h3><div id="kb-mapping-list-p2"></div></div>
             </div>
           </div>
 
-          <div id="tab-display-content" style="display:none;">
+          <div id="tab-display-content" role="tabpanel" aria-labelledby="tab-display" style="display:none;">
             <div class="settings-row">
               <span class="settings-label">Renderer</span>
               <div id="renderer-toggle" style="display:flex;gap:10px;font-size:0.8rem;color:#888;">
@@ -113,13 +113,13 @@
             </div>
           </div>
 
-          <div id="tab-dip-content" style="display:none;">
+          <div id="tab-dip-content" role="tabpanel" aria-labelledby="tab-dip" style="display:none;">
             <div id="dip-list"></div>
           </div>
 
           <div class="gp-actions">
             <button id="controls-reset-btn">Reset All</button>
-            <button id="controls-close-btn">Close</button>
+            <button id="controls-close-btn" aria-label="Close">Close</button>
           </div>
         </div>
       </div>
