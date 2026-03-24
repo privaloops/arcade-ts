@@ -69,10 +69,10 @@ const DEFAULT_PALETTE_CTRL = 0x30;
 // Layer identifiers (matching MAME convention)
 // ---------------------------------------------------------------------------
 
-const LAYER_OBJ     = 0; // MAME layer 0 = sprites
-const LAYER_SCROLL1 = 1; // MAME layer 1 = scroll1
-const LAYER_SCROLL2 = 2; // MAME layer 2 = scroll2
-const LAYER_SCROLL3 = 3; // MAME layer 3 = scroll3
+export const LAYER_OBJ     = 0; // MAME layer 0 = sprites
+export const LAYER_SCROLL1 = 1; // MAME layer 1 = scroll1
+export const LAYER_SCROLL2 = 2; // MAME layer 2 = scroll2
+export const LAYER_SCROLL3 = 3; // MAME layer 3 = scroll3
 
 const DEFAULT_ENABLE_SCROLL1 = 0x08;
 const DEFAULT_ENABLE_SCROLL2 = 0x10;
@@ -863,7 +863,7 @@ export class CPS1Video {
   // Layer priority resolution (CPS-B)
   // -------------------------------------------------------------------------
 
-  private getLayerOrder(): number[] {
+  getLayerOrder(): number[] {
     const ctrl = this.readCpsbReg(this.layerCtrlOffset);
 
     const l0 = (ctrl >> 0x06) & 0x03;
@@ -878,7 +878,7 @@ export class CPS1Video {
   // Layer enable check
   // -------------------------------------------------------------------------
 
-  private isLayerEnabled(layerId: number): boolean {
+  isLayerEnabled(layerId: number): boolean {
     const layercontrol = this.readCpsbReg(this.layerCtrlOffset);
     const videocontrol = this.readCpsaReg(CPSA_VIDEOCONTROL);
 
@@ -979,6 +979,15 @@ export class CPS1Video {
         this.renderScrollLayer(layerId, framebuffer);
       }
     }
+  }
+
+  invalidatePaletteCache(): void {
+    this.paletteCacheValid = false;
+  }
+
+  /** Returns the decoded palette cache (256 palettes × 16 colors, packed ABGR). */
+  getPaletteCache(): Uint32Array {
+    return this.paletteCache;
   }
 
   getObjBuffer(): Uint8Array {

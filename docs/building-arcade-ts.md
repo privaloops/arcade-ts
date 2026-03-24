@@ -142,6 +142,58 @@ In IM 0, the Z80 never calls the interrupt service routine at 0x0038. The ISR ne
 
 At some point you have to admit defeat. Even with experience and a good AI at your side, you can't challenge a project like MAME — 25 years of accumulated knowledge, hundreds of contributors who've already conquered every one of these problems. The further I go in this project, the deeper my respect for MAME grows.
 
+## "OK but... this already exists"
+
+The emulator worked. Street Fighter II, Final Fight, Cadillacs & Dinosaurs — all running in Chrome with sound. I was proud.
+
+Then I looked around. FinalBurn Neo runs in the browser via WebAssembly. RetroArch has a web player. MAME itself can be compiled to WASM. All with better compatibility, more games, decades of polish.
+
+My project had no reason to exist for an end user. Nobody is going to choose a TypeScript emulator with 39 games over FBNeo with thousands. As a technical challenge it was rewarding — but a technical challenge is all it was.
+
+Except my approach had one advantage I hadn't seen.
+
+MAME and FBNeo compiled to WASM are **black boxes**. Their rendering pipeline outputs a single flat framebuffer — all layers already composited, all pixels baked together. You can't see inside. To extract individual layers, you'd need to patch the C source and recompile the WASM. Nobody does this.
+
+My emulator decodes everything in TypeScript. The four CPS1 layers — three scroll planes and the sprite plane — exist as separate data structures before composition. I have access to every tile, every palette entry, every sprite coordinate, at every stage of the rendering pipeline.
+
+So instead of competing as a player, I built a **debug mode** — a tool to see how CPS1 games are actually drawn by the hardware.
+
+### What the debug mode shows
+
+Press F2 during gameplay and a panel opens alongside the game — which keeps running.
+
+**Layer toggles** — four checkboxes, one per hardware layer. Uncheck "Scroll 3" and the entire far background vanishes. You see exactly what each layer contributes to the final image. This is how you discover that the "3D" floor in a fighting stage is actually a single flat layer of 16×16 tiles being scrolled independently.
+
+**3D exploded view** — a slider separates the four layers in Z-space with CSS perspective, like an exploded diagram of a circuit board. Drag to rotate. You're looking at the game the way a hardware engineer would see it — four transparent planes stacked on top of each other.
+
+**Palette viewer** — a live grid of all 192 color palettes. Watch them change during gameplay: the fade to black when a round ends, the white flash when a punch connects, the palette swap between Player 1 and Player 2 Ryu (same sprites, different 16-color palette). All of this is just 32 bytes written to VRAM — no pixel recalculation, just a color table swap.
+
+**Tile inspector** — click any pixel on screen to identify which hardware layer drew it, with its color and coordinates.
+
+**Sprite list** — every active sprite object on screen, with tile code, position, palette index, and flip state. You can see a character as the hardware sees it: a grid of 16×16 tiles arranged by the 68000 CPU, with X/Y mirroring for left-facing animations.
+
+None of this is possible with a WASM black-box emulator. This is what the TypeScript approach makes uniquely possible.
+
+## A magnifying glass on genius
+
+The deeper I went into this project, the more something unexpected happened. I stopped being impressed by my own work and started being humbled by the engineers who built these games in 1991.
+
+Consider what they had: a 68000 running at 10 MHz, 64 KB of RAM, and roughly 168,000 CPU cycles per frame. No IDE, no debugger with breakpoints, no hot-reload. Change a line of assembly → burn new EPROMs → plug them into the board → boot → test. Minutes per iteration.
+
+And with these constraints, they did things like this:
+
+**Chun-Li's hair in Street Fighter II** doesn't use frame-by-frame animation. It's a multi-tile sprite dynamically rearranged by the 68000 every frame — the CPU calculates which sub-tile goes where based on the animation frame, the character state, and the facing direction. All within 16 milliseconds.
+
+**The parallax floor effect** in fighting stages isn't 3D. The 68000 writes to the Scroll 2 register *during the screen's vertical scan* — changing the X-scroll value at every scanline. This row-scroll technique warps a flat tile plane into a perspective floor. The register viewer in the debug mode shows these values changing line by line.
+
+**Palette as animation** — the lightning flash in Ken's stage, the fade to black between rounds, the hit spark when a punch connects: none of these involve rendering new pixels. The game just rewrites 16 colors in the palette table. 32 bytes in VRAM and the entire mood of the screen changes. You can watch this live in the palette viewer — the colors shift in real time as the game plays.
+
+**The sprite budget** — 256 sprites per frame, each positioned by writing 8 bytes to the sprite table. A single character in Street Fighter II is assembled from a dozen sub-tiles. The 68000 computes every position, every flip, every palette assignment, for every character on screen, every frame. In assembly.
+
+The CPS1 board is the size of a paperback book. It does scroll layers, sprites, palette animation, FM synthesis, and ADPCM samples with two CPUs, two custom ASICs, and a handful of standard chips. I needed 20,000 lines of TypeScript and a computer a million times more powerful to *approximate* what it does.
+
+The debug mode exists because of a competitive failure — I couldn't beat existing emulators at playing games. But it turned into something I care about more: a way to make the invisible genius of 1991 hardware engineering visible to anyone with a browser.
+
 ## Architecture
 
 The final architecture mirrors the real hardware more closely than I expected:
@@ -191,7 +243,9 @@ The audio output uses an **AudioWorklet** reading from a **SharedArrayBuffer** r
 
 **One bit matters.** A bitplane swap turns Ryu's face red. A mask (`& 0xffff`) silences entire channels. A fetch method (`fetchByte` vs `fetchOpcode`) makes QSound mute. That last one cost 12 hours.
 
-**The real hardware is humbling.** The CPS1 does scroll layers, sprites, palette animation, and stereo FM audio with two CPUs, two custom ASICs, and a handful of standard chips — on a board the size of a paperback book. I needed 20,000 lines of TypeScript and a computer a million times more powerful to approximate what it does.
+**Your weakness can be your edge.** I built everything in TypeScript — slower than C, no SIMD, interpreted. That felt like a handicap until I realized it meant every layer, every sprite, every palette was a JavaScript object I could inspect, toggle, and render independently. The "weakness" became the debug mode's foundation. WASM emulators can't do this without major surgery.
+
+**Build for the question, not the answer.** I set out to build an emulator. I ended up building a tool that asks "how does this game actually work?" — and that turned out to be far more interesting than the emulator itself.
 
 ---
 

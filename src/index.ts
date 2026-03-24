@@ -12,6 +12,7 @@ import { GameScreen } from "./video/GameScreen";
 import { DEFAULT_GP_MAPPING, DEFAULT_P1_MAPPING, DEFAULT_P2_MAPPING, type GamepadMapping, type KeyMapping, type AutofireKey } from "./input/input";
 import { getSlotInfo, getNumSlots } from "./save-state";
 import { getDipDef, bankToIndex, type DipSwitchDef } from "./dip-switches";
+import { DebugPanel } from "./debug/debug-panel";
 
 function getElement<T extends HTMLElement>(id: string): T {
   const el = document.getElementById(id);
@@ -161,6 +162,19 @@ const pauseBtn = getElement<HTMLButtonElement>("pause-btn");
 const muteBtn = getElement<HTMLButtonElement>("mute-btn");
 const saveBtnCtrl = getElement<HTMLButtonElement>("save-btn");
 const loadBtnCtrl = getElement<HTMLButtonElement>("load-btn-ss");
+const debugBtn = getElement<HTMLButtonElement>("dbg-btn");
+
+let debugPanel: DebugPanel | null = null;
+
+function toggleDebug(): void {
+  if (!emulator.isRunning() && !emulator.isPaused()) return;
+  if (!debugPanel) {
+    debugPanel = new DebugPanel(emulator, canvas);
+  }
+  debugPanel.toggle();
+}
+
+debugBtn.addEventListener("click", toggleDebug);
 
 pauseBtn.addEventListener("click", () => {
   if (emulator.isRunning()) {
@@ -201,6 +215,8 @@ if (localStorage.getItem("cps1-crt") === "1") {
 const quitBtn = getElement<HTMLButtonElement>("quit-btn");
 quitBtn.addEventListener("click", () => {
   if (document.fullscreenElement) void document.exitFullscreen();
+  debugPanel?.destroy();
+  debugPanel = null;
   emulator.stop();
   emulator.suspendAudio();
   dropZone.classList.remove("hidden");
@@ -337,6 +353,9 @@ async function handleRomFile(file: File): Promise<void> {
 
     // Restore saved DIP switches before starting
     loadDipFromStorage(emulator.getGameName(), emulator.getIoPorts());
+
+    // Update debug panel with new game's video
+    debugPanel?.onGameChange();
 
     emulator.start();
     setStatus(`Running: ${file.name} (${mode}${isTate ? ', TATE' : ''})`);
@@ -875,6 +894,9 @@ window.addEventListener("keydown", (e) => {
   if (e.code === "F1") {
     e.preventDefault();
     openControlsModal();
+  } else if (e.code === "F2") {
+    e.preventDefault();
+    toggleDebug();
   } else if (e.code === "F5") {
     e.preventDefault();
     openSsModal("save");
