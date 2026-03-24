@@ -87,7 +87,7 @@ const PALETTE_ALIGN  = 0x0400;
 // Helper: read big-endian 16-bit word from a Uint8Array
 // ---------------------------------------------------------------------------
 
-function readWord(data: Uint8Array, offset: number): number {
+export function readWord(data: Uint8Array, offset: number): number {
   if (offset + 1 >= data.length) return 0;
   return (data[offset]! << 8) | data[offset + 1]!;
 }
@@ -97,17 +97,17 @@ function readWord(data: Uint8Array, offset: number): number {
 // ---------------------------------------------------------------------------
 
 /** Scroll 1 (8x8): 64x64 tiles = 512x512 virtual pixels */
-function tilemap0Scan(col: number, row: number): number {
+export function tilemap0Scan(col: number, row: number): number {
   return (row & 0x1f) + ((col & 0x3f) << 5) + ((row & 0x20) << 6);
 }
 
 /** Scroll 2 (16x16): 64x64 tiles = 1024x1024 virtual pixels */
-function tilemap1Scan(col: number, row: number): number {
+export function tilemap1Scan(col: number, row: number): number {
   return (row & 0x0f) + ((col & 0x3f) << 4) + ((row & 0x30) << 6);
 }
 
 /** Scroll 3 (32x32): 64x64 tiles = 2048x2048 virtual pixels */
-function tilemap2Scan(col: number, row: number): number {
+export function tilemap2Scan(col: number, row: number): number {
   return (row & 0x07) + ((col & 0x3f) << 3) + ((row & 0x38) << 6);
 }
 
@@ -116,10 +116,10 @@ function tilemap2Scan(col: number, row: number): number {
 // GFX ROM bank mapper (from MAME gfxrom_bank_mapper)
 // ---------------------------------------------------------------------------
 
-const GFXTYPE_SPRITES = 1;
-const GFXTYPE_SCROLL1 = 2;
-const GFXTYPE_SCROLL2 = 4;
-const GFXTYPE_SCROLL3 = 8;
+export const GFXTYPE_SPRITES = 1;
+export const GFXTYPE_SCROLL1 = 2;
+export const GFXTYPE_SCROLL2 = 4;
+export const GFXTYPE_SCROLL3 = 8;
 
 interface GfxRange {
   type: number;
@@ -139,7 +139,7 @@ export interface VideoConfig {
   enableScroll3: number;
 }
 
-function gfxromBankMapper(type: number, code: number, mapperTable: GfxRange[], bankSizes: number[], bankBases: number[]): number {
+export function gfxromBankMapper(type: number, code: number, mapperTable: GfxRange[], bankSizes: number[], bankBases: number[]): number {
   let shift = 0;
   switch (type) {
     case GFXTYPE_SPRITES: shift = 1; break;
@@ -206,7 +206,7 @@ const ROW_STRIDE_32 = 16;  // 16 bytes per row for 32x32
  *
  * MAME readbit() uses (0x80 >> (bitnum % 8)) = MSB-first within each byte.
  */
-function decodeRow(
+export function decodeRow(
   b0: number, b1: number, b2: number, b3: number,
   out: Uint8Array, outOffset: number,
 ): void {
