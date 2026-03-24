@@ -1,4 +1,4 @@
-import { XRayRenderer, type PixelInspectResult } from "./xray-renderer";
+import { DebugRenderer, type PixelInspectResult } from "./debug-renderer";
 import { LAYER_OBJ, LAYER_SCROLL1, LAYER_SCROLL2, LAYER_SCROLL3 } from "../video/cps1-video";
 import { SCREEN_WIDTH, SCREEN_HEIGHT } from "../constants";
 import type { Emulator } from "../emulator";
@@ -12,14 +12,14 @@ const LAYER_SHORT: Record<number, string> = {
   [LAYER_SCROLL3]: "S3",
 };
 
-export class XRayPanel {
+export class DebugPanel {
   private active = false;
-  private readonly renderer: XRayRenderer;
+  private readonly renderer: DebugRenderer;
   private readonly emulator: Emulator;
 
   // DOM references
   private readonly container: HTMLDivElement;
-  private readonly xrayBtn: HTMLElement;
+  private readonly debugBtn: HTMLElement;
   private readonly layerRows: Map<number, HTMLDivElement> = new Map();
   private readonly layerCheckboxes: Map<number, HTMLInputElement> = new Map();
   private orderDisplay: HTMLSpanElement | null = null;
@@ -49,9 +49,9 @@ export class XRayPanel {
   constructor(emulator: Emulator, canvas: HTMLCanvasElement) {
     this.canvas = canvas;
     this.emulator = emulator;
-    this.renderer = new XRayRenderer(emulator, canvas);
-    this.container = document.getElementById("xray-panel") as HTMLDivElement;
-    this.xrayBtn = document.getElementById("xray-btn")!;
+    this.renderer = new DebugRenderer(emulator, canvas);
+    this.container = document.getElementById("dbg-panel") as HTMLDivElement;
+    this.debugBtn = document.getElementById("dbg-btn")!;
 
     this.buildDOM();
     this.bindEvents();
@@ -95,8 +95,8 @@ export class XRayPanel {
   private open(): void {
     this.active = true;
     this.container.classList.add("open");
-    document.body.classList.add("xray-active");
-    this.xrayBtn.classList.add("active");
+    document.body.classList.add("dbg-active");
+    this.debugBtn.classList.add("active");
     this.renderer.install();
     this.startUpdateLoop();
 
@@ -114,8 +114,8 @@ export class XRayPanel {
   private close(): void {
     this.active = false;
     this.container.classList.remove("open");
-    document.body.classList.remove("xray-active");
-    this.xrayBtn.classList.remove("active");
+    document.body.classList.remove("dbg-active");
+    this.debugBtn.classList.remove("active");
     this.renderer.uninstall();
     cancelAnimationFrame(this.updateRafId);
 
@@ -130,17 +130,17 @@ export class XRayPanel {
     c.innerHTML = "";
 
     // Header
-    const header = el("div", "xray-header");
+    const header = el("div", "dbg-header");
     const title = el("h2");
-    title.textContent = "X-Ray";
-    const closeBtn = el("button", "xray-close");
+    title.textContent = "Debug";
+    const closeBtn = el("button", "dbg-close");
     closeBtn.textContent = "\u00D7";
     closeBtn.addEventListener("click", () => this.toggle());
     header.append(title, closeBtn);
     c.appendChild(header);
 
     // Frame controls
-    const frameCtrls = el("div", "xray-frame-controls");
+    const frameCtrls = el("div", "dbg-frame-controls");
 
     this.playPauseBtn = el("button", "ctrl-btn") as HTMLButtonElement;
     this.playPauseBtn.textContent = "Pause";
@@ -148,7 +148,7 @@ export class XRayPanel {
     const stepBtn = el("button", "ctrl-btn") as HTMLButtonElement;
     stepBtn.textContent = "Step";
 
-    this.frameCounter = el("span", "xray-frame-count");
+    this.frameCounter = el("span", "dbg-frame-count");
     this.frameCounter.textContent = "Frame: 0";
 
     frameCtrls.append(this.playPauseBtn, stepBtn, this.frameCounter);
@@ -188,9 +188,9 @@ export class XRayPanel {
         content.appendChild(row);
       }
 
-      const orderDiv = el("div", "xray-order");
+      const orderDiv = el("div", "dbg-order");
       orderDiv.textContent = "Draw order: ";
-      this.orderDisplay = el("span", "xray-order-value");
+      this.orderDisplay = el("span", "dbg-order-value");
       this.orderDisplay.textContent = "...";
       orderDiv.appendChild(this.orderDisplay);
       content.appendChild(orderDiv);
@@ -210,13 +210,13 @@ export class XRayPanel {
       hint.textContent = "Drag to rotate \u00B7 Slider to spread layers";
       content.appendChild(hint);
 
-      const sliderRow = el("div", "xray-slider-row");
+      const sliderRow = el("div", "dbg-slider-row");
       this.spreadSlider = document.createElement("input");
       this.spreadSlider.type = "range";
       this.spreadSlider.min = "0";
       this.spreadSlider.max = "100";
       this.spreadSlider.value = "0";
-      this.spreadValue = el("span", "xray-slider-value");
+      this.spreadValue = el("span", "dbg-slider-value");
       this.spreadValue.textContent = "0";
       sliderRow.append(this.spreadSlider, this.spreadValue);
       content.appendChild(sliderRow);
@@ -245,14 +245,14 @@ export class XRayPanel {
         "• Page 3: Scroll 3 palettes (far background)\n\n" +
         "Watch palettes change live during fades, hit flashes, and character recolors (P1 vs P2).", false);
 
-      const pageRow = el("div", "xray-palette-pages");
+      const pageRow = el("div", "dbg-palette-pages");
       for (let p = 0; p < 6; p++) {
-        const btn = el("button", "xray-page-btn") as HTMLButtonElement;
+        const btn = el("button", "dbg-page-btn") as HTMLButtonElement;
         btn.textContent = String(p);
         if (p === 0) btn.classList.add("active");
         btn.addEventListener("click", () => {
           this.palettePage = p;
-          pageRow.querySelectorAll(".xray-page-btn").forEach(b => b.classList.remove("active"));
+          pageRow.querySelectorAll(".dbg-page-btn").forEach(b => b.classList.remove("active"));
           btn.classList.add("active");
         });
         pageRow.appendChild(btn);
@@ -266,12 +266,12 @@ export class XRayPanel {
       const palCanvas = document.createElement("canvas");
       palCanvas.width = 16 * CELL_W;
       palCanvas.height = 32 * CELL_H;
-      palCanvas.className = "xray-palette-canvas";
+      palCanvas.className = "dbg-palette-canvas";
       this.paletteCanvas = palCanvas;
       this.paletteCtx = palCanvas.getContext("2d")!;
       content.appendChild(palCanvas);
 
-      this.paletteInfo = el("div", "xray-palette-info") as HTMLDivElement;
+      this.paletteInfo = el("div", "dbg-palette-info") as HTMLDivElement;
       this.paletteInfo.textContent = "Hover to inspect";
       content.appendChild(this.paletteInfo);
 
@@ -327,7 +327,7 @@ export class XRayPanel {
       inspHint.textContent = "Click on the game screen to inspect a pixel";
       content.appendChild(inspHint);
 
-      this.inspectorInfo = el("div", "xray-inspector-info") as HTMLDivElement;
+      this.inspectorInfo = el("div", "dbg-inspector-info") as HTMLDivElement;
       this.inspectorInfo.textContent = "No pixel selected";
       content.appendChild(this.inspectorInfo);
 
@@ -346,7 +346,7 @@ export class XRayPanel {
         "• Flip — X/Y mirroring (used for left/right facing)\n\n" +
         "CPS1 supports up to 256 sprites per frame. Characters are typically multi-tile sprites.", false);
 
-      this.spriteListDiv = el("div", "xray-sprite-list") as HTMLDivElement;
+      this.spriteListDiv = el("div", "dbg-sprite-list") as HTMLDivElement;
       content.appendChild(this.spriteListDiv);
 
       c.appendChild(sec);
@@ -362,7 +362,7 @@ export class XRayPanel {
         "Games manipulate these registers every frame to scroll backgrounds, " +
         "enable/disable layers during transitions, and change draw priority.", false);
 
-      this.registerDiv = el("div", "xray-register-view") as HTMLDivElement;
+      this.registerDiv = el("div", "dbg-register-view") as HTMLDivElement;
       content.appendChild(this.registerDiv);
 
       c.appendChild(sec);
@@ -370,22 +370,22 @@ export class XRayPanel {
   }
 
   private createLayerRow(layerId: number): HTMLDivElement {
-    const row = el("div", "xray-layer-row") as HTMLDivElement;
+    const row = el("div", "dbg-layer-row") as HTMLDivElement;
 
     const cb = document.createElement("input");
     cb.type = "checkbox";
     cb.checked = true;
-    cb.id = `xray-cb-${layerId}`;
+    cb.id = `dbg-cb-${layerId}`;
     this.layerCheckboxes.set(layerId, cb);
 
-    const label = el("label", "xray-layer-label") as HTMLLabelElement;
+    const label = el("label", "dbg-layer-label") as HTMLLabelElement;
     label.htmlFor = cb.id;
-    label.textContent = XRayRenderer.LAYER_NAMES[layerId]!;
+    label.textContent = DebugRenderer.LAYER_NAMES[layerId]!;
 
-    const badge = el("span", "xray-badge");
-    badge.textContent = XRayRenderer.LAYER_BADGES[layerId]!;
+    const badge = el("span", "dbg-badge");
+    badge.textContent = DebugRenderer.LAYER_BADGES[layerId]!;
 
-    const flashBtn = el("button", "xray-flash-btn") as HTMLButtonElement;
+    const flashBtn = el("button", "dbg-flash-btn") as HTMLButtonElement;
     flashBtn.textContent = "Flash";
 
     cb.addEventListener("change", () => {
@@ -474,12 +474,12 @@ export class XRayPanel {
       if (sx < -32 || sx >= SCREEN_WIDTH + 32 || sy < -32 || sy >= SCREEN_HEIGHT + 32) continue;
 
       const flip = (flipX ? "X" : "") + (flipY ? "Y" : "") || "--";
-      html += `<div class="xray-sprite-entry">` +
-        `<span class="xray-spr-idx">#${i}</span>` +
-        `<span class="xray-spr-code">0x${code.toString(16).padStart(4, "0").toUpperCase()}</span>` +
-        `<span class="xray-spr-pos">(${sx},${sy})</span>` +
-        `<span class="xray-spr-pal">P:${pal.toString().padStart(2, "0")}</span>` +
-        `<span class="xray-spr-flip">${flip}</span>` +
+      html += `<div class="dbg-sprite-entry">` +
+        `<span class="dbg-spr-idx">#${i}</span>` +
+        `<span class="dbg-spr-code">0x${code.toString(16).padStart(4, "0").toUpperCase()}</span>` +
+        `<span class="dbg-spr-pos">(${sx},${sy})</span>` +
+        `<span class="dbg-spr-pal">P:${pal.toString().padStart(2, "0")}</span>` +
+        `<span class="dbg-spr-flip">${flip}</span>` +
         `</div>`;
       count++;
       if (count >= 32) break; // cap display for perf
@@ -510,13 +510,13 @@ export class XRayPanel {
     const orderStr = layerOrder.map(id => LAYER_SHORT[id] ?? "?").join(" > ");
 
     div.innerHTML =
-      `<div><span class="xray-reg-label">Scroll 1 XY</span> <code>${hex4(scr1X)} ${hex4(scr1Y)}</code></div>` +
-      `<div><span class="xray-reg-label">Scroll 2 XY</span> <code>${hex4(scr2X)} ${hex4(scr2Y)}</code></div>` +
-      `<div><span class="xray-reg-label">Scroll 3 XY</span> <code>${hex4(scr3X)} ${hex4(scr3Y)}</code></div>` +
-      `<div><span class="xray-reg-label">Layer order</span> <code>${orderStr}</code></div>` +
-      `<div><span class="xray-reg-label">S1 enabled</span> <code>${video.isLayerEnabled(LAYER_SCROLL1) ? "yes" : "no"}</code></div>` +
-      `<div><span class="xray-reg-label">S2 enabled</span> <code>${video.isLayerEnabled(LAYER_SCROLL2) ? "yes" : "no"}</code></div>` +
-      `<div><span class="xray-reg-label">S3 enabled</span> <code>${video.isLayerEnabled(LAYER_SCROLL3) ? "yes" : "no"}</code></div>`;
+      `<div><span class="dbg-reg-label">Scroll 1 XY</span> <code>${hex4(scr1X)} ${hex4(scr1Y)}</code></div>` +
+      `<div><span class="dbg-reg-label">Scroll 2 XY</span> <code>${hex4(scr2X)} ${hex4(scr2Y)}</code></div>` +
+      `<div><span class="dbg-reg-label">Scroll 3 XY</span> <code>${hex4(scr3X)} ${hex4(scr3Y)}</code></div>` +
+      `<div><span class="dbg-reg-label">Layer order</span> <code>${orderStr}</code></div>` +
+      `<div><span class="dbg-reg-label">S1 enabled</span> <code>${video.isLayerEnabled(LAYER_SCROLL1) ? "yes" : "no"}</code></div>` +
+      `<div><span class="dbg-reg-label">S2 enabled</span> <code>${video.isLayerEnabled(LAYER_SCROLL2) ? "yes" : "no"}</code></div>` +
+      `<div><span class="dbg-reg-label">S3 enabled</span> <code>${video.isLayerEnabled(LAYER_SCROLL3) ? "yes" : "no"}</code></div>`;
   }
 
   private startUpdateLoop(): void {
@@ -577,14 +577,14 @@ function hex4(n: number): string {
  */
 function collapsibleSection(text: string, tooltip: string, open = true): [HTMLDivElement, HTMLDivElement] {
   const wrapper = document.createElement("div");
-  wrapper.className = "xray-section";
+  wrapper.className = "dbg-section";
 
   const header = document.createElement("div");
-  header.className = "xray-section-title";
+  header.className = "dbg-section-title";
   header.title = tooltip;
 
   const arrow = document.createElement("span");
-  arrow.className = "xray-section-arrow";
+  arrow.className = "dbg-section-arrow";
   arrow.textContent = open ? "\u25BE" : "\u25B8"; // ▾ or ▸
 
   const label = document.createElement("span");
@@ -594,7 +594,7 @@ function collapsibleSection(text: string, tooltip: string, open = true): [HTMLDi
   wrapper.appendChild(header);
 
   const content = document.createElement("div");
-  content.className = "xray-section-content";
+  content.className = "dbg-section-content";
   if (!open) content.style.display = "none";
   wrapper.appendChild(content);
 

@@ -17,7 +17,7 @@ export interface PixelInspectResult {
   b: number;
 }
 
-export class XRayRenderer {
+export class DebugRenderer {
   // Layer visibility mask: [OBJ, S1, S2, S3]
   private readonly layerMask: boolean[] = [true, true, true, true];
 
