@@ -354,8 +354,14 @@ async function handleRomFile(file: File): Promise<void> {
     // Restore saved DIP switches before starting
     loadDipFromStorage(emulator.getGameName(), emulator.getIoPorts());
 
-    // Update debug panel with new game's video
-    debugPanel?.onGameChange();
+    // Open debug panel by default
+    if (!debugPanel) {
+      debugPanel = new DebugPanel(emulator, canvas);
+    }
+    debugPanel.onGameChange();
+    if (!debugPanel.isOpen()) {
+      debugPanel.toggle();
+    }
 
     emulator.start();
     setStatus(`Running: ${file.name} (${mode}${isTate ? ', TATE' : ''})`);
