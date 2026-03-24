@@ -97,6 +97,7 @@ export class Emulator {
   private audioWorkerReady = false;
   private vizSab: SharedArrayBuffer | null = null;
   private vizReader: VizReader | null = null;
+  private okiRom: Uint8Array | null = null;
   private pendingSoundLatches: number[] = [];
   private pendingSoundLatches2: number[] = [];
 
@@ -290,6 +291,7 @@ export class Emulator {
       this.z80.setBus(this.z80Bus);
 
       // Create OKI6295 with its ROM data and wire to Z80 bus
+      this.okiRom = romSet.okiRom;
       this.oki6295 = new OKI6295(romSet.okiRom);
       this.z80Bus.setOkiWriteCallback((value: number) => {
         this.oki6295!.write(value);
@@ -622,6 +624,23 @@ export class Emulator {
 
   isAudioWorkerActive(): boolean {
     return this.audioWorkerReady;
+  }
+
+  getOkiRom(): Uint8Array | null {
+    return this.okiRom;
+  }
+
+  /** Replace the OKI ROM and propagate to the audio worker. */
+  updateOkiRom(newRom: Uint8Array): void {
+    this.okiRom = newRom;
+    if (this.oki6295) this.oki6295.replaceRom(newRom);
+    if (this.audioWorkerReady && this.audioWorker) {
+      const copy = newRom.slice();
+      this.audioWorker.postMessage(
+        { type: 'updateOkiRom', rom: copy.buffer },
+        [copy.buffer],
+      );
+    }
   }
 
   private m68kErrorCount = 0;

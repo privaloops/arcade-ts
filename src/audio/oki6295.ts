@@ -87,7 +87,7 @@ interface OKIChannel {
 }
 
 export class OKI6295 {
-  private readonly rom: Uint8Array;
+  private rom: Uint8Array;
   private readonly channels: OKIChannel[];
   private voiceMask = 0xF; // 4 bits, all voices audible by default
 
@@ -297,6 +297,14 @@ export class OKI6295 {
   /** Native sample rate of the OKI6295 on the CPS1 board. */
   getSampleRate(): number {
     return OKI_SAMPLE_RATE;
+  }
+
+  getRom(): Uint8Array {
+    return this.rom;
+  }
+
+  replaceRom(newRom: Uint8Array): void {
+    this.rom = newRom;
   }
 
   getState(): OKI6295State {

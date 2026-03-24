@@ -571,6 +571,64 @@
         .aud-panel { display: none; }
         body.aud-active { padding-bottom: 0; }
       }
+
+      /* Sample Browser panel */
+      .smp-panel {
+        position: fixed; top: 50px; right: 0; width: 420px; height: calc(100vh - 50px);
+        background: #0a0a0a; border-left: 1px solid #2a2a2a; z-index: 8500;
+        transform: translateX(100%); transition: transform 0.3s ease;
+        overflow-y: auto; padding: 12px; color: #ccc;
+        font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      }
+      .smp-panel.open { transform: translateX(0); }
+
+      .smp-header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+      .smp-header h2 {
+        font: 700 0.9rem "Courier New", monospace; color: #ff1a50;
+        letter-spacing: 0.15em; text-transform: uppercase; margin: 0; flex: 1;
+      }
+      .smp-export { font-size: 0.6rem !important; padding: 3px 8px !important; }
+      .smp-close {
+        background: transparent; border: 1px solid #333; color: #666;
+        font-size: 0.8rem; width: 24px; height: 24px; border-radius: 3px;
+        cursor: pointer; display: flex; align-items: center; justify-content: center;
+      }
+      .smp-close:hover { border-color: #ff1a50; color: #ff1a50; }
+
+      .smp-table { width: 100%; border-collapse: collapse; font-size: 0.7rem; }
+      .smp-table th {
+        text-align: left; padding: 4px 6px; color: #555; font-weight: 600;
+        border-bottom: 1px solid #2a2a2a; font-size: 0.6rem; text-transform: uppercase;
+      }
+      .smp-table td { padding: 4px 6px; border-bottom: 1px solid #1a1a1a; color: #888; }
+      .smp-table tr:hover { background: #151515; }
+
+      .smp-play-btn {
+        background: transparent; border: 1px solid #333; color: #4ecb71;
+        font-size: 0.7rem; width: 24px; height: 20px; border-radius: 3px;
+        cursor: pointer; display: flex; align-items: center; justify-content: center;
+      }
+      .smp-play-btn:hover { border-color: #4ecb71; background: #0a1a10; }
+
+      .smp-replace-cell { display: flex; gap: 4px; align-items: center; }
+
+      .smp-drop {
+        flex: 1; padding: 3px 6px; border: 1px dashed #333; border-radius: 3px;
+        color: #555; font-size: 0.6rem; text-align: center; cursor: pointer;
+        transition: all 0.15s;
+      }
+      .smp-drop:hover { border-color: #ff1a50; color: #ff1a50; }
+      .smp-drop.drag-over { border-color: #ff1a50; background: #1a0a10; color: #ff1a50; }
+      .smp-drop.replaced { border-color: #4ecb71; color: #4ecb71; }
+
+      .smp-mic-btn {
+        background: transparent; border: 1px solid #333; color: #888;
+        font-size: 0.7rem; width: 24px; height: 20px; border-radius: 3px;
+        cursor: pointer; display: flex; align-items: center; justify-content: center;
+      }
+      .smp-mic-btn:hover { border-color: #ff1a50; }
+      .smp-mic-btn.recording { border-color: #ff1a50; color: #ff1a50; animation: pulse 0.5s infinite; }
+      @keyframes pulse { 50% { opacity: 0.5; } }
     </style>
   </head>
   <body class="dbg-active">
@@ -592,6 +650,7 @@
           <button id="mute-btn" class="ctrl-btn">Mute (M)</button>
           <button id="dbg-btn" class="ctrl-btn">Debug (F2)</button>
           <button id="aud-btn" class="ctrl-btn">Audio (F3)</button>
+          <button id="sample-btn" class="ctrl-btn">Samples (F4)</button>
           <button id="quit-btn" class="ctrl-btn" style="color:#ff1a50;">Quit</button>
         </div>
         <a class="github-link" href="https://github.com/privaloops/arcade-ts" target="_blank" rel="noopener">
@@ -688,6 +747,7 @@
 
     <div id="dbg-panel" class="dbg-panel open"></div>
     <div id="aud-panel" class="aud-panel"></div>
+    <div id="sample-panel" class="smp-panel"></div>
     <script type="module" src="/src/index.ts"></script>
   </body>
 </html>

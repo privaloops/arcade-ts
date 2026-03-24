@@ -14,6 +14,7 @@ import { getSlotInfo, getNumSlots } from "./save-state";
 import { getDipDef, bankToIndex, type DipSwitchDef } from "./dip-switches";
 import { DebugPanel } from "./debug/debug-panel";
 import { AudioPanel } from "./audio/audio-panel";
+import { SampleBrowser } from "./audio/sample-browser";
 
 function getElement<T extends HTMLElement>(id: string): T {
   const el = document.getElementById(id);
@@ -189,6 +190,16 @@ function toggleAudio(): void {
 
 audBtn.addEventListener("click", toggleAudio);
 
+const sampleBtn = getElement<HTMLButtonElement>("sample-btn");
+let sampleBrowser: SampleBrowser | null = new SampleBrowser(emulator);
+
+function toggleSamples(): void {
+  if (!sampleBrowser) sampleBrowser = new SampleBrowser(emulator);
+  sampleBrowser.toggle();
+}
+
+sampleBtn.addEventListener("click", toggleSamples);
+
 pauseBtn.addEventListener("click", () => {
   if (emulator.isRunning()) {
     emulator.pause();
@@ -231,6 +242,8 @@ quitBtn.addEventListener("click", () => {
   debugPanel?.destroy();
   debugPanel = null;
   audioPanel?.destroy();
+  sampleBrowser?.destroy();
+  sampleBrowser = null;
   audioPanel = null;
   emulator.stop();
   emulator.suspendAudio();
@@ -380,6 +393,7 @@ async function handleRomFile(file: File): Promise<void> {
 
     // Update audio panel
     audioPanel?.onGameChange();
+    sampleBrowser?.onGameChange();
 
     emulator.start();
     setStatus(`Running: ${file.name} (${mode}${isTate ? ', TATE' : ''})`);
@@ -947,6 +961,9 @@ window.addEventListener("keydown", (e) => {
   } else if (e.code === "F3") {
     e.preventDefault();
     toggleAudio();
+  } else if (e.code === "F4") {
+    e.preventDefault();
+    toggleSamples();
   } else if (e.code === "F5") {
     e.preventDefault();
     openSsModal("save");

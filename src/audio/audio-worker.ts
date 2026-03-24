@@ -360,6 +360,13 @@ self.onmessage = async (e: MessageEvent) => {
       break;
     }
 
+    case 'updateOkiRom': {
+      if (oki6295) {
+        oki6295.replaceRom(new Uint8Array(msg.rom as ArrayBuffer));
+      }
+      break;
+    }
+
     case 'getState': {
       // Return Z80 + Z80Bus + OKI + YM2151 state for save state
       const state: Record<string, unknown> = {};
