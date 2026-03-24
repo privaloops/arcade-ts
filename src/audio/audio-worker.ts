@@ -118,9 +118,9 @@ function updateYmShadow(register: number, data: number): void {
   if (!vizWriter) return;
 
   if (register === 0x08) {
-    // Key On/Off: bits 6-3 = channel (only 0-7 valid), bits 2-0 = op mask
-    const ch = (register === 0x08) ? (data >> 3) & 7 : 0;
-    const opMask = data & 0x0F;
+    // Key On/Off: bits 2-0 = channel, bits 6-3 = operator mask (M1,C1,M2,C2)
+    const ch = data & 7;
+    const opMask = (data >> 3) & 0xF;
     ymKon[ch] = opMask !== 0 ? 1 : 0;
     vizWriter.updateFmKon(ch, ymKon[ch]!);
     // Also update TL for this channel (carrier may have changed)
