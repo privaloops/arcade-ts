@@ -130,7 +130,7 @@ function applyChannelMask(mask: number): void {
   for (let ch = 0; ch < 8; ch++) {
     const shouldMute = (mask & (1 << ch)) === 0;
     const wasMuted = fmMuted[ch] !== 0;
-    if (shouldMute === (wasMuted !== 0)) continue; // no change
+    if (shouldMute === wasMuted) continue; // no change
     fmMuted[ch] = shouldMute ? 1 : 0;
 
     // Write RL register (0x20+ch): bits 7-6 = R/L, bits 5-3 = FB, bits 2-0 = connect
