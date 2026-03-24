@@ -284,17 +284,9 @@ self.onmessage = async (e: MessageEvent) => {
       });
       z80Bus.setYm2151WriteCallback((register: number, data: number) => {
         updateYmShadow(register, data);
-
-        // Intercept writes for muted channels — modify data, never block
-        if (register >= 0x60 && register <= 0x7F && fmMuted[register & 7]) {
-          ym2151!.writeData(0x7F); // silence: max attenuation
-        } else if (register >= 0x20 && register <= 0x27 && fmMuted[register & 7]) {
-          ym2151!.writeData(data & 0x3F); // clear RL output bits
-        } else if (register === 0x08 && fmMuted[data & 7]) {
-          ym2151!.writeData(data & 0x07); // key off: clear operator bits
-        } else {
-          ym2151!.writeData(data);
-        }
+        // All writes pass through unmodified — FM mute requires per-channel
+        // WASM output (not yet implemented). Visual indicators still work.
+        ym2151!.writeData(data);
       });
       z80Bus.setYm2151ReadStatusCallback(() => {
         return ym2151!.readStatus();
