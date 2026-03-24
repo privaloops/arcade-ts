@@ -25,6 +25,7 @@ import type { RendererInterface } from "./types";
 import type { VideoConfig } from "./video/cps1-video";
 import { InputManager } from "./input/input";
 import { loadRomFromZip, RomSet } from "./memory/rom-loader";
+import { RomStore } from "./rom-store";
 import { NukedOPMWasm, initOPMWasm } from "./audio/nuked-opm-wasm";
 import { VizReader, VIZ_SAB_SIZE } from "./audio/audio-viz";
 import { QSoundWasm, initQSoundWasm } from "./audio/qsound-wasm";
@@ -116,6 +117,7 @@ export class Emulator {
   private animFrameId: number = 0;
   private romLoaded: boolean = false;
   private gameName: string = '';
+  private romStore: RomStore | null = null;
 
   constructor(canvas: HTMLCanvasElement) {
     this.bus = new Bus();
@@ -199,6 +201,7 @@ export class Emulator {
     this.frameDebt = 0;
 
     const romSet: RomSet = await loadRomFromZip(file);
+    this.romStore = new RomStore(romSet);
 
     this.isQSound = romSet.qsound;
     this.gameName = romSet.name;
@@ -411,6 +414,7 @@ export class Emulator {
 
   /** Get the current game name (set at ROM load time). */
   getGameName(): string { return this.gameName; }
+  getRomStore(): RomStore | null { return this.romStore; }
 
   /** Expose I/O ports for DIP switch configuration. */
   getIoPorts(): Uint8Array { return this.bus.getIoPorts(); }

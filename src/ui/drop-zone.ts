@@ -20,6 +20,7 @@ export interface DropZoneDeps {
   gameSelect: HTMLSelectElement;
   loadBtn: HTMLButtonElement;
   romControls: HTMLDivElement;
+  exportBtn: HTMLButtonElement;
   statusEl: HTMLParagraphElement;
   getRendererMode(): "canvas" | "dom";
   setupDomRenderer(): void;
@@ -55,6 +56,7 @@ async function handleRomFile(file: File): Promise<void> {
     emulator.resumeAudio();
     dropZone.classList.add("hidden");
     controlsEl.classList.add("visible");
+    _deps.exportBtn.style.display = "";
 
     const mode = getRendererMode();
     if (mode === "dom") {

@@ -22,6 +22,7 @@ export interface ControlsBarDeps {
   debugBtn: HTMLButtonElement;
   audBtn: HTMLButtonElement;
   quitBtn: HTMLButtonElement;
+  exportBtn: HTMLButtonElement;
   hamburgerBtn: HTMLButtonElement;
   hamburgerMenu: HTMLDivElement;
   crtToggle: HTMLInputElement;
@@ -72,7 +73,7 @@ export function toggleAudio(deps: ControlsBarDeps): void {
 export function initControlsBar(deps: ControlsBarDeps): void {
   const {
     emulator, canvas, domScreen, dropZone, controlsEl, canvasWrapper,
-    pauseBtn, muteBtn, saveBtnCtrl, loadBtnCtrl, debugBtn, audBtn, quitBtn,
+    pauseBtn, muteBtn, saveBtnCtrl, loadBtnCtrl, debugBtn, audBtn, quitBtn, exportBtn,
     hamburgerBtn, hamburgerMenu,
     crtToggle, tateToggle, gameSelect, loadBtn,
     getMuted, setMuted, getDebugPanel, setDebugPanel, getAudioPanel, setAudioPanel,
@@ -131,6 +132,21 @@ export function initControlsBar(deps: ControlsBarDeps): void {
 
   debugBtn.addEventListener("click", () => toggleDebug(deps));
   audBtn.addEventListener("click", () => toggleAudio(deps));
+
+  // Export ROM
+  exportBtn.addEventListener("click", async () => {
+    const romStore = emulator.getRomStore();
+    if (!romStore) return;
+    setStatus("Exporting ROM...");
+    const blob = await romStore.exportZip();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${romStore.name}_modified.zip`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setStatus("ROM exported");
+  });
 
   // CRT toggle (in Config > Display tab)
   crtToggle.addEventListener("change", () => {

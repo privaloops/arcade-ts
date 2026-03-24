@@ -44,6 +44,7 @@ const loadBtnCtrl = getElement<HTMLButtonElement>("load-btn-ss");
 const debugBtn = getElement<HTMLButtonElement>("dbg-btn");
 const audBtn = getElement<HTMLButtonElement>("aud-btn");
 const quitBtn = getElement<HTMLButtonElement>("quit-btn");
+const exportBtn = getElement<HTMLButtonElement>("export-btn");
 const hamburgerBtn = getElement<HTMLButtonElement>("hamburger-btn");
 const hamburgerMenu = getElement<HTMLDivElement>("hamburger-menu");
 const crtToggle = getElement<HTMLInputElement>("crt-toggle");
@@ -189,7 +190,7 @@ ctrlResetBtn.addEventListener("click", () => {
 const rendererDeps = { emulator, canvas, domScreen, getGameScreen, setGameScreen, setStatus };
 const controlsBarDeps = {
   emulator, canvas, domScreen, dropZone, controlsEl, canvasWrapper,
-  pauseBtn, muteBtn, saveBtnCtrl, loadBtnCtrl, debugBtn, audBtn, quitBtn,
+  pauseBtn, muteBtn, saveBtnCtrl, loadBtnCtrl, debugBtn, audBtn, quitBtn, exportBtn,
   hamburgerBtn, hamburgerMenu,
   crtToggle, tateToggle, gameSelect, loadBtn,
   getMuted, setMuted, getDebugPanel, setDebugPanel, getAudioPanel, setAudioPanel,
@@ -202,7 +203,7 @@ initControlsBar(controlsBarDeps);
 initSaveStateUI({ emulator, ssOverlay, ssTitle, ssSlots, ssCloseBtn, canvasWrapper, appEl, getMuted, setStatus });
 initDropZone({
   emulator, canvas, domScreen, dropZone, fileInput, controlsEl, canvasWrapper,
-  tateToggle, gameSelect, loadBtn, romControls, statusEl,
+  tateToggle, gameSelect, loadBtn, romControls, exportBtn, statusEl,
   getRendererMode, setupDomRenderer: () => setupDomRenderer(rendererDeps),
   getDebugPanel, setDebugPanel, getAudioPanel: () => audioPanel, setLastRomFile, getLastRomFile, setStatus,
 });

@@ -10,7 +10,7 @@ import JSZip from 'jszip';
 import { GAME_DEFS } from './game-defs';
 import type { GameDef, ProgramDef, GraphicsDef, GfxBankDef, ProgramRomEntry, ProgramWordSwapEntry, CpsBConfig, GfxMapperConfig } from './game-defs';
 
-export type { CpsBConfig, GfxMapperConfig } from './game-defs';
+export type { CpsBConfig, GfxMapperConfig, GameDef } from './game-defs';
 
 export interface RomSet {
   name: string;
@@ -22,6 +22,10 @@ export interface RomSet {
   gfxMapper: GfxMapperConfig;
   qsound: boolean;
   qsoundDspRom: Uint8Array | null;
+  /** Original ROM files from ZIP, preserved for export */
+  originalFiles: Map<string, Uint8Array>;
+  /** Game definition, needed for ROM reconstruction on export */
+  gameDef: GameDef;
 }
 
 interface RomFileEntry {
@@ -372,6 +376,8 @@ export async function loadRomFromZip(file: File): Promise<RomSet> {
     gfxMapper: gameDef.gfxMapper,
     qsound: gameDef.qsound === true,
     qsoundDspRom,
+    originalFiles: fileMap,
+    gameDef,
   };
 }
 
