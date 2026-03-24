@@ -25,20 +25,21 @@ L'avantage structurel : tout est décodé en TypeScript. Chaque layer, sprite, p
 
 ---
 
-## Phase 2 — Audio DAW
+## Phase 2 — Audio DAW ✅ (livré)
 
 > Voir et entendre chaque instrument séparément.
 
-### Visualisation
-- [ ] Piano roll temps réel des 8 canaux FM (YM2151)
-- [ ] Waveform temps réel des 4 voix OKI (ADPCM samples)
-- [ ] Mini oscilloscope par canal (colonne gauche)
-- [ ] Volume meter par canal
-- [ ] Note actuelle + fréquence affichée
+### Visualisation ✅
+- [x] Piano roll Cubase-style (clavier vertical + blocs de notes scrollant)
+- [x] Waveform temps réel des 4 voix OKI (ADPCM signal)
+- [x] VU-mètre vertical par canal
+- [x] Note actuelle affichée par canal FM
+- [x] Hit timelines par piste FM
+- [x] Sélection de piste FM → clavier + piano roll suivent la piste
 
-### Contrôle
-- [ ] Mute / Solo par canal (FM et OKI)
-- [ ] Export pistes séparées (WAV par canal)
+### Contrôle ✅
+- [x] Mute / Solo par canal (FM via interception TL+RL+KON, OKI via voiceMask)
+- [ ] Export pistes séparées (WAV par canal) — nécessite per-channel WASM output
 
 ### Export MIDI
 - [ ] Enregistrer les notes FM (canal, note, durée, velocity) pendant N secondes
@@ -52,10 +53,11 @@ L'avantage structurel : tout est décodé en TypeScript. Chaque layer, sprite, p
 - [ ] Preview dans le jeu qui tourne
 - [ ] Export ROM audio modifiée
 
-### Technique
-- [ ] SharedArrayBuffer pour les métriques audio (Worker → Main thread)
-- [ ] ~200 octets par batch : 8 canaux × (freq + vol + key_on) + 4 voix × (sample_id + pos + active)
-- [ ] Panel sous le canvas, toute largeur, collapsible
+### Technique ✅
+- [x] SharedArrayBuffer (vizSAB 128 bytes) pour les métriques audio (Worker → Main thread)
+- [x] Shadow YM2151 register file dans le Worker
+- [x] Panel sous le canvas, toute largeur, collapsible
+- [x] Header StudioROM avec contrôles intégrés
 
 ---
 
