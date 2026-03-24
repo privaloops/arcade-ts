@@ -1,9 +1,9 @@
 :root {
-  --color-accent: var(--color-accent);
-  --color-accent-hover: var(--color-accent-hover);
-  --color-accent-glow: var(--color-accent-glow);
-  --color-accent-bg: var(--color-accent-bg);
-  --color-bg-app: var(--color-bg-app);
+  --color-accent: #ff1a50;
+  --color-accent-hover: #e0153f;
+  --color-accent-glow: #ff1a5044;
+  --color-accent-bg: #1a0a10;
+  --color-bg-app: #0a0a0a;
   --color-bg-element: #111;
   --color-bg-elevated: #141414;
   --color-bg-surface: #1a1a1a;
@@ -18,8 +18,8 @@
   --color-text-faint: #444;
   --color-text-dim: #666;
   --color-text-label: #999;
-  --color-success: var(--color-success);
-  --color-success-bg: var(--color-success-bg);
+  --color-success: #4ecb71;
+  --color-success-bg: #0a1a10;
   --font-mono: "Courier New", Courier, monospace;
   --font-system: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --radius-sm: 3px;
