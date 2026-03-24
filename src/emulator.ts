@@ -26,6 +26,7 @@ import type { VideoConfig } from "./video/cps1-video";
 import { InputManager } from "./input/input";
 import { loadRomFromZip, RomSet } from "./memory/rom-loader";
 import { NukedOPMWasm, initOPMWasm } from "./audio/nuked-opm-wasm";
+import { VizReader, VIZ_SAB_SIZE } from "./audio/audio-viz";
 import { QSoundWasm, initQSoundWasm } from "./audio/qsound-wasm";
 import { OKI6295 } from "./audio/oki6295";
 import { AudioOutput } from "./audio/audio-output";
@@ -94,6 +95,8 @@ export class Emulator {
   // Audio worker (standard CPS1 path only)
   private audioWorker: Worker | null = null;
   private audioWorkerReady = false;
+  private vizSab: SharedArrayBuffer | null = null;
+  private vizReader: VizReader | null = null;
   private pendingSoundLatches: number[] = [];
   private pendingSoundLatches2: number[] = [];
 
@@ -612,6 +615,15 @@ export class Emulator {
   getFpsDisplay(): number {
     return this.fpsDisplay;
   }
+
+  getVizReader(): VizReader | null {
+    return this.vizReader;
+  }
+
+  isAudioWorkerActive(): boolean {
+    return this.audioWorkerReady;
+  }
+
   private m68kErrorCount = 0;
   private z80ErrorCount = 0;
   private fpsFrames = 0;
@@ -712,12 +724,17 @@ export class Emulator {
         // Send init with Transferable buffers (zero-copy)
         const audioRomCopy = audioRom.slice();
         const okiRomCopy = okiRom.slice();
+        // Allocate visualization SharedArrayBuffer
+        this.vizSab = new SharedArrayBuffer(VIZ_SAB_SIZE);
+        this.vizReader = new VizReader(this.vizSab);
+
         this.audioWorker!.postMessage(
           {
             type: 'init',
             audioRom: audioRomCopy.buffer,
             okiRom: okiRomCopy.buffer,
             sab,
+            vizSab: this.vizSab,
             sampleRate: this.audioOutput.getSampleRate(),
           },
           [audioRomCopy.buffer, okiRomCopy.buffer],

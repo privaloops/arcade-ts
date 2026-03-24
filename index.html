@@ -477,6 +477,77 @@
       }
       .dbg-section-title:hover .dbg-section-arrow { color: #ff1a50; }
       .dbg-section-content { padding-left: 2px; }
+
+      /* Audio DAW panel */
+      .aud-panel {
+        position: fixed; bottom: 0; left: 0; right: 0;
+        max-height: 360px; background: #0a0a0a;
+        border-top: 1px solid #2a2a2a; z-index: 8000;
+        transform: translateY(100%); transition: transform 0.3s ease;
+        overflow-y: auto; padding: 10px 16px; color: #ccc;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      }
+      .aud-panel.open { transform: translateY(0); }
+      body.aud-active { padding-bottom: 360px; transition: padding-bottom 0.3s ease; }
+
+      .aud-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+      .aud-header h2 {
+        font: 700 0.9rem "Courier New", Courier, monospace; color: #ff1a50;
+        letter-spacing: 0.15em; text-transform: uppercase; margin: 0;
+      }
+      .aud-close {
+        background: transparent; border: 1px solid #333; color: #666;
+        font-size: 0.8rem; width: 24px; height: 24px; border-radius: 3px;
+        cursor: pointer; transition: all 0.15s; display: flex; align-items: center; justify-content: center;
+      }
+      .aud-close:hover { border-color: #ff1a50; color: #ff1a50; }
+
+      .aud-channels { display: flex; flex-direction: column; gap: 1px; }
+
+      .aud-ch-row {
+        display: flex; align-items: center; gap: 6px; padding: 3px 4px;
+        background: #111; border-radius: 2px;
+      }
+      .aud-ch-color {
+        width: 4px; height: 14px; border-radius: 1px; flex-shrink: 0;
+      }
+      .aud-ch-name {
+        font: 600 0.65rem "Courier New", monospace; color: #888;
+        min-width: 32px;
+      }
+      .aud-ch-note {
+        font: 0.65rem "Courier New", monospace; color: #ccc;
+        min-width: 28px; text-align: center;
+      }
+      .aud-ch-kon {
+        width: 6px; height: 6px; border-radius: 50%;
+        background: #333; flex-shrink: 0; transition: background 0.1s;
+      }
+      .aud-ch-kon.active { background: #4ecb71; box-shadow: 0 0 4px #4ecb7188; }
+
+      .aud-vol-container {
+        flex: 1; height: 6px; background: #1a1a1a; border-radius: 3px;
+        overflow: hidden;
+      }
+      .aud-vol-bar {
+        height: 100%; border-radius: 3px; transition: width 0.08s linear;
+        min-width: 0;
+      }
+
+      .aud-separator {
+        height: 1px; background: #2a2a2a; margin: 3px 0;
+      }
+
+      .aud-piano-wrapper { margin-top: 8px; }
+      .aud-piano-canvas {
+        width: 100%; height: 192px; image-rendering: pixelated;
+        border: 1px solid #1a1a1a; border-radius: 3px;
+      }
+
+      @media (max-width: 900px) {
+        .aud-panel { display: none; }
+        body.aud-active { padding-bottom: 0; }
+      }
     </style>
   </head>
   <body class="dbg-active">
@@ -517,6 +588,7 @@
         <button id="pause-btn" class="ctrl-btn">Pause (P)</button>
         <button id="mute-btn" class="ctrl-btn">Mute (M)</button>
         <button id="dbg-btn" class="ctrl-btn">Debug (F2)</button>
+        <button id="aud-btn" class="ctrl-btn">Audio (F3)</button>
         <button id="quit-btn" class="ctrl-btn" style="color:#ff1a50;">Quit</button>
       </div>
 
@@ -594,6 +666,7 @@
     </footer>
 
     <div id="dbg-panel" class="dbg-panel open"></div>
+    <div id="aud-panel" class="aud-panel"></div>
     <script type="module" src="/src/index.ts"></script>
   </body>
 </html>

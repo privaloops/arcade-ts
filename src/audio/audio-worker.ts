@@ -13,6 +13,7 @@ import { OKI6295, type OKI6295State } from './oki6295';
 import { LinearResampler } from './resampler';
 import { YM2151_SAMPLE_RATE, OKI6295_SAMPLE_RATE } from '../constants';
 import { RING_BUFFER_SAMPLES, SAB_DATA_OFFSET } from './audio-output';
+import { VizWriter } from './audio-viz';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -93,6 +94,60 @@ let mixedR = new Float32Array(2048);
 let suspended = false;
 let intervalId: ReturnType<typeof setInterval> | null = null;
 
+// Visualization
+let vizWriter: VizWriter | null = null;
+
+// YM2151 shadow register state (for visualization)
+const ymKc = new Uint8Array(8);   // Key Code per channel
+const ymKf = new Uint8Array(8);   // Key Fraction per channel
+const ymKon = new Uint8Array(8);  // Key On per channel
+const ymTl = new Uint8Array(32);  // Total Level per operator (8ch × 4ops)
+const ymRl = new Uint8Array(8);   // Right/Left per channel
+const ymConnect = new Uint8Array(8); // Connection/algorithm per channel
+
+/** Carrier operator slot for each algorithm (0-7).
+ *  In YM2151, the carrier is the last operator in the signal chain.
+ *  For algorithms 0-3, only op4 (slot 3) is the carrier.
+ *  For algo 4, ops 2+4 are carriers. For algo 5-6, ops 2+3+4. For algo 7, all 4.
+ *  We simplify: always read op4 (slot 3 = channel + 24) as the primary carrier TL. */
+function getCarrierTl(ch: number): number {
+  return ymTl[ch + 24]!; // slot 3 (operator 4, offset = ch + 3*8)
+}
+
+function updateYmShadow(register: number, data: number): void {
+  if (!vizWriter) return;
+
+  if (register === 0x08) {
+    // Key On/Off: bits 6-3 = channel (only 0-7 valid), bits 2-0 = op mask
+    const ch = (register === 0x08) ? (data >> 3) & 7 : 0;
+    const opMask = data & 0x0F;
+    ymKon[ch] = opMask !== 0 ? 1 : 0;
+    vizWriter.updateFmKon(ch, ymKon[ch]!);
+    // Also update TL for this channel (carrier may have changed)
+    vizWriter.updateFmTl(ch, getCarrierTl(ch));
+  } else if (register >= 0x28 && register <= 0x2F) {
+    const ch = register & 7;
+    ymKc[ch] = data;
+    vizWriter.updateFmKc(ch, data);
+  } else if (register >= 0x30 && register <= 0x37) {
+    const ch = register & 7;
+    ymKf[ch] = data >> 2; // KF is bits 7-2
+    vizWriter.updateFmKf(ch, ymKf[ch]!);
+  } else if (register >= 0x60 && register <= 0x7F) {
+    // TL: operator index = register & 0x1F
+    const opIdx = register & 0x1F;
+    ymTl[opIdx] = data & 0x7F;
+    // Update carrier TL for the channel this operator belongs to
+    const ch = opIdx & 7;
+    vizWriter.updateFmTl(ch, getCarrierTl(ch));
+  } else if (register >= 0x20 && register <= 0x27) {
+    const ch = register & 7;
+    ymRl[ch] = (data >> 6) & 3;
+    ymConnect[ch] = data & 7;
+    vizWriter.updateFmRl(ch, ymRl[ch]!);
+  }
+}
+
 // ── Autonomous frame generation ──────────────────────────────────────────
 
 function runAudioFrame(): void {
@@ -158,6 +213,17 @@ function runAudioFrame(): void {
   }
 
   ringBuffer.write(mixedL, mixedR, nOut);
+
+  // Update OKI voice state in vizSAB
+  if (vizWriter && oki6295) {
+    const okiState = oki6295.getState();
+    for (let v = 0; v < 4; v++) {
+      const ch = okiState.channels[v];
+      if (ch) {
+        vizWriter.updateOki(v, ch.playing ? 1 : 0, 0, Math.round(ch.volume * 255));
+      }
+    }
+  }
 }
 
 // ── Message handler ──────────────────────────────────────────────────────
@@ -171,6 +237,8 @@ self.onmessage = async (e: MessageEvent) => {
       const okiRom = new Uint8Array(msg.okiRom as ArrayBuffer);
       const sab = msg.sab as SharedArrayBuffer;
       const sampleRate = msg.sampleRate as number;
+      const vizSab = msg.vizSab as SharedArrayBuffer | undefined;
+      if (vizSab) vizWriter = new VizWriter(vizSab);
 
       // Init WASM OPM
       await initOPMWasm();
@@ -184,8 +252,9 @@ self.onmessage = async (e: MessageEvent) => {
       z80Bus.setYm2151AddressWriteCallback((value: number) => {
         ym2151!.writeAddress(value);
       });
-      z80Bus.setYm2151WriteCallback((_register: number, data: number) => {
+      z80Bus.setYm2151WriteCallback((register: number, data: number) => {
         ym2151!.writeData(data);
+        updateYmShadow(register, data);
       });
       z80Bus.setYm2151ReadStatusCallback(() => {
         return ym2151!.readStatus();

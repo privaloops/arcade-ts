@@ -13,6 +13,7 @@ import { DEFAULT_GP_MAPPING, DEFAULT_P1_MAPPING, DEFAULT_P2_MAPPING, type Gamepa
 import { getSlotInfo, getNumSlots } from "./save-state";
 import { getDipDef, bankToIndex, type DipSwitchDef } from "./dip-switches";
 import { DebugPanel } from "./debug/debug-panel";
+import { AudioPanel } from "./audio/audio-panel";
 
 function getElement<T extends HTMLElement>(id: string): T {
   const el = document.getElementById(id);
@@ -176,6 +177,18 @@ function toggleDebug(): void {
 
 debugBtn.addEventListener("click", toggleDebug);
 
+const audBtn = getElement<HTMLButtonElement>("aud-btn");
+let audioPanel: AudioPanel | null = new AudioPanel(emulator);
+
+function toggleAudio(): void {
+  if (!audioPanel) {
+    audioPanel = new AudioPanel(emulator);
+  }
+  audioPanel.toggle();
+}
+
+audBtn.addEventListener("click", toggleAudio);
+
 pauseBtn.addEventListener("click", () => {
   if (emulator.isRunning()) {
     emulator.pause();
@@ -217,6 +230,8 @@ quitBtn.addEventListener("click", () => {
   if (document.fullscreenElement) void document.exitFullscreen();
   debugPanel?.destroy();
   debugPanel = null;
+  audioPanel?.destroy();
+  audioPanel = null;
   emulator.stop();
   emulator.suspendAudio();
   dropZone.classList.remove("hidden");
@@ -362,6 +377,9 @@ async function handleRomFile(file: File): Promise<void> {
     if (!debugPanel.isOpen()) {
       debugPanel.toggle();
     }
+
+    // Update audio panel
+    audioPanel?.onGameChange();
 
     emulator.start();
     setStatus(`Running: ${file.name} (${mode}${isTate ? ', TATE' : ''})`);
@@ -926,6 +944,9 @@ window.addEventListener("keydown", (e) => {
   } else if (e.code === "F2") {
     e.preventDefault();
     toggleDebug();
+  } else if (e.code === "F3") {
+    e.preventDefault();
+    toggleAudio();
   } else if (e.code === "F5") {
     e.preventDefault();
     openSsModal("save");

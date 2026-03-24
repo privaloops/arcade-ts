@@ -89,6 +89,7 @@ interface OKIChannel {
 export class OKI6295 {
   private readonly rom: Uint8Array;
   private readonly channels: OKIChannel[];
+  private voiceMask = 0xF; // 4 bits, all voices audible by default
 
   /**
    * Pending phrase number when the first byte of a two-byte command has been
@@ -272,7 +273,7 @@ export class OKI6295 {
 
       for (let ch = 0; ch < NUM_CHANNELS; ch++) {
         const channel = this.channels[ch]!;
-        if (!channel.playing) {
+        if (!channel.playing || !(this.voiceMask & (1 << ch))) {
           continue;
         }
 
@@ -286,6 +287,11 @@ export class OKI6295 {
       // in the final mixer controls the level.
       buffer[i] = mix / 2048;
     }
+  }
+
+  /** Set voice mute mask (4 bits: bit N = voice N audible). */
+  setVoiceMask(mask: number): void {
+    this.voiceMask = mask & 0xF;
   }
 
   /** Native sample rate of the OKI6295 on the CPS1 board. */
