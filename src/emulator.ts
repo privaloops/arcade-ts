@@ -596,6 +596,22 @@ export class Emulator {
   }
 
   private frameCount = 0;
+
+  getFrameCount(): number {
+    return this.frameCount;
+  }
+
+  getRenderer(): RendererInterface {
+    return this.renderer;
+  }
+
+  getFramebuffer(): Uint8Array {
+    return this.framebuffer;
+  }
+
+  getFpsDisplay(): number {
+    return this.fpsDisplay;
+  }
   private m68kErrorCount = 0;
   private z80ErrorCount = 0;
   private fpsFrames = 0;

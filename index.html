@@ -319,6 +319,95 @@
       .settings-row { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; }
       .settings-label { font-size: 0.8rem; color: #888; }
       .settings-row select, .settings-row input[type="checkbox"] { accent-color: #ff1a50; }
+
+      /* X-Ray debug panel */
+      .xray-panel {
+        position: fixed; top: 0; right: 0; width: 280px; height: 100vh;
+        background: #0a0a0a; border-left: 1px solid #2a2a2a; z-index: 9000;
+        transform: translateX(100%); transition: transform 0.3s ease;
+        overflow-y: auto; padding: 16px 14px; box-sizing: border-box;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        color: #ccc;
+      }
+      .xray-panel.open { transform: translateX(0); }
+      body.xray-active #app { margin-right: 280px; transition: margin-right 0.3s ease; }
+
+      .xray-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+      .xray-header h2 {
+        font: 700 1.1rem "Courier New", Courier, monospace; color: #ff1a50;
+        letter-spacing: 0.15em; text-transform: uppercase; margin: 0;
+      }
+      .xray-close {
+        background: transparent; border: 1px solid #333; color: #666;
+        font-size: 0.8rem; width: 24px; height: 24px; border-radius: 3px;
+        cursor: pointer; transition: all 0.15s; display: flex; align-items: center; justify-content: center;
+      }
+      .xray-close:hover { border-color: #ff1a50; color: #ff1a50; }
+
+      .xray-frame-controls {
+        display: flex; align-items: center; gap: 6px; padding-bottom: 12px;
+        border-bottom: 1px solid #1e1e1e;
+      }
+      .xray-frame-controls .ctrl-btn { font-size: 0.65rem; padding: 3px 8px; }
+      .xray-frame-count {
+        font: 0.7rem "Courier New", monospace; color: #555; margin-left: auto;
+      }
+
+      .xray-section-title {
+        font: 600 0.7rem -apple-system, BlinkMacSystemFont, sans-serif; color: #555;
+        text-transform: uppercase; letter-spacing: 0.12em;
+        margin: 14px 0 8px; border-top: 1px solid #1e1e1e; padding-top: 12px;
+      }
+
+      .xray-layer-row {
+        display: flex; align-items: center; gap: 8px; padding: 6px 0;
+        border-bottom: 1px solid #1a1a1a;
+      }
+      .xray-layer-row input[type="checkbox"] { accent-color: #ff1a50; margin: 0; }
+      .xray-layer-label { font-size: 0.85rem; font-weight: 600; color: #ccc; flex: 1; cursor: pointer; }
+      .xray-badge { font: 0.65rem "Courier New", monospace; color: #555; }
+      .xray-flash-btn {
+        background: transparent; border: 1px solid #333; color: #666;
+        font-size: 0.6rem; padding: 2px 6px; border-radius: 3px;
+        cursor: pointer; transition: all 0.15s; text-transform: uppercase;
+      }
+      .xray-flash-btn:hover { border-color: #ff1a50; color: #ff1a50; }
+
+      .xray-order {
+        font-size: 0.7rem; color: #555; padding: 8px 0;
+        font-family: "Courier New", monospace;
+      }
+      .xray-order-value { color: #888; }
+
+      .xray-slider-row {
+        display: flex; align-items: center; gap: 8px; padding: 4px 0;
+      }
+      .xray-slider-row input[type="range"] {
+        flex: 1; accent-color: #ff1a50; height: 4px;
+      }
+      .xray-slider-value {
+        font: 0.7rem "Courier New", monospace; color: #888;
+        min-width: 24px; text-align: right;
+      }
+
+      /* Exploded 3D view */
+      .exploded-container {
+        perspective: 800px; perspective-origin: 50% 50%;
+        transform-style: preserve-3d; position: relative;
+        width: 100%; aspect-ratio: 384 / 224; cursor: grab;
+      }
+      .exploded-container:active { cursor: grabbing; }
+      .exploded-layer {
+        position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+        transform-style: preserve-3d;
+        transition: transform 0.15s ease-out;
+      }
+      .exploded-label {
+        position: absolute; top: -16px; left: 4px;
+        font: 600 10px "Courier New", monospace; color: #ff1a50;
+        text-shadow: 0 0 6px rgba(255,26,80,0.4);
+        pointer-events: none; text-transform: uppercase; letter-spacing: 0.1em;
+      }
     </style>
   </head>
   <body>
@@ -358,6 +447,7 @@
         <button id="load-btn-ss" class="ctrl-btn">Load (F8)</button>
         <button id="pause-btn" class="ctrl-btn">Pause (P)</button>
         <button id="mute-btn" class="ctrl-btn">Mute (M)</button>
+        <button id="xray-btn" class="ctrl-btn">X-Ray (F2)</button>
         <button id="quit-btn" class="ctrl-btn" style="color:#ff1a50;">Quit</button>
       </div>
 
@@ -434,6 +524,7 @@
       Built with TypeScript + WebGL2 + WASM
     </footer>
 
+    <div id="xray-panel" class="xray-panel"></div>
     <script type="module" src="/src/index.ts"></script>
   </body>
 </html>
