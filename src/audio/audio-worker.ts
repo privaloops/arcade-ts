@@ -85,9 +85,9 @@ let okiResampler: LinearResampler | null = null;
 let ymBufferL = new Float32Array(1024);
 let ymBufferR = new Float32Array(1024);
 let okiBuffer = new Float32Array(256);
-let ymResampledL = new Float32Array(16384);
-let ymResampledR = new Float32Array(16384);
-let okiResampledM = new Float32Array(16384);
+let ymResampledL = new Float32Array(12288);
+let ymResampledR = new Float32Array(12288);
+let okiResampledM = new Float32Array(12288);
 let mixedL = new Float32Array(2048);
 let mixedR = new Float32Array(2048);
 

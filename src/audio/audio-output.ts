@@ -22,7 +22,7 @@ import { YM2151_SAMPLE_RATE, OKI6295_SAMPLE_RATE, QSOUND_SAMPLE_RATE } from '../
 import { LinearResampler } from './resampler';
 
 /** Ring buffer capacity in stereo sample pairs */
-export const RING_BUFFER_SAMPLES = 16384;
+export const RING_BUFFER_SAMPLES = 12288;
 
 /** Byte offsets inside the SharedArrayBuffer */
 export const SAB_WRITE_PTR_OFFSET = 0; // Int32, in samples
@@ -47,7 +47,7 @@ const WORKLET_PROCESSOR_SOURCE = /* javascript */ `
 const SAB_WRITE_PTR_OFFSET = 0;
 const SAB_READ_PTR_OFFSET  = 4;
 const SAB_DATA_OFFSET      = 8;
-const RING_BUFFER_SAMPLES  = 16384;
+const RING_BUFFER_SAMPLES  = 12288;
 
 class AudioRingBufferProcessor extends AudioWorkletProcessor {
   /** @type {SharedArrayBuffer | null} */
@@ -261,9 +261,9 @@ export class AudioOutput {
   private qsResamplerR: LinearResampler | null = null;
 
   /** Scratch buffers (allocated once, reused every frame — zero GC pressure) */
-  private ymResampledL: Float32Array = new Float32Array(16384);
-  private ymResampledR: Float32Array = new Float32Array(16384);
-  private okiResampledM: Float32Array = new Float32Array(16384);
+  private ymResampledL: Float32Array = new Float32Array(12288);
+  private ymResampledR: Float32Array = new Float32Array(12288);
+  private okiResampledM: Float32Array = new Float32Array(12288);
   private _mixedL: Float32Array = new Float32Array(2048);
   private _mixedR: Float32Array = new Float32Array(2048);
 
