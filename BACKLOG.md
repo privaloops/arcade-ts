@@ -81,9 +81,10 @@
 - [x] **FM Patch Editor** — Voice read/write + macro UI done, real-time playback deferred (Z80 conflict). Code in `fm-patch-editor.ts` + `cps1-sound-driver.ts`, Synth tab hidden ([#20](https://github.com/privaloops/arcade-ts/issues/20))
 - [ ] **FM real-time preview** — Requires Z80 music sequencer reverse-engineering to avoid TL/volume conflicts
 - [ ] **Mute/Solo ROM export** — Requires reverse-engineering CPS1 music sequence format (note commands per-track)
-- [ ] **Scroll Layer Editor** — Edit scroll 1/2/3 tiles (same architecture as sprite editor)
+- [x] **Scroll Layer Editor** — Works via existing sprite editor (click scroll tile → edit → patches GFX ROM)
+- [ ] **Sprite Analyzer** — Select a multi-tile sprite → scan GFX ROM for all similar tile groups (animation frames, poses). Compare pixel-by-pixel, assemble nx×ny layout, score >70% = match. Display all variants in a gallery panel. Stores tile addresses for batch operations.
+- [ ] **Photo Import** — Upload photo → background removal → resize to sprite dimensions (nx×16 × ny×16) → quantize to sprite's 16-color palette → write pixels across all tiles. Combined with Sprite Analyzer: apply to ALL found variants (every animation frame gets the new face).
 - [ ] **Tile Allocation Manager** — Track free/used tiles across entire GFX ROM
-- [ ] **Image Import** — PNG → tile conversion with palette quantization
 
 ## UI / UX
 
