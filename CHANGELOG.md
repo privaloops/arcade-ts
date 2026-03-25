@@ -19,3 +19,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   - "Edit Sprites (E)" button in hamburger menu (visible after ROM load)
   - New getters on CPS1Video: `getGraphicsRom()`, `getVram()`, `getCpsaRegs()`, `getCpsbRegs()`, `getMapperTable()`, `getBankSizes()`, `getBankBases()`
   - Exported `GfxRange` interface from cps1-video.ts
+- **Audio timeline ruler** — frame-synced ruler bar with minor ticks (60f) and major ticks + labels (600f)
+- **FPS + frame counter** display on audio timeline ruler
+- **Timeline scroll sync** — tied to emulator frameCount, stops on pause, reversed direction (new data on left)
+
+### Fixed
+- **Firefox audio lag** — replaced naive `setInterval(16.77ms)` with 4ms tick + frame debt accumulator. Worker catches up missed frames instead of dropping them.
+- **Ring buffer** doubled from 8192 → 16384 samples (~340ms margin)
+
+### Changed
+- **Rebrand** StudioROM → ROMstudio
+- **UI colors** — `--color-text-muted` #888→#aaa, `--color-text-dim` #666→#888, timeline backgrounds lightened
