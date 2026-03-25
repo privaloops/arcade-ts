@@ -1,10 +1,10 @@
-# StudioROM
+# ROMstudio
 
 **A CPS1 arcade studio in the browser.** Play, inspect, and modify — zero install.
 
 > Play Street Fighter II, Final Fight, Cadillacs & Dinosaurs, and 30+ Capcom classics. Then open the studio tools to see how the hardware works, isolate audio channels, and replace sound samples.
 
-![StudioROM — 3D exploded view of CPS1 layers](docs/demo.gif)
+![ROMstudio — 3D exploded view of CPS1 layers](docs/demo.gif)
 
 ## Video (F2)
 
