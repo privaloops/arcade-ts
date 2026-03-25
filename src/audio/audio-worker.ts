@@ -85,14 +85,16 @@ let okiResampler: LinearResampler | null = null;
 let ymBufferL = new Float32Array(1024);
 let ymBufferR = new Float32Array(1024);
 let okiBuffer = new Float32Array(256);
-let ymResampledL = new Float32Array(8192);
-let ymResampledR = new Float32Array(8192);
-let okiResampledM = new Float32Array(8192);
+let ymResampledL = new Float32Array(16384);
+let ymResampledR = new Float32Array(16384);
+let okiResampledM = new Float32Array(16384);
 let mixedL = new Float32Array(2048);
 let mixedR = new Float32Array(2048);
 
 let suspended = false;
 let intervalId: ReturnType<typeof setInterval> | null = null;
+let lastAudioTime = 0;
+let audioDebt = 0;
 
 // Visualization
 let vizWriter: VizWriter | null = null;
@@ -174,10 +176,28 @@ function updateYmShadow(register: number, data: number): void {
 
 // ── Autonomous frame generation ──────────────────────────────────────────
 
+function runAudioTick(): void {
+  if (!z80 || !z80Bus || !ym2151 || !ringBuffer || suspended) return;
+
+  const now = performance.now();
+  if (lastAudioTime === 0) lastAudioTime = now;
+  audioDebt += now - lastAudioTime;
+  lastAudioTime = now;
+
+  // Run as many frames as we owe (catch up if behind)
+  const maxCatchUp = FRAME_MS * 4; // don't run more than 4 frames at once
+  if (audioDebt > maxCatchUp) audioDebt = maxCatchUp;
+
+  while (audioDebt >= FRAME_MS) {
+    audioDebt -= FRAME_MS;
+    if (ringBuffer.freeSlots < 1024) break; // buffer full, stop catching up
+    runAudioFrame();
+  }
+}
+
 function runAudioFrame(): void {
   if (!z80 || !z80Bus || !ym2151 || !ringBuffer || suspended) return;
 
-  // Skip if ring buffer is nearly full (we're ahead of the AudioWorklet)
   if (ringBuffer.freeSlots < 1024) return;
 
   // Read channel mask from main thread (mute/solo)
@@ -331,8 +351,10 @@ self.onmessage = async (e: MessageEvent) => {
 
       suspended = false;
 
-      // Start autonomous audio generation at ~60fps
-      intervalId = setInterval(runAudioFrame, FRAME_MS);
+      // Start autonomous audio generation — tick frequently, catch up via debt
+      lastAudioTime = 0;
+      audioDebt = 0;
+      intervalId = setInterval(runAudioTick, 4);
 
       self.postMessage({ type: 'ready' });
       break;
@@ -408,6 +430,8 @@ self.onmessage = async (e: MessageEvent) => {
 
     case 'resume': {
       suspended = false;
+      lastAudioTime = 0;
+      audioDebt = 0;
       break;
     }
 

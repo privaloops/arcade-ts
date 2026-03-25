@@ -1,8 +1,8 @@
-# StudioROM — Roadmap
+# ROMstudio — Roadmap
 
 ## Vision
 
-StudioROM n'est pas un émulateur de plus. C'est un **studio CPS1 dans le navigateur** : jouer, comprendre, modifier, créer. Tout en un, zero install.
+ROMstudio n'est pas un émulateur de plus. C'est un **studio CPS1 dans le navigateur** : jouer, comprendre, modifier, créer. Tout en un, zero install.
 
 L'avantage structurel : tout est décodé en TypeScript. Chaque layer, sprite, palette, canal audio existe comme un objet JavaScript inspectable et modifiable. C'est ce que les émulateurs compilés en WASM ne peuvent pas offrir.
 
@@ -58,7 +58,7 @@ L'avantage structurel : tout est décodé en TypeScript. Chaque layer, sprite, p
 - [x] SharedArrayBuffer (vizSAB 128 bytes) pour les métriques audio (Worker → Main thread)
 - [x] Shadow YM2151 register file dans le Worker
 - [x] Panel sous le canvas, toute largeur, collapsible
-- [x] Header StudioROM avec contrôles intégrés
+- [x] Header ROMstudio avec contrôles intégrés
 
 ---
 
