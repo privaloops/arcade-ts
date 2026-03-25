@@ -7,6 +7,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **FM Patch Editor** (code present, UI tab hidden) — CPS1 sound driver voice read/write (40-byte format), macro controls (volume, brightness, ADSR), algorithm selection, ROM export. Voice table auto-detection via base pointer or brute-force scan.
+- **Mic recording** — Record OKI samples from microphone with 3s auto-stop, lo-fi processing (3kHz low-pass + normalize + tanh soft-clip) to match arcade hardware character
+- **Audio panel enhancements** — Mute/solo per FM/OKI channel, FM timeline visualization, OKI waveforms, sortable sample table (click column headers)
+- **Palette ROM patching** — Palette color edits persist across rounds and in ZIP export. Brightness-aware search (strips CPS1 brightness nibble before matching program ROM). Program ROM reconstruction (ROM_LOAD16_BYTE deinterleave) added to export.
+- **CPS1 Sound Driver parser** (`cps1-sound-driver.ts`) — Reverse-engineered v4.x voice format, voice table scanner, `patchToRegisters()` for YM2151 register generation
+
+### Fixed
+- **Scroll 2 tile inspector** — Now accounts for per-row X scroll offset (row scroll), fixing wrong tile selection on stages with parallax effects (e.g., Ken's stage)
+- **3D exploded view drag** — Overlay pointer-events disabled in 3D mode, allowing drag-to-rotate without tile inspector interference
+- **Layer grid default** — Sprite grid checkbox off by default for all layers
+
+### Changed
+- **Synth tab hidden** — FM Patch Editor UI deferred (real-time register override conflicts with Z80 sound driver; see LEARNINGS.md)
+- **OKI sample encoding** — Boosted gain (1.8x + tanh 2.0 soft-clip) to match hot mastering of original CPS1 samples
+
+### Not shipped (investigated, deferred)
+- **FM Patch Editor real-time playback** — Multiple approaches attempted (ROM patching, fmOverride, Z80 write interception with shadow registers). Fundamental conflict: Z80 caches voice data in work RAM and continuously adjusts TL for volume envelopes. Intercepting timbre writes works partially but sounds wrong because the Z80's dynamic volume offsets are lost. Deferred until Z80 music sequencer format is reverse-engineered.
+- **Mute/Solo in ROM export** — Mute/solo is a runtime concept (which channel is audible). Persisting in ROM would require reverse-engineering the CPS1 music sequence format to remove note commands per-track. Noted in BACKLOG.
+
 - **Sprite Pixel Editor** — WYSIWYG sprite editing with palette & tile tools (#27)
   - `inspectSpriteAt()` on CPS1Video — hit-test sprites front-to-back with full tile metadata
   - `PixelInspectResult` enriched with tileCode, paletteIndex, gfxRomOffset, localX/Y, flip, multi-tile info

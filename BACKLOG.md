@@ -20,7 +20,7 @@
 - [x] UI redesign, project renamed to Arcade.ts
 - [x] Vercel deployment with COOP/COEP headers
 
-## Done (session March 25)
+## Done (session March 25 — morning)
 
 - [x] Sprite Pixel Editor — WYSIWYG sprite editing (#27, PR #29)
 - [x] Audio timeline ruler with frame-synced scroll (PR #30)
@@ -28,6 +28,16 @@
 - [x] Ring buffer 8192 → 16384 samples
 - [x] Rebrand StudioROM → ROMstudio
 - [x] UI polish: text colors boosted, backgrounds lightened
+
+## Done (session March 25 — evening)
+
+- [x] FM Patch Editor — voice read/write, macro UI, ROM export (code present, UI hidden)
+- [x] Mic recording — record OKI samples from mic, lo-fi processing
+- [x] Audio panel — mute/solo, FM timeline, OKI waveforms, sortable sample table
+- [x] Palette ROM patching — brightness-aware search, program ROM export
+- [x] Scroll 2 row scroll fix for tile inspector
+- [x] 3D drag fix — overlay pointer-events disabled in exploded mode
+- [x] Layer grid default off
 
 ## M68000 CPU — Tom Harte test failures
 
@@ -68,7 +78,9 @@
 
 - [x] **RomStore** — Central mutable ROM manager with ZIP export ([#22](https://github.com/privaloops/arcade-ts/issues/22))
 - [x] **Sprite Pixel Editor** — WYSIWYG sprite editing with palette & tile tools ([#27](https://github.com/privaloops/arcade-ts/issues/27))
-- [ ] **FM Patch Editor** — Live synth UI, ROM-level editing (depends on RomStore) ([#20](https://github.com/privaloops/arcade-ts/issues/20))
+- [x] **FM Patch Editor** — Voice read/write + macro UI done, real-time playback deferred (Z80 conflict). Code in `fm-patch-editor.ts` + `cps1-sound-driver.ts`, Synth tab hidden ([#20](https://github.com/privaloops/arcade-ts/issues/20))
+- [ ] **FM real-time preview** — Requires Z80 music sequencer reverse-engineering to avoid TL/volume conflicts
+- [ ] **Mute/Solo ROM export** — Requires reverse-engineering CPS1 music sequence format (note commands per-track)
 - [ ] **Scroll Layer Editor** — Edit scroll 1/2/3 tiles (same architecture as sprite editor)
 - [ ] **Tile Allocation Manager** — Track free/used tiles across entire GFX ROM
 - [ ] **Image Import** — PNG → tile conversion with palette quantization
