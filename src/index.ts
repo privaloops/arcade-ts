@@ -8,7 +8,6 @@ import { Emulator } from "./emulator";
 import { DEFAULT_GP_MAPPING, DEFAULT_P1_MAPPING, DEFAULT_P2_MAPPING, type AutofireKey } from "./input/input";
 import { DebugPanel } from "./debug/debug-panel";
 import { AudioPanel } from "./audio/audio-panel";
-import type { SpriteEditorUI } from "./editor/sprite-editor-ui";
 import type { GameScreen } from "./video/GameScreen";
 
 import { showOverlay, hideOverlay } from "./ui/modal";
@@ -85,7 +84,6 @@ let muted = false;
 let debugPanel: DebugPanel | null = new DebugPanel(emulator, canvas);
 let audioPanel: AudioPanel | null = new AudioPanel(emulator);
 let gameScreen: GameScreen | null = null;
-let spriteEditor: SpriteEditorUI | null = null;
 let lastRomFile: File | null = null;
 
 function setStatus(msg: string): void { statusEl.textContent = msg; }
@@ -97,8 +95,6 @@ const getAudioPanel = (): AudioPanel | null => audioPanel;
 const setAudioPanel = (p: AudioPanel | null): void => { audioPanel = p; };
 const getGameScreen = (): GameScreen | null => gameScreen;
 const setGameScreen = (gs: GameScreen | null): void => { gameScreen = gs; };
-const getSpriteEditor = (): SpriteEditorUI | null => spriteEditor;
-const setSpriteEditor = (se: SpriteEditorUI | null): void => { spriteEditor = se; };
 const getLastRomFile = (): File | null => lastRomFile;
 const setLastRomFile = (f: File | null): void => { lastRomFile = f; };
 
@@ -199,7 +195,7 @@ const controlsBarDeps = {
   hamburgerBtn, hamburgerMenu,
   crtToggle, tateToggle, gameSelect, loadBtn,
   getMuted, setMuted, getDebugPanel, setDebugPanel, getAudioPanel, setAudioPanel,
-  getGameScreen, setGameScreen, getSpriteEditor, setSpriteEditor, setStatus,
+  getGameScreen, setGameScreen, setStatus,
 };
 
 initKeyboardCapture(emulator);

@@ -1,5 +1,6 @@
 import { DebugRenderer, type PixelInspectResult } from "./debug-renderer";
 import { LAYER_OBJ, LAYER_SCROLL1, LAYER_SCROLL2, LAYER_SCROLL3 } from "../video/cps1-video";
+import { SpriteEditorUI } from "../editor/sprite-editor-ui";
 import { SCREEN_WIDTH, SCREEN_HEIGHT } from "../constants";
 import type { Emulator } from "../emulator";
 
@@ -42,6 +43,9 @@ export class DebugPanel {
   // Sprite list & registers
   private spriteListDiv: HTMLDivElement | null = null;
   private registerDiv: HTMLDivElement | null = null;
+
+  // Sprite editor (integrated)
+  private spriteEditorUI: SpriteEditorUI | null = null;
 
   // Update throttle
   private updateRafId = 0;
@@ -93,6 +97,7 @@ export class DebugPanel {
     if (this.active) {
       this.renderer.install();
       this.startUpdateLoop();
+      this.spriteEditorUI?.activate();
     }
   }
 
@@ -121,6 +126,9 @@ export class DebugPanel {
       this.showInspectResult(px, py, result);
     };
     this.canvas.addEventListener("click", this.inspectorClickHandler);
+
+    // Activate sprite editor overlay
+    this.spriteEditorUI?.activate();
   }
 
   private close(): void {
@@ -130,6 +138,9 @@ export class DebugPanel {
     this.debugBtn.classList.remove("active");
     this.renderer.uninstall();
     cancelAnimationFrame(this.updateRafId);
+
+    // Deactivate sprite editor overlay
+    this.spriteEditorUI?.deactivate();
 
     if (this.inspectorClickHandler) {
       this.canvas.removeEventListener("click", this.inspectorClickHandler);
@@ -342,6 +353,20 @@ export class DebugPanel {
       this.inspectorInfo = el("div", "dbg-inspector-info") as HTMLDivElement;
       this.inspectorInfo.textContent = "No pixel selected";
       content.appendChild(this.inspectorInfo);
+
+      c.appendChild(sec);
+    }
+
+    // ── Sprite Editor (open by default) ──
+    {
+      const [sec, content] = collapsibleSection("Sprite Editor",
+        "Click on a sprite in the game to select its tile.\n" +
+        "Paint pixels with pencil, fill, eraser tools.\n" +
+        "Changes are written directly to the GFX ROM and visible immediately.\n\n" +
+        "Shortcuts: B=pencil, G=fill, I=eyedropper, X=eraser, [/]=colors", true);
+
+      this.spriteEditorUI = new SpriteEditorUI(this.emulator, this.canvas);
+      this.spriteEditorUI.buildInto(content);
 
       c.appendChild(sec);
     }

@@ -419,7 +419,7 @@
 
       /* Debug panel */
       .dbg-panel {
-        position: fixed; top: 0; right: 0; width: 280px; height: 100vh;
+        position: fixed; top: 0; right: 0; width: 360px; height: 100vh;
         background: var(--color-bg-app); border-left: 1px solid var(--color-border); z-index: 9000;
         transform: translateX(100%); transition: transform 0.3s ease;
         overflow-y: auto; padding: 16px 14px; box-sizing: border-box;
@@ -427,7 +427,7 @@
         color: var(--color-text-secondary);
       }
       .dbg-panel.open { transform: translateX(0); }
-      body.dbg-active #app { margin-right: 280px; transition: margin-right 0.3s ease; }
+      body.dbg-active #app { margin-right: 360px; transition: margin-right 0.3s ease; }
 
       @media (max-width: 900px) {
         .dbg-panel { display: none; }
@@ -750,30 +750,7 @@
       /* Sprite Editor                                                       */
       /* ------------------------------------------------------------------ */
 
-      .edit-panel {
-        position: fixed; top: 0; right: 0; width: 360px; height: 100vh;
-        background: var(--color-bg-app); border-left: 1px solid var(--color-border); z-index: 9500;
-        transform: translateX(100%); transition: transform 0.3s ease;
-        overflow-y: auto; padding: 16px 14px; box-sizing: border-box;
-        font-family: var(--font-system); color: var(--color-text-secondary);
-      }
-      .edit-panel.open { transform: translateX(0); }
-      body.edit-active #app { margin-right: 360px; transition: margin-right 0.3s ease; }
-      body.edit-active header { right: 360px; transition: right 0.3s ease; }
-      body.edit-active .dbg-panel { right: 360px; }
-
-      @media (max-width: 900px) {
-        .edit-panel { display: none; }
-        body.edit-active #app { margin-right: 0; }
-        body.edit-active header { right: 0; }
-      }
-
-      .edit-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
-      .edit-title {
-        font: 700 1rem var(--font-mono); color: var(--color-accent);
-        letter-spacing: 0.15em; text-transform: uppercase; margin: 0;
-      }
-      .edit-close { font-size: 1.2rem; padding: 2px 8px; }
+      /* Sprite editor elements (integrated in debug panel) */
 
       .edit-info {
         font: 0.75rem/1.4 var(--font-mono); color: var(--color-text-muted);
@@ -836,5 +813,5 @@
       /* Overlay canvas on top of game canvas */
       .edit-overlay {
         position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-        image-rendering: pixelated; cursor: crosshair; z-index: 100;
+        image-rendering: pixelated; cursor: default; z-index: 100;
       }
