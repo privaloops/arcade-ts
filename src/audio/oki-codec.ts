@@ -98,7 +98,36 @@ export function decodeSample(rom: Uint8Array, phrase: PhraseInfo): Float32Array 
  *  Resamples to 7575 Hz if needed. Returns packed ADPCM (high nibble first). */
 export function encodeSample(pcm: Float32Array, srcRate: number): Uint8Array {
   // Resample to OKI rate
-  const resampled = srcRate === OKI_SAMPLE_RATE ? pcm : resampleLinear(pcm, srcRate, OKI_SAMPLE_RATE);
+  let resampled = srcRate === OKI_SAMPLE_RATE ? pcm : resampleLinear(pcm, srcRate, OKI_SAMPLE_RATE);
+
+  // Lo-fi processing: match OKI hardware character
+  // 1. Low-pass at ~3kHz (single-pole) to kill harsh highs before ADPCM quantization
+  const cutoff = 3000;
+  const rc = 1 / (2 * Math.PI * cutoff);
+  const dt = 1 / OKI_SAMPLE_RATE;
+  const alpha = dt / (rc + dt);
+  let prev = 0;
+  for (let i = 0; i < resampled.length; i++) {
+    prev += alpha * (resampled[i]! - prev);
+    resampled[i] = prev;
+  }
+
+  // 2. Normalize + soft-clip: match the hot mastering of original CPS1 samples
+  let peak = 0;
+  for (let i = 0; i < resampled.length; i++) {
+    const abs = Math.abs(resampled[i]!);
+    if (abs > peak) peak = abs;
+  }
+  if (peak > 0.001) {
+    // Boost to 1.8x peak (intentional overdrive like originals), then soft-clip
+    const gain = 1.8 / peak;
+    for (let i = 0; i < resampled.length; i++) {
+      let s = resampled[i]! * gain;
+      // tanh soft-clip — pushes everything loud like arcade samples
+      s = Math.tanh(s * 2.0);
+      resampled[i] = s;
+    }
+  }
 
   const numSamples = resampled.length;
   const numBytes = Math.ceil(numSamples / 2);

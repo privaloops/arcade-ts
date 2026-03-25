@@ -13,7 +13,8 @@
  *   40-55  oki[4×4]      OKI voices: {playing, phraseId, volume, pad}
  *   56-57  channelMask   Mute/solo bitmask (bit=1 = audible)
  *                        bits 0-7 = FM, bits 8-11 = OKI
- *   58-127 reserved
+ *   58-65  connect[8]    FM Algorithm (0-7) per channel
+ *   66-127 reserved
  */
 
 export const VIZ_SAB_SIZE = 128;
@@ -26,6 +27,7 @@ const OFF_TL  = 24;
 const OFF_RL  = 32;
 const OFF_OKI = 40;  // 4 voices × 4 bytes = 16 bytes
 const OFF_MASK = 56;
+const OFF_CONNECT = 58;
 
 /** Worker-side writer. Writes channel state into the vizSAB each frame. */
 export class VizWriter {
@@ -50,6 +52,7 @@ export class VizWriter {
   updateFmKon(ch: number, kon: number): void { this.u8[OFF_KON + ch] = kon; }
   updateFmTl(ch: number, tl: number): void { this.u8[OFF_TL + ch] = tl; }
   updateFmRl(ch: number, rl: number): void { this.u8[OFF_RL + ch] = rl; }
+  updateFmConnect(ch: number, connect: number): void { this.u8[OFF_CONNECT + ch] = connect; }
 
   updateOki(voice: number, playing: number, phraseId: number, volume: number, signal: number): void {
     const base = OFF_OKI + voice * 4;
@@ -72,6 +75,7 @@ export interface FmChannelState {
   kon: boolean;
   tl: number;
   rl: number;
+  connect: number;  // algorithm (0-7)
 }
 
 export interface OkiVoiceState {
@@ -98,6 +102,7 @@ export class VizReader {
       kon: this.u8[OFF_KON + ch]! !== 0,
       tl: this.u8[OFF_TL + ch]!,
       rl: this.u8[OFF_RL + ch]!,
+      connect: this.u8[OFF_CONNECT + ch]!,
     };
   }
 

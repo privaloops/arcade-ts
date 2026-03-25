@@ -639,6 +639,13 @@
         cursor: pointer; transition: background 0.1s;
       }
       .aud-fm-strip:hover { background: var(--color-bg-surface); }
+      .aud-edit-btn {
+        background: transparent; border: 1px solid var(--color-border-strong);
+        color: var(--color-text-disabled); font-size: 0.6rem; width: 18px; height: 16px;
+        border-radius: 2px; cursor: pointer; display: flex; align-items: center;
+        justify-content: center; padding: 0; flex-shrink: 0; margin-left: auto;
+      }
+      .aud-edit-btn:hover { border-color: var(--color-accent); color: var(--color-accent); }
       .aud-fm-strip.selected { background: #1a1520; border-left: 2px solid var(--color-accent); }
       .aud-kb-canvas { image-rendering: pixelated; border-left: 1px solid var(--color-border-subtle); border-right: 1px solid var(--color-border-subtle); }
       .aud-ruler-wrap {
@@ -746,6 +753,138 @@
       .smp-toast.error { background: var(--color-accent-bg); color: var(--color-accent); border: 1px solid var(--color-accent); }
       @keyframes toastIn { from { opacity: 0; transform: translateX(-50%) translateY(10px); } }
       @keyframes toastOut { to { opacity: 0; transform: translateX(-50%) translateY(-10px); } }
+
+      /* ------------------------------------------------------------------ */
+      /* FM Patch Editor (Synth tab)                                         */
+      /* ------------------------------------------------------------------ */
+
+      .synth-editor {
+        padding: 8px 0;
+        font: 0.65rem/1.3 var(--font-mono);
+        color: var(--color-text-muted);
+      }
+
+      .synth-placeholder {
+        text-align: center; padding: 24px 12px; color: var(--color-text-disabled);
+        font-style: italic;
+      }
+
+      .synth-channel-label {
+        font: 700 0.85rem var(--font-mono); color: var(--color-success);
+      }
+      .synth-nav-sep {
+        color: var(--color-text-disabled); font-size: 0.7rem;
+      }
+      .synth-nav {
+        display: flex; align-items: center; gap: 8px; margin-bottom: 10px;
+      }
+      .synth-nav-btn {
+        background: transparent; border: 1px solid var(--color-border-strong);
+        color: var(--color-text-muted); font-size: 0.6rem; width: 22px; height: 20px;
+        border-radius: 3px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+      }
+      .synth-nav-btn:hover { border-color: var(--color-accent); color: var(--color-accent); }
+      .synth-patch-num {
+        font: 700 0.85rem var(--font-mono); color: var(--color-accent);
+      }
+      .synth-patch-count {
+        font: 0.65rem var(--font-mono); color: var(--color-text-disabled);
+      }
+      .synth-modified {
+        font: 600 0.55rem var(--font-mono); color: var(--color-accent);
+        margin-left: auto;
+      }
+
+      .synth-global {
+        background: var(--color-bg-element); border-radius: 4px;
+        padding: 8px; margin-bottom: 8px;
+      }
+
+      .synth-algo-row {
+        display: flex; align-items: center; gap: 4px; margin-bottom: 4px;
+      }
+      .synth-algo-btn {
+        background: transparent; border: 1px solid var(--color-border-strong);
+        color: var(--color-text-disabled); font: 600 0.6rem var(--font-mono);
+        width: 22px; height: 20px; border-radius: 3px; cursor: pointer;
+        display: flex; align-items: center; justify-content: center;
+      }
+      .synth-algo-btn:hover { border-color: var(--color-text-muted); color: var(--color-text-muted); }
+      .synth-algo-btn.active { border-color: var(--color-accent); color: var(--color-accent); background: var(--color-accent-bg); }
+      .synth-algo-desc {
+        font: 0.55rem var(--font-mono); color: var(--color-text-disabled);
+        margin-bottom: 6px; min-height: 1em;
+      }
+
+      .synth-label {
+        min-width: 28px; color: var(--color-text-disabled); font-weight: 600;
+        font-size: 0.6rem;
+      }
+      .synth-value {
+        min-width: 20px; text-align: right; color: var(--color-text-primary);
+        font: 0.65rem var(--font-mono);
+      }
+      .synth-param-row {
+        display: flex; align-items: center; gap: 6px; height: 18px;
+      }
+      .synth-slider {
+        flex: 1; height: 3px; -webkit-appearance: none; appearance: none;
+        background: var(--color-border-strong); border-radius: 2px; outline: none;
+        cursor: pointer;
+      }
+      .synth-slider::-webkit-slider-thumb {
+        -webkit-appearance: none; width: 10px; height: 10px;
+        background: var(--color-accent); border-radius: 50%; cursor: pointer;
+      }
+
+      .synth-ops-grid {
+        display: grid; grid-template-columns: 1fr 1fr;
+        gap: 6px; margin-bottom: 8px;
+      }
+      @media (min-width: 700px) {
+        .synth-ops-grid { grid-template-columns: 1fr 1fr 1fr 1fr; }
+      }
+
+      .synth-op-panel {
+        background: var(--color-bg-element); border-radius: 4px;
+        padding: 6px 8px; border-left: 2px solid var(--color-border-strong);
+      }
+      .synth-op-panel.carrier { border-left-color: var(--color-accent); }
+
+      .synth-op-header {
+        display: flex; align-items: center; justify-content: space-between;
+        margin-bottom: 4px;
+      }
+      .synth-op-name {
+        font: 700 0.65rem var(--font-mono); color: var(--color-text-secondary);
+      }
+      .synth-op-role {
+        font: 600 0.5rem var(--font-mono); padding: 1px 4px;
+        border-radius: 2px; text-transform: uppercase;
+      }
+      .synth-op-role.carrier { background: var(--color-accent-bg); color: var(--color-accent); }
+      .synth-op-role.modulator { background: var(--color-bg-surface); color: var(--color-text-disabled); }
+
+      .synth-adsr-section {
+        margin-bottom: 8px;
+      }
+      .synth-adsr-canvas {
+        width: 100%; height: 80px; background: #0a0a0a;
+        border: 1px solid var(--color-border-subtle); border-radius: 3px;
+      }
+
+      .synth-actions {
+        display: flex; gap: 6px; flex-wrap: wrap;
+      }
+      .synth-action-btn {
+        font-size: 0.6rem !important; padding: 3px 8px !important;
+      }
+      .synth-test-btn {
+        border-color: var(--color-success) !important; color: var(--color-success) !important;
+      }
+      .synth-test-btn:hover {
+        background: var(--color-success-bg) !important;
+      }
 
       /* ------------------------------------------------------------------ */
       /* Sprite Editor                                                       */

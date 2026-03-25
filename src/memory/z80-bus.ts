@@ -75,6 +75,11 @@ export class Z80Bus implements Z80BusInterface {
     this.audioRom = data;
   }
 
+  /** Patch audioRom bytes in-place (used by FM editor sync from main thread). */
+  patchAudioRom(offset: number, data: Uint8Array): void {
+    this.audioRom.set(data, offset);
+  }
+
   getWorkRam(): Uint8Array {
     return this.workRam;
   }

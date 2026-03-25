@@ -120,6 +120,7 @@ export class DebugPanel {
 
     // Tile inspector: listen for clicks on the game canvas
     this.inspectorClickHandler = (e: MouseEvent) => {
+      if (this.renderer.isExplodedActive()) return; // 3D mode: drag only, no tile inspect
       const rect = this.canvas.getBoundingClientRect();
       const px = Math.floor((e.clientX - rect.left) / rect.width * SCREEN_WIDTH);
       const py = Math.floor((e.clientY - rect.top) / rect.height * SCREEN_HEIGHT);
@@ -436,7 +437,7 @@ export class DebugPanel {
 
     const gridCb = document.createElement("input");
     gridCb.type = "checkbox";
-    gridCb.checked = layerId === LAYER_OBJ; // sprites grid on by default
+    gridCb.checked = false;
     gridCb.title = "Show tile grid";
     gridCb.className = "dbg-grid-cb";
     this.gridEnabled.set(layerId, gridCb.checked);

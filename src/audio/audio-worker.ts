@@ -104,6 +104,11 @@ const fmMuted = new Uint8Array(8);       // 1 = channel is muted
 let lastChannelMask = 0xFFF;             // all 12 channels audible
 let lastYmAddr = 0;                      // last address written to YM2151
 
+// FM Editor override: when active on a channel, Z80 timbre writes are replaced
+// with the editor's values. Key-on/off and pitch pass through unchanged.
+const fmEditorActive = new Uint8Array(8);  // 1 = editor controls this channel
+const fmEditorRegs = new Uint8Array(256);  // shadow: editor's register values (0x20-0xFF)
+
 // YM2151 shadow register state (for visualization)
 const ymKc = new Uint8Array(8);   // Key Code per channel
 const ymKf = new Uint8Array(8);   // Key Fraction per channel
@@ -171,6 +176,8 @@ function updateYmShadow(register: number, data: number): void {
     ymRlFull[ch] = data;
     ymRlValid[ch] = 1;
     vizWriter.updateFmRl(ch, ymRl[ch]!);
+    // Store full FB/ALG byte (6 bits, without RL) for voice detection
+    vizWriter.updateFmConnect(ch, ymRlFull[ch]! & 0x3F);
   }
 }
 
@@ -432,6 +439,37 @@ self.onmessage = async (e: MessageEvent) => {
       suspended = false;
       lastAudioTime = 0;
       audioDebt = 0;
+      break;
+    }
+
+    case 'fmOverride': {
+      if (!ym2151) return;
+      const writes = msg.writes as Array<{ register: number; value: number }>;
+      for (const w of writes) {
+        ym2151.writeAddress(w.register);
+        ym2151.writeData(w.value);
+        // Also store in editor shadow for continuous override
+        if (w.register >= 0x20) {
+          fmEditorRegs[w.register] = w.value;
+        }
+      }
+      break;
+    }
+
+    case 'fmEditorLock': {
+      const ch = msg.channel as number;
+      const lock = msg.lock as boolean;
+      if (ch >= 0 && ch < 8) {
+        fmEditorActive[ch] = lock ? 1 : 0;
+      }
+      break;
+    }
+
+    case 'updateAudioRom': {
+      if (!z80Bus) return;
+      const offset = msg.offset as number;
+      const data = new Uint8Array(msg.data as ArrayBuffer);
+      z80Bus.patchAudioRom(offset, data);
       break;
     }
 

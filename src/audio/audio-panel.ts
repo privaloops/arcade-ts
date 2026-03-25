@@ -89,6 +89,8 @@ export class AudioPanel {
   private samplesTabBtn: HTMLButtonElement | null = null;
 
   // Sample browser
+  private sampleSortKey: "id" | "duration" | "size" = "id";
+  private sampleSortAsc = true;
   private sampleTableBody: HTMLElement | null = null;
   private phrases: PhraseInfo[] = [];
   private sampleAudioCtx: AudioContext | null = null;
@@ -116,6 +118,7 @@ export class AudioPanel {
 
   toggle(): void { if (this.active) this.close(); else this.open(); }
   isOpen(): boolean { return this.active; }
+
 
   onGameChange(): void {
     this.muted.clear();
@@ -259,6 +262,7 @@ export class AudioPanel {
     this.samplesContent.style.display = "none";
     this.buildSamplesTab();
     c.appendChild(this.samplesContent);
+
   }
 
   private buildSamplesTab(): void {
@@ -281,7 +285,17 @@ export class AudioPanel {
     // Table
     const table = el("table", "smp-table");
     const thead = el("thead");
-    thead.innerHTML = `<tr><th>#</th><th>Duration</th><th>Size</th><th>Play</th><th>Replace</th></tr>`;
+    const hRow = document.createElement("tr");
+    for (const [label, key] of [["#", "id"], ["Duration", "duration"], ["Size", "size"], ["Play", ""], ["Replace", ""]] as const) {
+      const th = document.createElement("th");
+      th.textContent = label;
+      if (key) {
+        th.style.cursor = "pointer";
+        th.addEventListener("click", () => this.sortSamples(key as "id" | "duration" | "size"));
+      }
+      hRow.appendChild(th);
+    }
+    thead.appendChild(hRow);
     table.appendChild(thead);
     this.sampleTableBody = el("tbody");
     table.appendChild(this.sampleTableBody);
@@ -297,6 +311,16 @@ export class AudioPanel {
     if (tab === "samples") this.refreshSampleTable();
   }
 
+  private sortSamples(key: "id" | "duration" | "size"): void {
+    if (this.sampleSortKey === key) {
+      this.sampleSortAsc = !this.sampleSortAsc;
+    } else {
+      this.sampleSortKey = key;
+      this.sampleSortAsc = true;
+    }
+    this.refreshSampleTable();
+  }
+
   private refreshSampleTable(): void {
     if (!this.sampleTableBody) return;
     const rom = this.emulator.getOkiRom();
@@ -305,6 +329,13 @@ export class AudioPanel {
       return;
     }
     this.phrases = parsePhraseTable(rom);
+    const dir = this.sampleSortAsc ? 1 : -1;
+    const key = this.sampleSortKey;
+    this.phrases.sort((a, b) => {
+      const va = key === "id" ? a.id : key === "duration" ? a.durationMs : a.sizeBytes;
+      const vb = key === "id" ? b.id : key === "duration" ? b.durationMs : b.sizeBytes;
+      return (va - vb) * dir;
+    });
     this.sampleTableBody.innerHTML = "";
 
     for (const phrase of this.phrases) {
@@ -339,6 +370,12 @@ export class AudioPanel {
         input.click();
       });
       tdReplace.appendChild(dropZone);
+
+      const micBtn = el("button", "smp-mic-btn") as HTMLButtonElement;
+      micBtn.textContent = "\uD83C\uDFA4";
+      micBtn.title = "Record from microphone";
+      micBtn.addEventListener("click", () => this.toggleMicRecord(phrase.id, micBtn));
+      tdReplace.appendChild(micBtn);
 
       tr.append(tdId, tdDur, tdSize, tdPlay, tdReplace);
       this.sampleTableBody.appendChild(tr);
@@ -529,6 +566,85 @@ export class AudioPanel {
     }
     if (replaced > 0) { this.emulator.updateOkiRom(rom); this.refreshSampleTable(); }
     this.showToast(replaced > 0 ? `Imported ${replaced} sample${replaced > 1 ? "s" : ""}` : "No samples imported", replaced > 0);
+  }
+
+  // -- Microphone recording --
+
+  private micStream: MediaStream | null = null;
+  private micRecorder: MediaRecorder | null = null;
+  private micChunks: Blob[] = [];
+  private micActiveBtn: HTMLButtonElement | null = null;
+  private micPhraseId = -1;
+  private micTimeout: ReturnType<typeof setTimeout> | null = null;
+
+  private async toggleMicRecord(phraseId: number, btn: HTMLButtonElement): Promise<void> {
+    // If already recording this one, stop
+    if (this.micRecorder && this.micRecorder.state === "recording" && this.micActiveBtn === btn) {
+      this.micRecorder.stop();
+      return;
+    }
+    // If recording another, stop that first
+    if (this.micRecorder && this.micRecorder.state === "recording") {
+      this.micRecorder.stop();
+    }
+
+    try {
+      this.micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch {
+      this.showToast("Microphone access denied", false);
+      return;
+    }
+
+    this.micPhraseId = phraseId;
+    this.micActiveBtn = btn;
+    this.micChunks = [];
+    this.micRecorder = new MediaRecorder(this.micStream);
+
+    this.micRecorder.addEventListener("dataavailable", (e) => {
+      if (e.data.size > 0) this.micChunks.push(e.data);
+    });
+
+    this.micRecorder.addEventListener("stop", async () => {
+      // Release mic
+      if (this.micTimeout) { clearTimeout(this.micTimeout); this.micTimeout = null; }
+      this.micStream?.getTracks().forEach(t => t.stop());
+      this.micStream = null;
+      btn.classList.remove("recording");
+      btn.textContent = "\uD83C\uDFA4";
+
+      if (this.micChunks.length === 0) return;
+      const blob = new Blob(this.micChunks, { type: this.micChunks[0]!.type });
+      try {
+        const ctx = this.getAudioCtx();
+        const arrayBuf = await blob.arrayBuffer();
+        const audioBuf = await ctx.decodeAudioData(arrayBuf);
+        const pcm = audioBuf.getChannelData(0);
+        const rom = this.emulator.getOkiRom();
+        if (!rom) return;
+        const adpcm = encodeSample(pcm, audioBuf.sampleRate);
+        const result = replaceSampleInRom(rom, this.micPhraseId, adpcm);
+        if (result.success) {
+          this.emulator.updateOkiRom(rom);
+          if (result.truncated) {
+            this.showToast(`Sample #${this.micPhraseId} recorded (truncated: ${result.keptMs}ms / ${result.originalMs}ms)`, true);
+          } else {
+            this.showToast(`Sample #${this.micPhraseId} recorded`, true);
+          }
+          setTimeout(() => this.refreshSampleTable(), 1000);
+        }
+      } catch (err) {
+        this.showToast("Recording encode error", false);
+        console.error("Mic encode error:", err);
+      }
+    });
+
+    this.micRecorder.start();
+    btn.classList.add("recording");
+    btn.textContent = "\u23F9";
+    // Auto-stop after 3s — replaceSampleInRom will truncate to fit the OKI slot
+    this.micTimeout = setTimeout(() => {
+      if (this.micRecorder?.state === "recording") this.micRecorder.stop();
+    }, 3000);
   }
 
   private extractPhraseId(filename: string): number {

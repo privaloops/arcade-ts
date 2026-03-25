@@ -634,6 +634,31 @@ export class Emulator {
     return this.okiRom;
   }
 
+  /** Send immediate FM register writes to the audio worker (bypass Z80). */
+  postFmOverride(writes: Array<{ register: number; value: number }>): void {
+    if (this.audioWorkerReady && this.audioWorker) {
+      this.audioWorker.postMessage({ type: 'fmOverride', writes });
+    }
+  }
+
+  /** Lock/unlock a FM channel for editor preview (blocks Z80 TL writes on that channel). */
+  postFmEditorLock(channel: number, lock: boolean): void {
+    if (this.audioWorkerReady && this.audioWorker) {
+      this.audioWorker.postMessage({ type: 'fmEditorLock', channel, lock });
+    }
+  }
+
+  /** Sync modified audioRom bytes to the audio worker. */
+  syncAudioRom(offset: number, data: Uint8Array): void {
+    if (this.audioWorkerReady && this.audioWorker) {
+      const copy = data.slice();
+      this.audioWorker.postMessage(
+        { type: 'updateAudioRom', offset, data: copy.buffer },
+        [copy.buffer],
+      );
+    }
+  }
+
   /** Replace the OKI ROM and propagate to the audio worker. */
   updateOkiRom(newRom: Uint8Array): void {
     this.okiRom = newRom;

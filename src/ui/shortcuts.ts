@@ -21,6 +21,7 @@ export interface ShortcutsDeps {
   toggleDebug(): void;
   toggleAudio(): void;
   toggleSpriteEditor(): void;
+  toggleSynth(): void;
   toggleFullscreen(): void;
   isCtrlModalOpen(): boolean;
   isSsModalOpen(): boolean;
@@ -34,7 +35,7 @@ export function initShortcuts(deps: ShortcutsDeps): void {
     getMuted, setMuted,
     openControlsModal, closeControlsModal,
     openSsModal, closeSsModal,
-    toggleDebug, toggleAudio, toggleSpriteEditor, toggleFullscreen,
+    toggleDebug, toggleAudio, toggleSpriteEditor, toggleSynth, toggleFullscreen,
     isCtrlModalOpen, isSsModalOpen,
     setStatus,
   } = deps;
@@ -122,6 +123,9 @@ export function initShortcuts(deps: ShortcutsDeps): void {
     } else if (e.code === "F3") {
       e.preventDefault();
       toggleAudio();
+    } else if (e.code === "F4") {
+      e.preventDefault();
+      toggleSynth();
     } else if (e.code === "F5") {
       e.preventDefault();
       openSsModal("save");
