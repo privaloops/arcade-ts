@@ -146,6 +146,24 @@ export interface SpriteInspectResult {
   nys: number;             // sub-tile Y index within multi-tile sprite
 }
 
+/** Result of inspectScrollAt(): identifies the scroll tile under a screen pixel */
+export interface ScrollInspectResult {
+  layerId: number;         // LAYER_SCROLL1, LAYER_SCROLL2, or LAYER_SCROLL3
+  tileCode: number;        // mapped GFX ROM tile code
+  rawCode: number;         // raw tile code (before bank mapping)
+  paletteIndex: number;    // palette index (including group offset)
+  colorIndex: number;      // pixel's color index within palette (0-15)
+  gfxRomOffset: number;    // byte offset in graphicsRom where this tile starts
+  localX: number;          // pixel position within the tile
+  localY: number;          // pixel position within the tile
+  tileW: number;           // tile width (8, 16, or 32)
+  tileH: number;           // tile height (8, 16, or 32)
+  charSize: number;        // tile size in bytes (64, 128, or 512)
+  flipX: boolean;
+  flipY: boolean;
+  tilemapOffset: number;   // VRAM offset of the tilemap entry
+}
+
 /** Config needed by the DOM renderer to create a FrameStateExtractor */
 export interface VideoConfig {
   graphicsRom: Uint8Array;
@@ -1130,6 +1148,111 @@ export class CPS1Video {
     }
 
     return null;
+  }
+
+  /**
+   * Hit-test: identify the scroll tile at screen position (x, y).
+   * Checks the given layer (LAYER_SCROLL1, LAYER_SCROLL2, LAYER_SCROLL3).
+   * Returns null if no tile covers that pixel or the layer is disabled.
+   */
+  inspectScrollAt(x: number, y: number, layerId: number, boundsOnly = false): ScrollInspectResult | null {
+    if (x < 0 || y < 0 || x >= SCREEN_WIDTH || y >= SCREEN_HEIGHT) return null;
+    if (layerId < LAYER_SCROLL1 || layerId > LAYER_SCROLL3) return null;
+
+    let tileW: number, tileH: number, scrollXReg: number, scrollYReg: number;
+    let baseReg: number, scanFn: (col: number, row: number) => number;
+    let paletteGroupOffset: number, codeMask: number, gfxType: number;
+    let charSize: number, rowStride: number;
+
+    switch (layerId) {
+      case LAYER_SCROLL1:
+        tileW = TILE8; tileH = TILE8;
+        scrollXReg = CPSA_SCROLL1_XSCR; scrollYReg = CPSA_SCROLL1_YSCR;
+        baseReg = CPSA_SCROLL1_BASE; scanFn = tilemap0Scan;
+        paletteGroupOffset = 0x20; codeMask = 0xFFFF;
+        gfxType = GFXTYPE_SCROLL1; charSize = CHAR_SIZE_8; rowStride = ROW_STRIDE_8;
+        break;
+      case LAYER_SCROLL2:
+        tileW = TILE16; tileH = TILE16;
+        scrollXReg = CPSA_SCROLL2_XSCR; scrollYReg = CPSA_SCROLL2_YSCR;
+        baseReg = CPSA_SCROLL2_BASE; scanFn = tilemap1Scan;
+        paletteGroupOffset = 0x40; codeMask = 0xFFFF;
+        gfxType = GFXTYPE_SCROLL2; charSize = CHAR_SIZE_16; rowStride = ROW_STRIDE_8;
+        break;
+      default: // LAYER_SCROLL3
+        tileW = TILE32; tileH = TILE32;
+        scrollXReg = CPSA_SCROLL3_XSCR; scrollYReg = CPSA_SCROLL3_YSCR;
+        baseReg = CPSA_SCROLL3_BASE; scanFn = tilemap2Scan;
+        paletteGroupOffset = 0x60; codeMask = 0x3FFF;
+        gfxType = GFXTYPE_SCROLL3; charSize = CHAR_SIZE_32; rowStride = ROW_STRIDE_32;
+        break;
+    }
+
+    const scrollX = (this.readCpsaReg(scrollXReg) + CPS_HBEND) & 0xFFFF;
+    const scrollY = (this.readCpsaReg(scrollYReg) + CPS_VBEND) & 0xFFFF;
+    const virtualW = 64 * tileW;
+    const virtualH = 64 * tileH;
+    const tilemapBase = this.vramBaseOffset(baseReg, SCROLL_SIZE);
+
+    // Map screen pixel to virtual tilemap position
+    const vx = ((x + scrollX) & 0xFFFF) % virtualW;
+    const vy = ((y + scrollY) & 0xFFFF) % virtualH;
+    const tileCol = (vx / tileW) | 0;
+    const tileRow = (vy / tileH) | 0;
+
+    const tileIndex = scanFn(tileCol, tileRow);
+    const entryOffset = tilemapBase + tileIndex * 4;
+    if (entryOffset + 3 >= VRAM_SIZE) return null;
+
+    const vram = this.vram;
+    const rawCode = ((vram[entryOffset]! << 8) | vram[entryOffset + 1]!) & codeMask;
+    const tileCode = gfxromBankMapper(gfxType, rawCode, this.mapperTable, this.bankSizes, this.bankBases);
+    if (tileCode === -1) return null;
+
+    const attribs = (vram[entryOffset + 2]! << 8) | vram[entryOffset + 3]!;
+    const palette = (attribs & 0x1F) + paletteGroupOffset;
+    const flipX = ((attribs >> 5) & 1) === 1;
+    const flipY = ((attribs >> 6) & 1) === 1;
+
+    let localX = vx % tileW;
+    let localY = vy % tileH;
+    if (flipX) localX = tileW - 1 - localX;
+    if (flipY) localY = tileH - 1 - localY;
+
+    // Decode pixel to get color index
+    const gfxRom = this.graphicsRom;
+    const halfOff = localX >= 8 ? 4 : 0;
+    const isScroll1 = layerId === LAYER_SCROLL1;
+    const groupOffset = isScroll1 ? 0 : ((localX >> 3) * 4);
+    const planeBase = tileCode * charSize + localY * rowStride + (isScroll1 ? ((tileIndex & 0x20) >> 5) * 4 : groupOffset);
+    const bit = 7 - (localX & 7);
+
+    if (planeBase + 3 >= gfxRom.length) return null;
+
+    const colorIndex =
+      ((gfxRom[planeBase]! >> bit) & 1) |
+      (((gfxRom[planeBase + 1]! >> bit) & 1) << 1) |
+      (((gfxRom[planeBase + 2]! >> bit) & 1) << 2) |
+      (((gfxRom[planeBase + 3]! >> bit) & 1) << 3);
+
+    if (colorIndex === 15 && !boundsOnly) return null;
+
+    return {
+      layerId,
+      tileCode,
+      rawCode,
+      paletteIndex: palette,
+      colorIndex,
+      gfxRomOffset: tileCode * charSize,
+      localX,
+      localY,
+      tileW,
+      tileH,
+      charSize,
+      flipX,
+      flipY,
+      tilemapOffset: entryOffset,
+    };
   }
 
   getGraphicsRom(): Uint8Array {

@@ -14,9 +14,7 @@ import type { Emulator } from '../emulator';
 // Constants
 // ---------------------------------------------------------------------------
 
-const TILE_PX = 16;
-const CELL_SIZE = 16;
-const GRID_SIZE = TILE_PX * CELL_SIZE; // 256px
+const GRID_SIZE = 256; // fixed canvas size
 
 const TOOL_DEFS: { id: EditorTool; label: string; key: string }[] = [
   { id: 'pencil',     label: 'Pencil',     key: 'B' },
@@ -290,21 +288,24 @@ export class SpriteEditorUI {
     if (!video) return;
 
     const ctx = this.overlayCtx;
-    const info = tile.spriteInfo;
 
-    const objBuf = video.getObjBuffer();
-    const entryOff = info.spriteIndex * 8;
-    const sprX = (objBuf[entryOff]! << 8) | objBuf[entryOff + 1]!;
-    const sprY = (objBuf[entryOff + 2]! << 8) | objBuf[entryOff + 3]!;
+    if (tile.layerId === 0 && tile.spriteIndex !== undefined) {
+      // Sprite: get screen position from OBJ buffer
+      const objBuf = video.getObjBuffer();
+      const entryOff = tile.spriteIndex * 8;
+      const sprX = (objBuf[entryOff]! << 8) | objBuf[entryOff + 1]!;
+      const sprY = (objBuf[entryOff + 2]! << 8) | objBuf[entryOff + 3]!;
+      const tileScreenX = ((sprX + (tile.nxs ?? 0) * 16) & 0x1FF) - 64;
+      const tileScreenY = ((sprY + (tile.nys ?? 0) * 16) & 0x1FF) - 16;
 
-    const tileScreenX = ((sprX + info.nxs * 16) & 0x1FF) - 64;
-    const tileScreenY = ((sprY + info.nys * 16) & 0x1FF) - 16;
-
-    ctx.fillStyle = 'rgba(255, 26, 80, 0.25)';
-    ctx.fillRect(tileScreenX, tileScreenY, 16, 16);
-    ctx.strokeStyle = '#ff1a50';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(tileScreenX, tileScreenY, 16, 16);
+      ctx.fillStyle = 'rgba(255, 26, 80, 0.25)';
+      ctx.fillRect(tileScreenX, tileScreenY, 16, 16);
+      ctx.strokeStyle = '#ff1a50';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(tileScreenX, tileScreenY, 16, 16);
+    }
+    // For scroll tiles, the bounds overlay is less useful (tiles are static grid)
+    // so we skip drawing a selection box on the game canvas for now.
   }
 
   /** Draw bounding boxes for all visible sprites on the overlay. */
@@ -379,10 +380,13 @@ export class SpriteEditorUI {
 
   private tilePixelFromEvent(e: MouseEvent): { x: number; y: number } | null {
     if (!this.tileCanvas) return null;
+    const tile = this.editor.currentTile;
+    const tw = tile?.tileW ?? 16;
+    const th = tile?.tileH ?? 16;
     const rect = this.tileCanvas.getBoundingClientRect();
-    const x = Math.floor((e.clientX - rect.left) / rect.width * TILE_PX);
-    const y = Math.floor((e.clientY - rect.top) / rect.height * TILE_PX);
-    if (x < 0 || y < 0 || x >= TILE_PX || y >= TILE_PX) return null;
+    const x = Math.floor((e.clientX - rect.left) / rect.width * tw);
+    const y = Math.floor((e.clientY - rect.top) / rect.height * th);
+    if (x < 0 || y < 0 || x >= tw || y >= th) return null;
     return { x, y };
   }
 
@@ -410,32 +414,42 @@ export class SpriteEditorUI {
     const ctx = this.tileCtx;
     if (!ctx || !this.tileCanvas) return;
 
+    const tile = this.editor.currentTile;
     const tileData = this.editor.getCurrentTileData();
-    if (!tileData) {
+    if (!tileData || !tile) {
       ctx.fillStyle = '#111';
       ctx.fillRect(0, 0, GRID_SIZE, GRID_SIZE);
       return;
     }
 
+    const tw = tile.tileW;
+    const th = tile.tileH;
+    const cellW = GRID_SIZE / tw;
+    const cellH = GRID_SIZE / th;
     const palette = this.editor.getCurrentPalette();
 
-    for (let y = 0; y < TILE_PX; y++) {
-      for (let x = 0; x < TILE_PX; x++) {
-        const colorIdx = tileData[y * TILE_PX + x]!;
+    for (let y = 0; y < th; y++) {
+      for (let x = 0; x < tw; x++) {
+        const colorIdx = tileData[y * tw + x]!;
 
         if (colorIdx === 15) {
-          const cx = x * CELL_SIZE;
-          const cy = y * CELL_SIZE;
-          for (let dy = 0; dy < CELL_SIZE; dy++) {
-            for (let dx = 0; dx < CELL_SIZE; dx++) {
-              ctx.fillStyle = ((dx + dy) & 1) ? '#222' : '#333';
+          // Transparent: checkerboard
+          const cx = x * cellW;
+          const cy = y * cellH;
+          ctx.fillStyle = '#222';
+          ctx.fillRect(cx, cy, cellW, cellH);
+          ctx.fillStyle = '#333';
+          for (let dy = 0; dy < cellH; dy += 2) {
+            for (let dx = 0; dx < cellW; dx += 2) {
               ctx.fillRect(cx + dx, cy + dy, 1, 1);
+              if (dx + 1 < cellW && dy + 1 < cellH)
+                ctx.fillRect(cx + dx + 1, cy + dy + 1, 1, 1);
             }
           }
         } else {
           const [r, g, b] = palette[colorIdx] ?? [0, 0, 0];
           ctx.fillStyle = `rgb(${r},${g},${b})`;
-          ctx.fillRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+          ctx.fillRect(x * cellW, y * cellH, cellW, cellH);
         }
       }
     }
@@ -443,14 +457,16 @@ export class SpriteEditorUI {
     // Grid lines
     ctx.strokeStyle = 'rgba(255,255,255,0.08)';
     ctx.lineWidth = 1;
-    for (let i = 1; i < TILE_PX; i++) {
+    for (let i = 1; i < tw; i++) {
       ctx.beginPath();
-      ctx.moveTo(i * CELL_SIZE + 0.5, 0);
-      ctx.lineTo(i * CELL_SIZE + 0.5, GRID_SIZE);
+      ctx.moveTo(i * cellW + 0.5, 0);
+      ctx.lineTo(i * cellW + 0.5, GRID_SIZE);
       ctx.stroke();
+    }
+    for (let i = 1; i < th; i++) {
       ctx.beginPath();
-      ctx.moveTo(0, i * CELL_SIZE + 0.5);
-      ctx.lineTo(GRID_SIZE, i * CELL_SIZE + 0.5);
+      ctx.moveTo(0, i * cellH + 0.5);
+      ctx.lineTo(GRID_SIZE, i * cellH + 0.5);
       ctx.stroke();
     }
   }
@@ -521,13 +537,16 @@ export class SpriteEditorUI {
     this.neighborGrid.innerHTML = '';
 
     const tile = this.editor.currentTile;
-    if (!tile || (tile.spriteInfo.nx <= 1 && tile.spriteInfo.ny <= 1)) {
+    if (!tile || ((tile.nx ?? 1) <= 1 && (tile.ny ?? 1) <= 1)) {
       this.neighborGrid.style.display = 'none';
       return;
     }
 
     this.neighborGrid.style.display = 'grid';
-    const { nx, ny, nxs, nys } = tile.spriteInfo;
+    const nx = tile.nx ?? 1;
+    const ny = tile.ny ?? 1;
+    const nxs = tile.nxs ?? 0;
+    const nys = tile.nys ?? 0;
 
     for (let dy = -1; dy <= 1; dy++) {
       for (let dx = -1; dx <= 1; dx++) {
@@ -571,11 +590,12 @@ export class SpriteEditorUI {
       this.infoBar.textContent = 'Click a sprite on the game screen';
       return;
     }
-    const info = tile.spriteInfo;
-    this.infoBar.textContent =
-      `Tile: 0x${info.tileCode.toString(16).toUpperCase()} | ` +
-      `Sprite #${info.spriteIndex} | ` +
-      `Palette: ${info.paletteIndex}`;
+    const layerNames = ['Sprites', 'Scroll 1', 'Scroll 2', 'Scroll 3'];
+    const layerName = layerNames[tile.layerId] ?? '?';
+    let text = `Tile: 0x${tile.tileCode.toString(16).toUpperCase()} | ${layerName}`;
+    if (tile.spriteIndex !== undefined) text += ` #${tile.spriteIndex}`;
+    text += ` | Pal: ${tile.paletteIndex} | ${tile.tileW}x${tile.tileH}`;
+    this.infoBar.textContent = text;
   }
 
   private refreshToolButtons(): void {
@@ -645,13 +665,13 @@ export class SpriteEditorUI {
       case 'ArrowDown':
       case 'ArrowLeft': {
         const tile = this.editor.currentTile;
-        if (tile && (tile.spriteInfo.nx > 1 || tile.spriteInfo.ny > 1)) {
+        if (tile && ((tile.nx ?? 1) > 1 || (tile.ny ?? 1) > 1)) {
           const dx = e.key === 'ArrowLeft' ? -1 : 0;
           const dy = e.key === 'ArrowUp' ? -1 : e.key === 'ArrowDown' ? 1 : 0;
-          const newNxs = tile.spriteInfo.nxs + dx;
-          const newNys = tile.spriteInfo.nys + dy;
-          if (newNxs >= 0 && newNxs < tile.spriteInfo.nx &&
-              newNys >= 0 && newNys < tile.spriteInfo.ny) {
+          const newNxs = (tile.nxs ?? 0) + dx;
+          const newNys = (tile.nys ?? 0) + dy;
+          if (newNxs >= 0 && newNxs < (tile.nx ?? 1) &&
+              newNys >= 0 && newNys < (tile.ny ?? 1)) {
             this.editor.selectNeighborTile(newNxs, newNys);
             this.refreshTileGrid();
             this.refreshPalette();

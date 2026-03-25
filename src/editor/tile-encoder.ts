@@ -10,7 +10,8 @@
  */
 
 const CHAR_SIZE_16 = 128;
-const ROW_STRIDE = 8;
+const ROW_STRIDE_8 = 8;    // row stride for 8x8 and 16x16 tiles
+const ROW_STRIDE_32 = 16;  // row stride for 32x32 tiles
 
 /**
  * Encode 8 pixel indices (0-15) back into 4 planar bytes.
@@ -46,10 +47,11 @@ export function writePixel(
   localX: number,
   localY: number,
   colorIndex: number,
+  charSize = CHAR_SIZE_16,
 ): void {
-  const tileOffset = tileCode * CHAR_SIZE_16;
-  const halfOffset = localX < 8 ? 0 : 4;
-  const groupBase = tileOffset + localY * ROW_STRIDE + halfOffset;
+  const rowStride = charSize >= 512 ? ROW_STRIDE_32 : ROW_STRIDE_8;
+  const tileOffset = tileCode * charSize;
+  const groupBase = tileOffset + localY * rowStride + ((localX >> 3) * 4);
 
   // Decode the 8 pixels of this group
   const pixels = new Uint8Array(8);
@@ -67,7 +69,7 @@ export function writePixel(
   }
 
   // Modify the target pixel
-  const pixelInGroup = localX < 8 ? localX : localX - 8;
+  const pixelInGroup = localX & 7;
   pixels[pixelInGroup] = colorIndex & 0x0F;
 
   // Re-encode and write back
@@ -86,12 +88,12 @@ export function readPixel(
   tileCode: number,
   localX: number,
   localY: number,
+  charSize = CHAR_SIZE_16,
 ): number {
-  const tileOffset = tileCode * CHAR_SIZE_16;
-  const halfOffset = localX < 8 ? 0 : 4;
-  const groupBase = tileOffset + localY * ROW_STRIDE + halfOffset;
-  const pixelInGroup = localX < 8 ? localX : localX - 8;
-  const bit = 7 - pixelInGroup;
+  const rowStride = charSize >= 512 ? ROW_STRIDE_32 : ROW_STRIDE_8;
+  const tileOffset = tileCode * charSize;
+  const groupBase = tileOffset + localY * rowStride + ((localX >> 3) * 4);
+  const bit = 7 - (localX & 7);
 
   return ((graphicsRom[groupBase]! >> bit) & 1)
        | (((graphicsRom[groupBase + 1]! >> bit) & 1) << 1)
@@ -106,40 +108,33 @@ export function readPixel(
 export function readTile(
   graphicsRom: Uint8Array,
   tileCode: number,
+  tileW = 16,
+  tileH = 16,
+  charSize = CHAR_SIZE_16,
 ): Uint8Array {
-  const result = new Uint8Array(256);
-  const tileOffset = tileCode * CHAR_SIZE_16;
+  const rowStride = charSize >= 512 ? ROW_STRIDE_32 : ROW_STRIDE_8;
+  const groupsPerRow = tileW >> 3;
+  const result = new Uint8Array(tileW * tileH);
+  const tileOffset = tileCode * charSize;
 
-  for (let row = 0; row < 16; row++) {
-    const rowBase = tileOffset + row * ROW_STRIDE;
-    const outBase = row * 16;
+  for (let row = 0; row < tileH; row++) {
+    const rowBase = tileOffset + row * rowStride;
+    const outBase = row * tileW;
 
-    // Left half (pixels 0-7)
-    const lb0 = graphicsRom[rowBase]!;
-    const lb1 = graphicsRom[rowBase + 1]!;
-    const lb2 = graphicsRom[rowBase + 2]!;
-    const lb3 = graphicsRom[rowBase + 3]!;
+    for (let group = 0; group < groupsPerRow; group++) {
+      const planeBase = rowBase + group * 4;
+      const b0 = graphicsRom[planeBase]!;
+      const b1 = graphicsRom[planeBase + 1]!;
+      const b2 = graphicsRom[planeBase + 2]!;
+      const b3 = graphicsRom[planeBase + 3]!;
 
-    for (let p = 0; p < 8; p++) {
-      const bit = 7 - p;
-      result[outBase + p] = ((lb0 >> bit) & 1)
-                           | (((lb1 >> bit) & 1) << 1)
-                           | (((lb2 >> bit) & 1) << 2)
-                           | (((lb3 >> bit) & 1) << 3);
-    }
-
-    // Right half (pixels 8-15)
-    const rb0 = graphicsRom[rowBase + 4]!;
-    const rb1 = graphicsRom[rowBase + 5]!;
-    const rb2 = graphicsRom[rowBase + 6]!;
-    const rb3 = graphicsRom[rowBase + 7]!;
-
-    for (let p = 0; p < 8; p++) {
-      const bit = 7 - p;
-      result[outBase + 8 + p] = ((rb0 >> bit) & 1)
-                                | (((rb1 >> bit) & 1) << 1)
-                                | (((rb2 >> bit) & 1) << 2)
-                                | (((rb3 >> bit) & 1) << 3);
+      for (let p = 0; p < 8; p++) {
+        const bit = 7 - p;
+        result[outBase + group * 8 + p] = ((b0 >> bit) & 1)
+                                         | (((b1 >> bit) & 1) << 1)
+                                         | (((b2 >> bit) & 1) << 2)
+                                         | (((b3 >> bit) & 1) << 3);
+      }
     }
   }
 

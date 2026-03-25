@@ -1,14 +1,15 @@
 /**
- * Sprite Editor — logic layer.
+ * Sprite & Scroll Editor — logic layer.
  *
  * Manages tool state, undo stack, tile read/write operations,
  * and coordinates between the UI and the emulator.
+ * Supports OBJ (sprites) and Scroll 1/2/3 layers.
  */
 
 import { writePixel, readPixel, readTile } from './tile-encoder';
 import { readPalette, writeColor } from './palette-editor';
-import { gfxromBankMapper, GFXTYPE_SPRITES } from '../video/cps1-video';
-import type { SpriteInspectResult } from '../video/cps1-video';
+import { gfxromBankMapper, GFXTYPE_SPRITES, LAYER_OBJ, LAYER_SCROLL1, LAYER_SCROLL2, LAYER_SCROLL3 } from '../video/cps1-video';
+import type { SpriteInspectResult, ScrollInspectResult } from '../video/cps1-video';
 import type { Emulator } from '../emulator';
 
 // ---------------------------------------------------------------------------
@@ -19,13 +20,29 @@ export type EditorTool = 'pencil' | 'fill' | 'eyedropper' | 'eraser';
 
 export interface UndoEntry {
   tileCode: number;
-  offset: number;        // byte offset in GFX ROM
-  oldBytes: Uint8Array;  // 128 bytes (full tile backup)
+  offset: number;
+  oldBytes: Uint8Array;
+  charSize: number;
 }
 
 export interface TileContext {
-  spriteInfo: SpriteInspectResult;
+  layerId: number;
+  tileCode: number;
+  rawCode: number;
+  paletteIndex: number;
+  gfxRomOffset: number;
+  tileW: number;
+  tileH: number;
+  charSize: number;
+  flipX: boolean;
+  flipY: boolean;
   paletteBase: number;
+  // Sprite-specific
+  spriteIndex?: number;
+  nx?: number;
+  ny?: number;
+  nxs?: number;
+  nys?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -38,17 +55,14 @@ const CHAR_SIZE_16 = 128;
 export class SpriteEditor {
   private readonly emulator: Emulator;
 
-  // State
   private _active = false;
   private _tool: EditorTool = 'pencil';
   private _activeColorIndex = 1;
   private _currentTile: TileContext | null = null;
 
-  // Undo/redo stacks
   private readonly undoStack: UndoEntry[] = [];
   private readonly redoStack: UndoEntry[] = [];
 
-  // Callbacks for UI updates
   private onTileChanged: (() => void) | null = null;
   private onToolChanged: (() => void) | null = null;
   private onColorChanged: (() => void) | null = null;
@@ -92,54 +106,102 @@ export class SpriteEditor {
 
   // -- Tile selection --
 
-  selectTileAt(screenX: number, screenY: number): SpriteInspectResult | null {
+  /**
+   * Select the tile at screen position (x, y).
+   * Checks sprites first (front layer), then scroll layers back-to-front.
+   */
+  selectTileAt(screenX: number, screenY: number): TileContext | null {
     const video = this.emulator.getVideo();
     if (!video) return null;
-
-    const info = video.inspectSpriteAt(screenX, screenY, true);
-    if (!info) return null;
-
     const paletteBase = video.getPaletteBase();
 
-    this._currentTile = { spriteInfo: info, paletteBase };
-    this.onTileChanged?.();
-    return info;
+    // Try sprites first
+    const sprInfo = video.inspectSpriteAt(screenX, screenY, true);
+    if (sprInfo) {
+      this._currentTile = {
+        layerId: LAYER_OBJ,
+        tileCode: sprInfo.tileCode,
+        rawCode: sprInfo.rawCode,
+        paletteIndex: sprInfo.paletteIndex,
+        gfxRomOffset: sprInfo.gfxRomOffset,
+        tileW: 16, tileH: 16,
+        charSize: CHAR_SIZE_16,
+        flipX: sprInfo.flipX,
+        flipY: sprInfo.flipY,
+        paletteBase,
+        spriteIndex: sprInfo.spriteIndex,
+        nx: sprInfo.nx, ny: sprInfo.ny,
+        nxs: sprInfo.nxs, nys: sprInfo.nys,
+      };
+      this.onTileChanged?.();
+      return this._currentTile;
+    }
+
+    // Try scroll layers (front-to-back based on layer order)
+    const layerOrder = video.getLayerOrder();
+    for (let slot = layerOrder.length - 1; slot >= 0; slot--) {
+      const lid = layerOrder[slot]!;
+      if (lid === LAYER_OBJ) continue; // already checked
+      if (!video.isLayerEnabled(lid)) continue;
+
+      const scrInfo = video.inspectScrollAt(screenX, screenY, lid, true);
+      if (scrInfo) {
+        this._currentTile = {
+          layerId: lid,
+          tileCode: scrInfo.tileCode,
+          rawCode: scrInfo.rawCode,
+          paletteIndex: scrInfo.paletteIndex,
+          gfxRomOffset: scrInfo.gfxRomOffset,
+          tileW: scrInfo.tileW, tileH: scrInfo.tileH,
+          charSize: scrInfo.charSize,
+          flipX: scrInfo.flipX,
+          flipY: scrInfo.flipY,
+          paletteBase,
+        };
+        this.onTileChanged?.();
+        return this._currentTile;
+      }
+    }
+
+    return null;
   }
 
   /** Switch to a neighbor tile within a multi-tile sprite */
   selectNeighborTile(nxs: number, nys: number): void {
-    if (!this._currentTile) return;
-    const info = this._currentTile.spriteInfo;
-    if (nxs < 0 || nxs >= info.nx || nys < 0 || nys >= info.ny) return;
+    if (!this._currentTile || this._currentTile.layerId !== LAYER_OBJ) return;
+    const tile = this._currentTile;
+    if (!tile.nx || !tile.ny) return;
+    if (nxs < 0 || nxs >= tile.nx || nys < 0 || nys >= tile.ny) return;
 
-    // Recompute tile code for the neighbor sub-tile
     const video = this.emulator.getVideo();
     if (!video) return;
 
     const mappedBaseCode = gfxromBankMapper(
-      GFXTYPE_SPRITES, info.rawCode,
+      GFXTYPE_SPRITES, tile.rawCode,
       video.getMapperTable(), video.getBankSizes(), video.getBankBases(),
     );
     if (mappedBaseCode === -1) return;
 
     let tileCode: number;
-    if (info.flipY) {
-      if (info.flipX) {
-        tileCode = (mappedBaseCode & ~0x0F) + ((mappedBaseCode + (info.nx - 1) - nxs) & 0x0F) + 0x10 * (info.ny - 1 - nys);
+    if (tile.flipY) {
+      if (tile.flipX) {
+        tileCode = (mappedBaseCode & ~0x0F) + ((mappedBaseCode + (tile.nx - 1) - nxs) & 0x0F) + 0x10 * (tile.ny - 1 - nys);
       } else {
-        tileCode = (mappedBaseCode & ~0x0F) + ((mappedBaseCode + nxs) & 0x0F) + 0x10 * (info.ny - 1 - nys);
+        tileCode = (mappedBaseCode & ~0x0F) + ((mappedBaseCode + nxs) & 0x0F) + 0x10 * (tile.ny - 1 - nys);
       }
     } else {
-      if (info.flipX) {
-        tileCode = (mappedBaseCode & ~0x0F) + ((mappedBaseCode + (info.nx - 1) - nxs) & 0x0F) + 0x10 * nys;
+      if (tile.flipX) {
+        tileCode = (mappedBaseCode & ~0x0F) + ((mappedBaseCode + (tile.nx - 1) - nxs) & 0x0F) + 0x10 * nys;
       } else {
         tileCode = (mappedBaseCode & ~0x0F) + ((mappedBaseCode + nxs) & 0x0F) + 0x10 * nys;
       }
     }
 
     this._currentTile = {
-      spriteInfo: { ...info, tileCode, gfxRomOffset: tileCode * CHAR_SIZE_16, nxs, nys },
-      paletteBase: this._currentTile.paletteBase,
+      ...tile,
+      tileCode,
+      gfxRomOffset: tileCode * CHAR_SIZE_16,
+      nxs, nys,
     };
     this.onTileChanged?.();
   }
@@ -155,13 +217,11 @@ export class SpriteEditor {
     const gfxRom = this.getGfxRom();
     if (!gfxRom) return;
 
-    const { tileCode } = this._currentTile.spriteInfo;
+    const { tileCode, charSize } = this._currentTile;
     const colorIndex = this._tool === 'eraser' ? 15 : this._activeColorIndex;
 
-    // Save undo before modifying
-    this.pushUndo(tileCode, gfxRom);
-
-    writePixel(gfxRom, tileCode, localX, localY, colorIndex);
+    this.pushUndo(tileCode, charSize, gfxRom);
+    writePixel(gfxRom, tileCode, localX, localY, colorIndex, charSize);
     this.onTileChanged?.();
   }
 
@@ -170,7 +230,7 @@ export class SpriteEditor {
     const gfxRom = this.getGfxRom();
     if (!gfxRom) return;
 
-    const color = readPixel(gfxRom, this._currentTile.spriteInfo.tileCode, localX, localY);
+    const color = readPixel(gfxRom, this._currentTile.tileCode, localX, localY, this._currentTile.charSize);
     this.setActiveColor(color);
   }
 
@@ -179,31 +239,30 @@ export class SpriteEditor {
     const gfxRom = this.getGfxRom();
     if (!gfxRom) return;
 
-    const { tileCode } = this._currentTile.spriteInfo;
-    const targetColor = readPixel(gfxRom, tileCode, localX, localY);
+    const { tileCode, tileW, tileH, charSize } = this._currentTile;
+    const targetColor = readPixel(gfxRom, tileCode, localX, localY, charSize);
     const fillColor = this._tool === 'eraser' ? 15 : this._activeColorIndex;
 
     if (targetColor === fillColor) return;
 
-    this.pushUndo(tileCode, gfxRom);
+    this.pushUndo(tileCode, charSize, gfxRom);
 
-    // BFS flood fill
-    const visited = new Uint8Array(256); // 16x16
+    const visited = new Uint8Array(tileW * tileH);
     const queue: [number, number][] = [[localX, localY]];
-    visited[localY * 16 + localX] = 1;
+    visited[localY * tileW + localX] = 1;
 
     while (queue.length > 0) {
       const [cx, cy] = queue.pop()!;
-      writePixel(gfxRom, tileCode, cx, cy, fillColor);
+      writePixel(gfxRom, tileCode, cx, cy, fillColor, charSize);
 
       for (const [dx, dy] of [[0, 1], [0, -1], [1, 0], [-1, 0]] as const) {
         const nx = cx + dx;
         const ny = cy + dy;
-        if (nx < 0 || nx >= 16 || ny < 0 || ny >= 16) continue;
-        if (visited[ny * 16 + nx]) continue;
-        visited[ny * 16 + nx] = 1;
+        if (nx < 0 || nx >= tileW || ny < 0 || ny >= tileH) continue;
+        if (visited[ny * tileW + nx]) continue;
+        visited[ny * tileW + nx] = 1;
 
-        if (readPixel(gfxRom, tileCode, nx, ny) === targetColor) {
+        if (readPixel(gfxRom, tileCode, nx, ny, charSize) === targetColor) {
           queue.push([nx, ny]);
         }
       }
@@ -214,15 +273,13 @@ export class SpriteEditor {
 
   // -- Undo/Redo --
 
-  private pushUndo(tileCode: number, gfxRom: Uint8Array): void {
-    const offset = tileCode * CHAR_SIZE_16;
-    const oldBytes = new Uint8Array(CHAR_SIZE_16);
-    oldBytes.set(gfxRom.subarray(offset, offset + CHAR_SIZE_16));
+  private pushUndo(tileCode: number, charSize: number, gfxRom: Uint8Array): void {
+    const offset = tileCode * charSize;
+    const oldBytes = new Uint8Array(charSize);
+    oldBytes.set(gfxRom.subarray(offset, offset + charSize));
 
-    this.undoStack.push({ tileCode, offset, oldBytes });
+    this.undoStack.push({ tileCode, offset, oldBytes, charSize });
     if (this.undoStack.length > MAX_UNDO) this.undoStack.shift();
-
-    // Clear redo stack on new action
     this.redoStack.length = 0;
   }
 
@@ -233,12 +290,10 @@ export class SpriteEditor {
     const gfxRom = this.getGfxRom();
     if (!gfxRom) return;
 
-    // Save current state for redo
-    const currentBytes = new Uint8Array(CHAR_SIZE_16);
-    currentBytes.set(gfxRom.subarray(entry.offset, entry.offset + CHAR_SIZE_16));
-    this.redoStack.push({ tileCode: entry.tileCode, offset: entry.offset, oldBytes: currentBytes });
+    const currentBytes = new Uint8Array(entry.charSize);
+    currentBytes.set(gfxRom.subarray(entry.offset, entry.offset + entry.charSize));
+    this.redoStack.push({ tileCode: entry.tileCode, offset: entry.offset, oldBytes: currentBytes, charSize: entry.charSize });
 
-    // Restore old bytes
     gfxRom.set(entry.oldBytes, entry.offset);
     this.onTileChanged?.();
   }
@@ -250,12 +305,10 @@ export class SpriteEditor {
     const gfxRom = this.getGfxRom();
     if (!gfxRom) return;
 
-    // Save current state for undo
-    const currentBytes = new Uint8Array(CHAR_SIZE_16);
-    currentBytes.set(gfxRom.subarray(entry.offset, entry.offset + CHAR_SIZE_16));
-    this.undoStack.push({ tileCode: entry.tileCode, offset: entry.offset, oldBytes: currentBytes });
+    const currentBytes = new Uint8Array(entry.charSize);
+    currentBytes.set(gfxRom.subarray(entry.offset, entry.offset + entry.charSize));
+    this.undoStack.push({ tileCode: entry.tileCode, offset: entry.offset, oldBytes: currentBytes, charSize: entry.charSize });
 
-    // Restore redo bytes
     gfxRom.set(entry.oldBytes, entry.offset);
     this.onTileChanged?.();
   }
@@ -268,13 +321,12 @@ export class SpriteEditor {
     const gfxRom = this.getGfxRom();
     if (!gfxRom) return;
 
-    const { tileCode } = this._currentTile.spriteInfo;
-    this.pushUndo(tileCode, gfxRom);
+    const { tileCode, charSize } = this._currentTile;
+    this.pushUndo(tileCode, charSize, gfxRom);
 
-    // Copy only this tile from the pristine original
-    const offset = tileCode * CHAR_SIZE_16;
+    const offset = tileCode * charSize;
     const original = romStore.getOriginal('graphics');
-    gfxRom.set(original.subarray(offset, offset + CHAR_SIZE_16), offset);
+    gfxRom.set(original.subarray(offset, offset + charSize), offset);
 
     this.onTileChanged?.();
   }
@@ -284,13 +336,13 @@ export class SpriteEditor {
   getCurrentPalette(): Array<[number, number, number]> {
     if (!this._currentTile) return [];
     const bufs = this.emulator.getBusBuffers();
-    return readPalette(bufs.vram, this._currentTile.paletteBase, this._currentTile.spriteInfo.paletteIndex);
+    return readPalette(bufs.vram, this._currentTile.paletteBase, this._currentTile.paletteIndex);
   }
 
   editPaletteColor(colorIndex: number, r: number, g: number, b: number): void {
     if (!this._currentTile) return;
     const bufs = this.emulator.getBusBuffers();
-    writeColor(bufs.vram, this._currentTile.paletteBase, this._currentTile.spriteInfo.paletteIndex, colorIndex, r, g, b);
+    writeColor(bufs.vram, this._currentTile.paletteBase, this._currentTile.paletteIndex, colorIndex, r, g, b);
     this.onTileChanged?.();
   }
 
@@ -300,7 +352,8 @@ export class SpriteEditor {
     if (!this._currentTile) return null;
     const gfxRom = this.getGfxRom();
     if (!gfxRom) return null;
-    return readTile(gfxRom, this._currentTile.spriteInfo.tileCode);
+    const { tileCode, tileW, tileH, charSize } = this._currentTile;
+    return readTile(gfxRom, tileCode, tileW, tileH, charSize);
   }
 
   // -- Frame stepping --
