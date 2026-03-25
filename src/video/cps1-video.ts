@@ -1008,6 +1008,11 @@ export class CPS1Video {
     return this.paletteCache;
   }
 
+  /** Returns the VRAM byte offset where palette data starts. */
+  getPaletteBase(): number {
+    return this.vramBaseOffset(CPSA_PALETTE_BASE, PALETTE_ALIGN);
+  }
+
   /**
    * Hit-test: identify the topmost sprite tile at screen position (x, y).
    * Iterates front-to-back (index 0 = topmost, same as render order).

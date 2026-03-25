@@ -67,7 +67,7 @@ export class SpriteEditorUI {
     this.boundOverlayLeave = () => this.clearOverlay();
 
     // Wire editor callbacks
-    this.editor.setOnTileChanged(() => this.refreshTileGrid());
+    this.editor.setOnTileChanged(() => { this.refreshTileGrid(); this.emulator.rerender(); });
     this.editor.setOnToolChanged(() => this.refreshToolButtons());
     this.editor.setOnColorChanged(() => this.refreshPalette());
   }
@@ -304,8 +304,8 @@ export class SpriteEditorUI {
 
     // Hovered tile outline (cyan)
     ctx.strokeStyle = '#00ffff';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(tileScreenX + 0.5, tileScreenY + 0.5, 15, 15);
+    ctx.lineWidth = 2;
+    ctx.strokeRect(tileScreenX, tileScreenY, 16, 16);
 
     // If multi-tile, draw dim outlines on all sub-tiles
     if (spriteInfo.nx > 1 || spriteInfo.ny > 1) {
@@ -360,11 +360,11 @@ export class SpriteEditorUI {
     const tileScreenY = ((sprY + info.nys * 16) & 0x1FF) - 16;
 
     // Selected tile: red outline + semi-transparent fill
-    ctx.fillStyle = 'rgba(255, 26, 80, 0.15)';
+    ctx.fillStyle = 'rgba(255, 26, 80, 0.25)';
     ctx.fillRect(tileScreenX, tileScreenY, 16, 16);
     ctx.strokeStyle = '#ff1a50';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(tileScreenX + 0.5, tileScreenY + 0.5, 15, 15);
+    ctx.lineWidth = 2;
+    ctx.strokeRect(tileScreenX, tileScreenY, 16, 16);
   }
 
   private refreshOverlayAfterStep(): void {

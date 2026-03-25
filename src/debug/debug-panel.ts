@@ -402,6 +402,7 @@ export class DebugPanel {
 
     cb.addEventListener("change", () => {
       this.renderer.setLayerEnabled(layerId, cb.checked);
+      if (this.emulator.isPaused()) this.emulator.rerender();
     });
 
     flashBtn.addEventListener("click", () => {

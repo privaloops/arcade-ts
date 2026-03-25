@@ -859,6 +859,11 @@ export class Emulator {
     }
   }
 
+  /** Re-render the current frame without advancing emulation. */
+  rerender(): void {
+    this.renderFrame();
+  }
+
   private renderFrame(): void {
     if (this._customRenderCallback) {
       this._customRenderCallback();

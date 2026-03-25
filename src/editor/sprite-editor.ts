@@ -102,9 +102,7 @@ export class SpriteEditor {
     const info = video.inspectSpriteAt(screenX, screenY);
     if (!info) return null;
 
-    const bufs = this.emulator.getBusBuffers();
-    // Read palette base from CPS-A register 0x0A
-    const paletteBase = ((bufs.cpsaRegs[0x0A]! << 8) | bufs.cpsaRegs[0x0B]!) * 256;
+    const paletteBase = video.getPaletteBase();
 
     this._currentTile = { spriteInfo: info, paletteBase };
     this.onTileChanged?.();
