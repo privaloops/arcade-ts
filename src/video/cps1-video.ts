@@ -1018,7 +1018,7 @@ export class CPS1Video {
    * Iterates front-to-back (index 0 = topmost, same as render order).
    * Returns null if no sprite covers that pixel.
    */
-  inspectSpriteAt(x: number, y: number): SpriteInspectResult | null {
+  inspectSpriteAt(x: number, y: number, boundsOnly = false): SpriteInspectResult | null {
     if (x < 0 || y < 0 || x >= SCREEN_WIDTH || y >= SCREEN_HEIGHT) return null;
 
     const objData = this.objBuffer;
@@ -1107,7 +1107,7 @@ export class CPS1Video {
           const colorIndex = rowBuf[pixelInGroup]!;
 
           // Skip transparent pixels (pen 15) — look through to sprites behind
-          if (colorIndex === 15) continue;
+          if (colorIndex === 15 && !boundsOnly) continue;
 
           return {
             spriteIndex: i,

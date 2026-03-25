@@ -69,9 +69,6 @@ export class SpriteEditor {
   activate(): void {
     if (this._active) return;
     this._active = true;
-    if (this.emulator.isRunning() && !this.emulator.isPaused()) {
-      this.emulator.pause();
-    }
   }
 
   deactivate(): void {
@@ -99,7 +96,7 @@ export class SpriteEditor {
     const video = this.emulator.getVideo();
     if (!video) return null;
 
-    const info = video.inspectSpriteAt(screenX, screenY);
+    const info = video.inspectSpriteAt(screenX, screenY, true);
     if (!info) return null;
 
     const paletteBase = video.getPaletteBase();

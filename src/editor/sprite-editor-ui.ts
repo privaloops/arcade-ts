@@ -1,6 +1,9 @@
 /**
- * Sprite Editor UI — DOM panel, tile grid canvas, palette sidebar,
- * tools bar, overlay on game canvas, keyboard shortcuts.
+ * Sprite Editor UI — integrated into the debug/video panel.
+ *
+ * Provides DOM elements (tile grid, tools, palette) that are injected into
+ * a container (the debug panel). Manages the overlay canvas on the game screen
+ * and keyboard shortcuts independently.
  */
 
 import { SpriteEditor, type EditorTool } from './sprite-editor';
@@ -11,8 +14,8 @@ import type { Emulator } from '../emulator';
 // Constants
 // ---------------------------------------------------------------------------
 
-const TILE_PX = 16;       // tile is 16x16 pixels
-const CELL_SIZE = 16;     // each pixel rendered as 16x16 in the grid
+const TILE_PX = 16;
+const CELL_SIZE = 16;
 const GRID_SIZE = TILE_PX * CELL_SIZE; // 256px
 
 const TOOL_DEFS: { id: EditorTool; label: string; key: string }[] = [
@@ -31,8 +34,8 @@ export class SpriteEditorUI {
   private readonly emulator: Emulator;
   private readonly gameCanvas: HTMLCanvasElement;
 
-  // DOM elements
-  private panel: HTMLDivElement | null = null;
+  // DOM elements (injected into external container)
+  private built = false;
   private overlay: HTMLCanvasElement | null = null;
   private overlayCtx: CanvasRenderingContext2D | null = null;
   private tileCanvas: HTMLCanvasElement | null = null;
@@ -44,13 +47,13 @@ export class SpriteEditorUI {
   private redoBtn: HTMLButtonElement | null = null;
   private resetBtn: HTMLButtonElement | null = null;
   private neighborGrid: HTMLDivElement | null = null;
-  private frameInfo: HTMLSpanElement | null = null;
 
   // State
   private painting = false;
   private lastPaintPos: { x: number; y: number } | null = null;
+  private overlayRafId = 0;
 
-  // Bound handlers for cleanup
+  // Bound handlers
   private readonly boundKeyHandler: (e: KeyboardEvent) => void;
   private readonly boundOverlayMove: (e: MouseEvent) => void;
   private readonly boundOverlayClick: (e: MouseEvent) => void;
@@ -66,7 +69,6 @@ export class SpriteEditorUI {
     this.boundOverlayClick = (e) => this.handleOverlayClick(e);
     this.boundOverlayLeave = () => this.clearOverlay();
 
-    // Wire editor callbacks
     this.editor.setOnTileChanged(() => { this.refreshTileGrid(); this.emulator.rerender(); });
     this.editor.setOnToolChanged(() => this.refreshToolButtons());
     this.editor.setOnColorChanged(() => this.refreshPalette());
@@ -74,75 +76,15 @@ export class SpriteEditorUI {
 
   // -- Public API --
 
-  toggle(): void {
-    if (this.editor.active) {
-      this.close();
-    } else {
-      this.open();
-    }
-  }
-
-  isOpen(): boolean {
-    return this.editor.active;
-  }
-
-  getEditor(): SpriteEditor {
-    return this.editor;
-  }
-
-  destroy(): void {
-    this.close();
-  }
-
-  // -- Open / Close --
-
-  private open(): void {
-    this.editor.activate();
-    this.buildDOM();
-    this.createOverlay();
-
-    document.body.classList.add('edit-active');
-    this.panel!.classList.add('open');
-
-    document.addEventListener('keydown', this.boundKeyHandler);
-  }
-
-  private close(): void {
-    this.editor.deactivate();
-    document.body.classList.remove('edit-active');
-
-    if (this.panel) {
-      this.panel.classList.remove('open');
-      this.panel.remove();
-      this.panel = null;
-    }
-    this.removeOverlay();
-    document.removeEventListener('keydown', this.boundKeyHandler);
-  }
-
-  // -- DOM construction --
-
-  private buildDOM(): void {
-    if (this.panel) return;
-
-    const panel = el('div', 'edit-panel') as HTMLDivElement;
-
-    // Header
-    const header = el('div', 'edit-header');
-    const title = el('h2', 'edit-title');
-    title.textContent = 'SPRITE EDITOR';
-    const closeBtn = el('button', 'ctrl-btn edit-close') as HTMLButtonElement;
-    closeBtn.textContent = '\u2715';
-    closeBtn.title = 'Close (Esc)';
-    closeBtn.onclick = () => this.close();
-    header.appendChild(title);
-    header.appendChild(closeBtn);
-    panel.appendChild(header);
+  /** Build sprite editor elements into the given container (called once by debug panel). */
+  buildInto(container: HTMLElement): void {
+    if (this.built) return;
+    this.built = true;
 
     // Info bar
     this.infoBar = el('div', 'edit-info') as HTMLDivElement;
     this.infoBar.textContent = 'Click a sprite on the game screen';
-    panel.appendChild(this.infoBar);
+    container.appendChild(this.infoBar);
 
     // Tile grid canvas
     const tileSection = el('div', 'edit-tile-section');
@@ -154,7 +96,7 @@ export class SpriteEditorUI {
     this.tileCtx = cvs.getContext('2d')!;
     this.bindTileCanvasEvents(cvs);
     tileSection.appendChild(cvs);
-    panel.appendChild(tileSection);
+    container.appendChild(tileSection);
 
     // Tools bar
     const toolsBar = el('div', 'edit-tools');
@@ -167,12 +109,12 @@ export class SpriteEditorUI {
       this.toolBtns.set(def.id, btn);
       toolsBar.appendChild(btn);
     }
-    panel.appendChild(toolsBar);
+    container.appendChild(toolsBar);
     this.refreshToolButtons();
 
     // Palette
     this.paletteContainer = el('div', 'edit-palette') as HTMLDivElement;
-    panel.appendChild(this.paletteContainer);
+    container.appendChild(this.paletteContainer);
 
     // Tile neighbors
     const neighborsSection = el('div', 'edit-neighbors-section');
@@ -181,7 +123,7 @@ export class SpriteEditorUI {
     neighborsSection.appendChild(neighborsLabel);
     this.neighborGrid = el('div', 'edit-neighbors') as HTMLDivElement;
     neighborsSection.appendChild(this.neighborGrid);
-    panel.appendChild(neighborsSection);
+    container.appendChild(neighborsSection);
 
     // Action buttons
     const actions = el('div', 'edit-actions');
@@ -203,35 +145,60 @@ export class SpriteEditorUI {
     this.resetBtn.onclick = () => { this.editor.resetTile(); this.refreshUndoButtons(); };
     actions.appendChild(this.resetBtn);
 
-    panel.appendChild(actions);
-
-    // Frame info
-    const frameBar = el('div', 'edit-frame-bar');
-    this.frameInfo = el('span', 'edit-frame-info') as HTMLSpanElement;
-    this.updateFrameInfo();
-
-    const stepBtn = el('button', 'ctrl-btn') as HTMLButtonElement;
-    stepBtn.textContent = '\u25B6 Step';
-    stepBtn.title = 'Right Arrow';
-    stepBtn.onclick = () => { this.editor.stepFrames(1); this.updateFrameInfo(); this.refreshOverlayAfterStep(); };
-
-    const step10Btn = el('button', 'ctrl-btn') as HTMLButtonElement;
-    step10Btn.textContent = '\u25B6\u25B6 \u00D710';
-    step10Btn.title = 'Shift+Right';
-    step10Btn.onclick = () => { this.editor.stepFrames(10); this.updateFrameInfo(); this.refreshOverlayAfterStep(); };
-
-    frameBar.appendChild(this.frameInfo);
-    frameBar.appendChild(stepBtn);
-    frameBar.appendChild(step10Btn);
-    panel.appendChild(frameBar);
-
-    this.panel = panel;
-    document.body.appendChild(panel);
-
+    container.appendChild(actions);
     this.refreshUndoButtons();
   }
 
+  toggle(): void {
+    if (this.editor.active) {
+      this.deactivate();
+    } else {
+      this.activate();
+    }
+  }
+
+  isOpen(): boolean {
+    return this.editor.active;
+  }
+
+  getEditor(): SpriteEditor {
+    return this.editor;
+  }
+
+  destroy(): void {
+    this.deactivate();
+  }
+
+  // -- Activate / Deactivate (overlay + shortcuts, no panel creation) --
+
+  activate(): void {
+    this.editor.activate();
+    this.createOverlay();
+    document.body.classList.add('edit-active');
+    document.addEventListener('keydown', this.boundKeyHandler);
+    this.startOverlayLoop();
+  }
+
+  deactivate(): void {
+    this.editor.deactivate();
+    cancelAnimationFrame(this.overlayRafId);
+    document.body.classList.remove('edit-active');
+    this.removeOverlay();
+    document.removeEventListener('keydown', this.boundKeyHandler);
+  }
+
   // -- Overlay --
+
+  private startOverlayLoop(): void {
+    cancelAnimationFrame(this.overlayRafId);
+    const loop = (): void => {
+      if (!this.editor.active) return;
+      this.drawAllSpriteBounds();
+      this.drawSelectedOverlay();
+      this.overlayRafId = requestAnimationFrame(loop);
+    };
+    this.overlayRafId = requestAnimationFrame(loop);
+  }
 
   private createOverlay(): void {
     if (this.overlay) return;
@@ -248,7 +215,6 @@ export class SpriteEditorUI {
     cvs.addEventListener('click', this.boundOverlayClick);
     cvs.addEventListener('mouseleave', this.boundOverlayLeave);
 
-    // Insert overlay in canvas wrapper, on top of game canvas
     const wrapper = this.gameCanvas.parentElement;
     if (wrapper) wrapper.appendChild(cvs);
   }
@@ -279,46 +245,27 @@ export class SpriteEditorUI {
 
   private handleOverlayMove(e: MouseEvent): void {
     const pos = this.screenCoordsFromEvent(e);
-    if (!pos) { this.clearOverlay(); return; }
+    if (!pos) return;
 
     const video = this.emulator.getVideo();
     if (!video) return;
 
-    const info = video.inspectSpriteAt(pos.x, pos.y);
-    this.clearOverlay();
+    const info = video.inspectSpriteAt(pos.x, pos.y, true);
     if (!info || !this.overlayCtx) return;
 
-    // Draw tile outline (snap to tile bounds)
     const ctx = this.overlayCtx;
-    const spriteInfo = info;
-
-    // Get the OBJ buffer to find screen position
     const objBuf = video.getObjBuffer();
-    const entryOff = spriteInfo.spriteIndex * 8;
+    const entryOff = info.spriteIndex * 8;
     const sprX = (objBuf[entryOff]! << 8) | objBuf[entryOff + 1]!;
     const sprY = (objBuf[entryOff + 2]! << 8) | objBuf[entryOff + 3]!;
 
-    // Sub-tile screen position
-    const tileScreenX = ((sprX + spriteInfo.nxs * 16) & 0x1FF) - 64;
-    const tileScreenY = ((sprY + spriteInfo.nys * 16) & 0x1FF) - 16;
+    const tileScreenX = ((sprX + info.nxs * 16) & 0x1FF) - 64;
+    const tileScreenY = ((sprY + info.nys * 16) & 0x1FF) - 16;
 
-    // Hovered tile outline (cyan)
+    // Hovered tile outline (cyan, drawn on top of bounds by next rAF)
     ctx.strokeStyle = '#00ffff';
     ctx.lineWidth = 2;
     ctx.strokeRect(tileScreenX, tileScreenY, 16, 16);
-
-    // If multi-tile, draw dim outlines on all sub-tiles
-    if (spriteInfo.nx > 1 || spriteInfo.ny > 1) {
-      ctx.strokeStyle = 'rgba(0, 255, 255, 0.3)';
-      for (let nys = 0; nys < spriteInfo.ny; nys++) {
-        for (let nxs = 0; nxs < spriteInfo.nx; nxs++) {
-          if (nxs === spriteInfo.nxs && nys === spriteInfo.nys) continue;
-          const sx = ((sprX + nxs * 16) & 0x1FF) - 64;
-          const sy = ((sprY + nys * 16) & 0x1FF) - 16;
-          ctx.strokeRect(sx + 0.5, sy + 0.5, 15, 15);
-        }
-      }
-    }
   }
 
   private handleOverlayClick(e: MouseEvent): void {
@@ -332,11 +279,6 @@ export class SpriteEditorUI {
       this.refreshNeighbors();
       this.refreshInfoBar();
       this.refreshUndoButtons();
-
-      // Draw selected tile outline (red)
-      if (this.overlayCtx) {
-        this.drawSelectedOverlay();
-      }
     }
   }
 
@@ -347,7 +289,6 @@ export class SpriteEditorUI {
     const video = this.emulator.getVideo();
     if (!video) return;
 
-    this.clearOverlay();
     const ctx = this.overlayCtx;
     const info = tile.spriteInfo;
 
@@ -359,7 +300,6 @@ export class SpriteEditorUI {
     const tileScreenX = ((sprX + info.nxs * 16) & 0x1FF) - 64;
     const tileScreenY = ((sprY + info.nys * 16) & 0x1FF) - 16;
 
-    // Selected tile: red outline + semi-transparent fill
     ctx.fillStyle = 'rgba(255, 26, 80, 0.25)';
     ctx.fillRect(tileScreenX, tileScreenY, 16, 16);
     ctx.strokeStyle = '#ff1a50';
@@ -367,8 +307,49 @@ export class SpriteEditorUI {
     ctx.strokeRect(tileScreenX, tileScreenY, 16, 16);
   }
 
-  private refreshOverlayAfterStep(): void {
-    this.drawSelectedOverlay();
+  /** Draw bounding boxes for all visible sprites on the overlay. */
+  private drawAllSpriteBounds(): void {
+    const video = this.emulator.getVideo();
+    if (!video || !this.overlayCtx || !this.overlay) return;
+
+    this.clearOverlay();
+    const ctx = this.overlayCtx;
+    const objBuf = video.getObjBuffer();
+
+    ctx.strokeStyle = 'rgba(0, 255, 128, 0.35)';
+    ctx.lineWidth = 1;
+
+    let lastIdx = 255;
+    for (let i = 0; i < 256; i++) {
+      const off = i * 8;
+      if (off + 7 >= 0x0800) break;
+      const colour = (objBuf[off + 6]! << 8) | objBuf[off + 7]!;
+      if ((colour & 0xFF00) === 0xFF00) {
+        lastIdx = i - 1;
+        break;
+      }
+    }
+
+    for (let i = 0; i <= lastIdx; i++) {
+      const off = i * 8;
+      if (off + 7 >= 0x0800) break;
+
+      const sprX = (objBuf[off]! << 8) | objBuf[off + 1]!;
+      const sprY = (objBuf[off + 2]! << 8) | objBuf[off + 3]!;
+      const colour = (objBuf[off + 6]! << 8) | objBuf[off + 7]!;
+
+      const nx = (colour & 0xFF00) ? (((colour >> 8) & 0x0F) + 1) : 1;
+      const ny = (colour & 0xFF00) ? (((colour >> 12) & 0x0F) + 1) : 1;
+
+      const sx = (sprX & 0x1FF) - 64;
+      const sy = (sprY & 0x1FF) - 16;
+      const w = nx * 16;
+      const h = ny * 16;
+
+      if (sx + w <= 0 || sx >= SCREEN_WIDTH || sy + h <= 0 || sy >= SCREEN_HEIGHT) continue;
+
+      ctx.strokeRect(sx + 0.5, sy + 0.5, w - 1, h - 1);
+    }
   }
 
   // -- Tile grid canvas events --
@@ -443,7 +424,6 @@ export class SpriteEditorUI {
         const colorIdx = tileData[y * TILE_PX + x]!;
 
         if (colorIdx === 15) {
-          // Transparent: checkerboard
           const cx = x * CELL_SIZE;
           const cy = y * CELL_SIZE;
           for (let dy = 0; dy < CELL_SIZE; dy++) {
@@ -473,9 +453,6 @@ export class SpriteEditorUI {
       ctx.lineTo(GRID_SIZE, i * CELL_SIZE + 0.5);
       ctx.stroke();
     }
-
-    // Highlight active color index in the grid
-    this.drawSelectedOverlay();
   }
 
   private refreshPalette(): void {
@@ -495,7 +472,6 @@ export class SpriteEditorUI {
       const swatch = el('div', 'edit-swatch') as HTMLDivElement;
 
       if (i === 15) {
-        // Transparent — checkerboard
         swatch.classList.add('edit-swatch-transparent');
       } else {
         const [r, g, b] = palette[i] ?? [0, 0, 0];
@@ -519,7 +495,6 @@ export class SpriteEditorUI {
     const palette = this.editor.getCurrentPalette();
     const [r, g, b] = palette[colorIndex] ?? [0, 0, 0];
 
-    // Use native color input
     const input = document.createElement('input');
     input.type = 'color';
     input.value = `#${hex2(r)}${hex2(g)}${hex2(b)}`;
@@ -537,10 +512,7 @@ export class SpriteEditorUI {
       this.refreshPalette();
     });
 
-    input.addEventListener('change', () => {
-      input.remove();
-    });
-
+    input.addEventListener('change', () => { input.remove(); });
     input.click();
   }
 
@@ -557,7 +529,6 @@ export class SpriteEditorUI {
     this.neighborGrid.style.display = 'grid';
     const { nx, ny, nxs, nys } = tile.spriteInfo;
 
-    // Show a 3x3 grid centered on current tile
     for (let dy = -1; dy <= 1; dy++) {
       for (let dx = -1; dx <= 1; dx++) {
         const tnxs = nxs + dx;
@@ -567,7 +538,7 @@ export class SpriteEditorUI {
         if (tnxs >= 0 && tnxs < nx && tnys >= 0 && tnys < ny) {
           if (dx === 0 && dy === 0) {
             cell.classList.add('edit-neighbor-current');
-            cell.textContent = '\u2022'; // bullet
+            cell.textContent = '\u2022';
           } else {
             cell.classList.add('edit-neighbor-valid');
             const arrows: Record<string, string> = {
@@ -618,23 +589,15 @@ export class SpriteEditorUI {
     if (this.redoBtn) this.redoBtn.disabled = !this.editor.canRedo;
   }
 
-  private updateFrameInfo(): void {
-    if (this.frameInfo) {
-      this.frameInfo.textContent = `Frame: ${this.emulator.getFrameCount()}`;
-    }
-  }
-
   // -- Keyboard shortcuts --
 
   private handleKey(e: KeyboardEvent): void {
     if (!this.editor.active) return;
-
-    // Don't capture if typing in an input
     if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
 
     switch (e.key) {
       case 'Escape':
-        this.close();
+        this.deactivate();
         e.preventDefault();
         break;
       case 'b': case 'B':
@@ -677,13 +640,10 @@ export class SpriteEditorUI {
       case 'ArrowRight':
         e.preventDefault();
         this.editor.stepFrames(e.shiftKey ? 10 : 1);
-        this.updateFrameInfo();
-        this.refreshOverlayAfterStep();
         break;
       case 'ArrowUp':
       case 'ArrowDown':
       case 'ArrowLeft': {
-        // Navigate neighbor tiles
         const tile = this.editor.currentTile;
         if (tile && (tile.spriteInfo.nx > 1 || tile.spriteInfo.ny > 1)) {
           const dx = e.key === 'ArrowLeft' ? -1 : 0;

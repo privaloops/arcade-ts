@@ -5,7 +5,6 @@
 import type { Emulator } from "../emulator";
 import { DebugPanel } from "../debug/debug-panel";
 import { AudioPanel } from "../audio/audio-panel";
-import { SpriteEditorUI } from "../editor/sprite-editor-ui";
 import type { GameScreen } from "../video/GameScreen";
 import { openSsModal } from "./save-state-ui";
 
@@ -39,8 +38,6 @@ export interface ControlsBarDeps {
   setAudioPanel(p: AudioPanel | null): void;
   getGameScreen(): GameScreen | null;
   setGameScreen(gs: GameScreen | null): void;
-  getSpriteEditor(): SpriteEditorUI | null;
-  setSpriteEditor(se: SpriteEditorUI | null): void;
   setStatus(msg: string): void;
 }
 
@@ -66,12 +63,8 @@ export function toggleDebug(deps: ControlsBarDeps): void {
 }
 
 export function toggleSpriteEditor(deps: ControlsBarDeps): void {
-  let spriteEditor = deps.getSpriteEditor();
-  if (!spriteEditor) {
-    spriteEditor = new SpriteEditorUI(deps.emulator, deps.canvas);
-    deps.setSpriteEditor(spriteEditor);
-  }
-  spriteEditor.toggle();
+  // Sprite editor is integrated in the debug panel — just open it
+  toggleDebug(deps);
 }
 
 export function toggleAudio(deps: ControlsBarDeps): void {
@@ -156,7 +149,9 @@ export function initControlsBar(deps: ControlsBarDeps): void {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${romStore.name}_modified.zip`;
+    const now = new Date();
+    const ts = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}_${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}`;
+    a.download = `${romStore.name}_${ts}.zip`;
     a.click();
     URL.revokeObjectURL(url);
     setStatus("ROM exported");
@@ -200,6 +195,7 @@ export function initControlsBar(deps: ControlsBarDeps): void {
   // Double-click / double-tap fullscreen
   canvasWrapper.addEventListener("dblclick", (e) => {
     e.preventDefault();
+    if (document.body.classList.contains('edit-active')) return;
     toggleFullscreen(canvasWrapper);
   });
 
