@@ -1668,4 +1668,32 @@ export const GAME_DEFS: GameDef[] = [
     },
   },
 
+  // Synthetic test ROM (e2e tests only)
+  {
+    name: 'test',
+    program: {
+      entries: [
+        { even: 'test_e.rom', odd: 'test_o.rom', offset: 0x00000, size: 0x8000 },
+      ],
+      size: 0x10000,
+    },
+    graphics: {
+      banks: [
+        { files: ['test_gfx0.rom', 'test_gfx1.rom', 'test_gfx2.rom', 'test_gfx3.rom'], offset: 0x000000, romSize: 0x4000 },
+      ],
+      size: 0x10000,
+    },
+    audio: { files: ['test_snd.rom'], size: 0x1000 },
+    oki: { files: ['test_oki.rom'], size: 0x1000 },
+    cpsBConfig: {
+      idOffset: 0x00, idValue: 0x0000,
+      layerControl: 0x26, priority: [0x28, 0x2A, 0x2C, 0x2E],
+      paletteControl: 0x30, layerEnableMask: [0x02, 0x08, 0x10, 0x20, 0x02],
+    },
+    gfxMapper: {
+      bankSizes: [0x4000, 0, 0, 0],
+      ranges: [],
+    },
+  },
+
 ];

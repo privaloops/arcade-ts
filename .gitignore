@@ -7,6 +7,10 @@ dist/
 snap/
 cfg/
 
+# Playwright
+test-results/
+playwright-report/
+
 # ROM files — never commit copyrighted material
 public/*.zip
 public/roms/*.zip
