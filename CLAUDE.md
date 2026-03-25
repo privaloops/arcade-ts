@@ -1,7 +1,7 @@
-# Arcade.ts
+# ROMstudio
 
-CPS1 (Capcom Play System 1) arcade emulator, from scratch, in the browser.
-TypeScript strict + WebGL2 + Web Worker audio + WASM. Zero emulation dependencies.
+CPS1 (Capcom Play System 1) arcade studio in the browser.
+Play, inspect, and modify — TypeScript strict + WebGL2 + Web Worker audio + WASM. Zero emulation dependencies.
 
 ## Commands
 
@@ -42,9 +42,16 @@ src/
     game-defs.ts    # Per-game ROM layouts, CPS-B configs, GFX mappers
     kabuki.ts       # Kabuki Z80 decryption (QSound games)
     eeprom-93c46.ts # EEPROM 93C46 serial protocol (QSound games)
+  editor/
+    tile-encoder.ts   # GFX ROM tile encode/decode (inverse of decodeRow)
+    palette-editor.ts # VRAM palette read/write, RGB↔CPS1 conversion
+    sprite-editor.ts  # Sprite editor logic: tools, undo, paint, flood fill
+    sprite-editor-ui.ts # DOM panel, tile grid, overlay, shortcuts
+    tile-refs.ts      # Tile reference counter + duplication
   input/
     input.ts        # Keyboard + Gamepad API + device assignment + autofire
   game-catalog.ts   # 245 CPS1 games (source: MAME 0.286)
+  rom-store.ts      # Central mutable ROM manager with ZIP export
   save-state.ts     # Save/load state (4 slots, localStorage)
   dip-switches.ts   # DIP switch definitions (56 games, from MAME)
   types.ts          # Shared interfaces (BusInterface, Z80BusInterface)
@@ -60,6 +67,9 @@ src/__tests__/
   m68000-tom-harte.test.ts  # M68000 Tom Harte tests (84 instructions, 200 vectors each)
   z80-tom-harte.test.ts     # Z80 SingleStepTests (588 instructions, 200 vectors each)
   oki6295.test.ts   # OKI6295 tests (ADPCM, commands)
+  tile-encoder.test.ts    # Tile encoder roundtrip tests
+  palette-editor.test.ts  # Palette encode/decode tests
+  tile-refs.test.ts       # Tile reference counter tests
 tests/
   68000/*.json      # Tom Harte M68000 test vectors (ProcessorTests)
   z80/*.json        # Z80 SingleStepTests vectors (JSMoo)
@@ -121,28 +131,45 @@ ROMs loaded from public/roms/ (not included in the repo).
 | P | Pause / Resume |
 | M | Mute |
 | F1 | Config |
+| E | Sprite Editor |
 | F5 | Save state |
 | F8 | Load state |
 | Double-click | Fullscreen |
 | Escape | Close dialog |
+
+## Sprite Editor shortcuts (when editor is active)
+
+| Key | Action |
+|-----|--------|
+| B | Pencil tool |
+| G | Fill tool |
+| I | Eyedropper |
+| X | Eraser |
+| Ctrl+Z | Undo |
+| Ctrl+Shift+Z | Redo |
+| [ / ] | Previous / next palette color |
+| Arrow keys | Navigate neighbor tiles |
+| Right Arrow | Step 1 frame |
+| Shift+Right | Step 10 frames |
+| Escape | Close editor |
 
 ## Audio architecture
 
 ```
 Main Thread                     Audio Worker (Web Worker)
 ───────────                     ────────────────────────
-68K writes sound latch ───────→ Z80 (3.58 MHz, autonomous timer)
+68K writes sound latch ───────→ Z80 (3.58 MHz, debt-based timing)
                                 ├─ YM2151 WASM (cycle-accurate)
                                 └─ OKI6295 (TS ADPCM)
                                 Resampling → 48kHz
                                 Mixing: ymL*0.35 + ymR*0.35 + oki*0.30
                                 ↓
-                                SharedArrayBuffer ring buffer (8192 samples)
+                                SharedArrayBuffer ring buffer (16384 samples)
                                 ↓
                                 AudioWorklet (separate thread) → speakers
 ```
 
-The audio Z80 runs autonomously in the Worker, just like real hardware where it has its own crystal oscillator. The main thread only posts sound latches via postMessage.
+The audio Z80 runs autonomously in the Worker via a debt-based timing system (4ms setInterval + frame debt accumulator with catch-up). This replaces the naive setInterval(16.77ms) approach, fixing audio lag on Firefox. The main thread only posts sound latches via postMessage.
 
 For QSound games (Dino, Punisher, WoF, Slammast), the Z80 stays on the main thread (interleaved per-scanline with the 68K due to shared RAM communication).
 

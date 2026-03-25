@@ -15,10 +15,19 @@
 - [x] Unified Config modal (Joypad/Keyboard/Display/DIP tabs)
 - [x] Device assignment — per-player gamepad selection with persistence
 - [x] Buttons 4-6 (kicks) for SF2 via CPS-B register 0x36
-- [x] Ring buffer 4096 → 8192 for better audio margin
+- [x] Ring buffer 4096 → 8192 → 16384 for better audio margin
 - [x] ROM cache from public/roms/
 - [x] UI redesign, project renamed to Arcade.ts
 - [x] Vercel deployment with COOP/COEP headers
+
+## Done (session March 25)
+
+- [x] Sprite Pixel Editor — WYSIWYG sprite editing (#27, PR #29)
+- [x] Audio timeline ruler with frame-synced scroll (PR #30)
+- [x] Debt-based audio timing — fixes Firefox audio lag (PR #31)
+- [x] Ring buffer 8192 → 16384 samples
+- [x] Rebrand StudioROM → ROMstudio
+- [x] UI polish: text colors boosted, backgrounds lightened
 
 ## M68000 CPU — Tom Harte test failures
 
@@ -47,9 +56,13 @@
 - [x] **Web Worker audio** — Z80 + YM2151 + OKI off main thread, autonomous timer
 - [x] **QSound audio resampling** — 24038 Hz → 48kHz via LinearResampler
 - [x] **QSound stereo** — True stereo output with independent L/R resampling
+- [x] **Debt-based audio timing** — 4ms tick + frame debt accumulator, fixes Firefox audio lag
+- [x] **Audio timeline ruler** — Frame-synced ruler with minor/major ticks, FPS display
+- [x] **Timeline scroll sync** — Scroll tied to frameCount, stops on pause, reversed direction
 - [ ] **Audio worker state on save/load** — Music resumes but YM2151 envelope state may be slightly off
 - [ ] **OKI sample crackling** — Slight crackling on some OKI samples, may need better interpolation
 - [ ] **Volume per channel** — Allow user to adjust YM2151 / OKI / QSound balance
+- [ ] **Audio timeline frame grid** — Vertical grid lines on FM/OKI timelines aligned to frames
 
 ## ROM Editor
 
