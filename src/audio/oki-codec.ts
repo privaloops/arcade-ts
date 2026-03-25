@@ -162,54 +162,54 @@ function resampleLinear(input: Float32Array, srcRate: number, dstRate: number): 
 // ── ROM Manipulation ──
 
 /** Replace a sample in the OKI ROM. Returns true if successful. */
+export interface ReplaceResult {
+  success: boolean;
+  truncated: boolean;
+  /** Duration kept in ms (only meaningful if truncated) */
+  keptMs: number;
+  /** Original WAV duration in ms */
+  originalMs: number;
+}
+
 export function replaceSampleInRom(
   rom: Uint8Array,
   phraseId: number,
   adpcmData: Uint8Array,
-): boolean {
+): ReplaceResult {
   const off = phraseId * PHRASE_ENTRY_SIZE;
-  if (off + 5 >= rom.length) return false;
+  if (off + 5 >= rom.length) return { success: false, truncated: false, keptMs: 0, originalMs: 0 };
 
   const oldStart = ((rom[off]! << 16) | (rom[off + 1]! << 8) | rom[off + 2]!) & 0x3FFFF;
   const oldEnd = ((rom[off + 3]! << 16) | (rom[off + 4]! << 8) | rom[off + 5]!) & 0x3FFFF;
   const oldSize = oldEnd - oldStart;
 
-  let writeStart: number;
-  let writeEnd: number;
+  if (oldStart >= rom.length) return { success: false, truncated: false, keptMs: 0, originalMs: 0 };
 
-  if (adpcmData.length <= oldSize) {
-    // Fits in existing slot
-    writeStart = oldStart;
-    writeEnd = oldStart + adpcmData.length;
-    // Write ADPCM data
-    rom.set(adpcmData, writeStart);
-    // Pad remaining with silence (0x80 = two zero deltas)
-    for (let i = writeStart + adpcmData.length; i < oldEnd; i++) {
-      rom[i] = 0x80;
-    }
-  } else {
-    // Doesn't fit — append at end of used ROM space
-    // Find the highest end address across all phrases
-    let maxEnd = 0x400; // after phrase table
-    for (let p = 0; p < PHRASE_TABLE_SIZE; p++) {
-      const pOff = p * PHRASE_ENTRY_SIZE;
-      if (pOff + 5 >= rom.length) break;
-      const pEnd = ((rom[pOff + 3]! << 16) | (rom[pOff + 4]! << 8) | rom[pOff + 5]!) & 0x3FFFF;
-      if (pEnd > maxEnd) maxEnd = pEnd;
-    }
-    writeStart = maxEnd;
-    writeEnd = writeStart + adpcmData.length;
-    if (writeEnd > rom.length) return false; // ROM too small
-    rom.set(adpcmData, writeStart);
+  const originalMs = Math.round((adpcmData.length * 2) / OKI_SAMPLE_RATE * 1000);
+  let writeData = adpcmData;
+  let truncated = false;
+
+  if (adpcmData.length > oldSize) {
+    // Truncate to fit in existing slot
+    writeData = adpcmData.subarray(0, oldSize);
+    truncated = true;
   }
 
-  // Update phrase table entry
-  rom[off] = (writeStart >> 16) & 0xFF;
-  rom[off + 1] = (writeStart >> 8) & 0xFF;
-  rom[off + 2] = writeStart & 0xFF;
+  // Write ADPCM data at the original slot
+  rom.set(writeData, oldStart);
+
+  // Pad remaining with silence
+  for (let i = oldStart + writeData.length; i < oldEnd; i++) {
+    rom[i] = 0x80;
+  }
+
+  // Update phrase table end pointer (in case truncated)
+  const writeEnd = oldStart + writeData.length;
   rom[off + 3] = (writeEnd >> 16) & 0xFF;
   rom[off + 4] = (writeEnd >> 8) & 0xFF;
   rom[off + 5] = writeEnd & 0xFF;
 
-  return true;
+  const keptMs = Math.round((writeData.length * 2) / OKI_SAMPLE_RATE * 1000);
+
+  return { success: true, truncated, keptMs, originalMs };
 }

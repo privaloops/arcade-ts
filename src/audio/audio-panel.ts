@@ -438,14 +438,19 @@ export class AudioPanel {
       const audioBuf = await ctx.decodeAudioData(arrayBuf);
       const pcm = audioBuf.getChannelData(0);
       const adpcm = encodeSample(pcm, audioBuf.sampleRate);
-      if (replaceSampleInRom(rom, phraseId, adpcm)) {
+      const result = replaceSampleInRom(rom, phraseId, adpcm);
+      if (result.success) {
         this.emulator.updateOkiRom(rom);
         dropZone.textContent = "\u2713 OK";
         dropZone.classList.add("replaced");
-        this.showToast(`Sample #${phraseId} replaced`, true);
+        if (result.truncated) {
+          this.showToast(`Sample #${phraseId} replaced (truncated: ${result.keptMs}ms / ${result.originalMs}ms)`, true);
+        } else {
+          this.showToast(`Sample #${phraseId} replaced`, true);
+        }
         setTimeout(() => this.refreshSampleTable(), 1000);
       } else {
-        this.showToast(`Sample #${phraseId}: ROM full`, false);
+        this.showToast(`Sample #${phraseId}: invalid slot`, false);
       }
     } catch (err) {
       this.showToast(`Sample #${phraseId}: error`, false);
