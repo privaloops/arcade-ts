@@ -202,6 +202,10 @@ export class SpriteEditorUI {
     cancelAnimationFrame(this.overlayRafId);
     const loop = (): void => {
       if (!this.editor.active) return;
+      // In 3D mode, let mouse events pass through to the exploded container
+      if (this.overlay) {
+        this.overlay.style.pointerEvents = this._isInteractionBlocked?.() ? 'none' : '';
+      }
       this.drawAllSpriteBounds();
       this.drawSelectedOverlay();
       this.overlayRafId = requestAnimationFrame(loop);
