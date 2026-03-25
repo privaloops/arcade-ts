@@ -1,6 +1,6 @@
 import { LAYER_OBJ, LAYER_SCROLL1, LAYER_SCROLL2, LAYER_SCROLL3 } from "../video/cps1-video";
 import { SCREEN_WIDTH, SCREEN_HEIGHT, FRAMEBUFFER_SIZE } from "../constants";
-import type { CPS1Video } from "../video/cps1-video";
+import type { CPS1Video, SpriteInspectResult } from "../video/cps1-video";
 import type { RendererInterface } from "../types";
 import type { Emulator } from "../emulator";
 
@@ -15,6 +15,21 @@ export interface PixelInspectResult {
   r: number;
   g: number;
   b: number;
+  // Tile metadata (populated for sprites, undefined for scroll layers in v1)
+  tileCode?: number;
+  paletteIndex?: number;
+  colorIndex?: number;
+  gfxRomOffset?: number;
+  localX?: number;
+  localY?: number;
+  spriteIndex?: number;
+  flipX?: boolean;
+  flipY?: boolean;
+  nx?: number;
+  ny?: number;
+  nxs?: number;
+  nys?: number;
+  rawCode?: number;
 }
 
 export class DebugRenderer {
@@ -155,12 +170,35 @@ export class DebugRenderer {
       const a = tempFb[pixelIdx + 3]!;
       if (a === 0 && r === 0 && g === 0 && b === 0) continue;
 
-      return {
+      const result: PixelInspectResult = {
         layerId,
         layerName: LAYER_NAMES[layerId]!,
         x, y,
         r, g, b,
       };
+
+      // Enrich with tile metadata for sprites
+      if (layerId === LAYER_OBJ && video) {
+        const spriteInfo = video.inspectSpriteAt(x, y);
+        if (spriteInfo) {
+          result.tileCode = spriteInfo.tileCode;
+          result.paletteIndex = spriteInfo.paletteIndex;
+          result.colorIndex = spriteInfo.colorIndex;
+          result.gfxRomOffset = spriteInfo.gfxRomOffset;
+          result.localX = spriteInfo.localX;
+          result.localY = spriteInfo.localY;
+          result.spriteIndex = spriteInfo.spriteIndex;
+          result.flipX = spriteInfo.flipX;
+          result.flipY = spriteInfo.flipY;
+          result.nx = spriteInfo.nx;
+          result.ny = spriteInfo.ny;
+          result.nxs = spriteInfo.nxs;
+          result.nys = spriteInfo.nys;
+          result.rawCode = spriteInfo.rawCode;
+        }
+      }
+
+      return result;
     }
 
     return null;

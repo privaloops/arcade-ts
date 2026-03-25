@@ -121,11 +121,29 @@ export const GFXTYPE_SCROLL1 = 2;
 export const GFXTYPE_SCROLL2 = 4;
 export const GFXTYPE_SCROLL3 = 8;
 
-interface GfxRange {
+export interface GfxRange {
   type: number;
   start: number;
   end: number;
   bank: number;
+}
+
+/** Result of inspectSpriteAt(): identifies the sprite tile under a screen pixel */
+export interface SpriteInspectResult {
+  spriteIndex: number;     // index in OBJ table (0-255)
+  tileCode: number;        // mapped GFX ROM tile code
+  rawCode: number;         // raw sprite code (before bank mapping)
+  paletteIndex: number;    // palette group index (0-31)
+  colorIndex: number;      // pixel's color index within palette (0-15)
+  gfxRomOffset: number;    // byte offset in graphicsRom where this tile starts
+  localX: number;          // pixel position within the tile (0-15)
+  localY: number;          // pixel position within the tile (0-15)
+  flipX: boolean;
+  flipY: boolean;
+  nx: number;              // multi-tile width
+  ny: number;              // multi-tile height
+  nxs: number;             // sub-tile X index within multi-tile sprite
+  nys: number;             // sub-tile Y index within multi-tile sprite
 }
 
 /** Config needed by the DOM renderer to create a FrameStateExtractor */
@@ -988,6 +1006,153 @@ export class CPS1Video {
   /** Returns the decoded palette cache (256 palettes × 16 colors, packed ABGR). */
   getPaletteCache(): Uint32Array {
     return this.paletteCache;
+  }
+
+  /**
+   * Hit-test: identify the topmost sprite tile at screen position (x, y).
+   * Iterates front-to-back (index 0 = topmost, same as render order).
+   * Returns null if no sprite covers that pixel.
+   */
+  inspectSpriteAt(x: number, y: number): SpriteInspectResult | null {
+    if (x < 0 || y < 0 || x >= SCREEN_WIDTH || y >= SCREEN_HEIGHT) return null;
+
+    const objData = this.objBuffer;
+    const MAX_ENTRIES = OBJ_SIZE / 8;
+    const gfxRom = this.graphicsRom;
+    const gfxRomLen = gfxRom.length;
+    const rowBuf = this.tileRowBuf;
+
+    // Find last sprite (end-of-table marker)
+    let lastSpriteIdx = MAX_ENTRIES - 1;
+    for (let i = 0; i < MAX_ENTRIES; i++) {
+      const entryOffset = i * 8;
+      if (entryOffset + 7 >= OBJ_SIZE) break;
+      const colour = (objData[entryOffset + 6]! << 8) | objData[entryOffset + 7]!;
+      if ((colour & 0xFF00) === 0xFF00) {
+        lastSpriteIdx = i - 1;
+        break;
+      }
+    }
+
+    // Scan front-to-back (index 0 = drawn last = visually on top)
+    for (let i = 0; i <= lastSpriteIdx; i++) {
+      const entryOffset = i * 8;
+      if (entryOffset + 7 >= OBJ_SIZE) continue;
+
+      const sprX = (objData[entryOffset]! << 8) | objData[entryOffset + 1]!;
+      const sprY = (objData[entryOffset + 2]! << 8) | objData[entryOffset + 3]!;
+      const code = (objData[entryOffset + 4]! << 8) | objData[entryOffset + 5]!;
+      const colour = (objData[entryOffset + 6]! << 8) | objData[entryOffset + 7]!;
+
+      const col = colour & 0x1F;
+      const flipX = (colour >> 5) & 1;
+      const flipY = (colour >> 6) & 1;
+
+      const mappedBaseCode = gfxromBankMapper(GFXTYPE_SPRITES, code, this.mapperTable, this.bankSizes, this.bankBases);
+      if (mappedBaseCode === -1) continue;
+
+      const nx = (colour & 0xFF00) ? (((colour >> 8) & 0x0F) + 1) : 1;
+      const ny = (colour & 0xFF00) ? (((colour >> 12) & 0x0F) + 1) : 1;
+
+      for (let nys = 0; nys < ny; nys++) {
+        for (let nxs = 0; nxs < nx; nxs++) {
+          const sx = ((sprX + nxs * 16) & 0x1FF) - CPS_HBEND;
+          const sy = ((sprY + nys * 16) & 0x1FF) - CPS_VBEND;
+
+          // Check if (x, y) falls within this sub-tile's 16x16 area
+          if (x < sx || x >= sx + 16 || y < sy || y >= sy + 16) continue;
+
+          // Compute tile code (same logic as renderObjects)
+          let tileCode: number;
+          if (flipY) {
+            if (flipX) {
+              tileCode = (mappedBaseCode & ~0x0F) + ((mappedBaseCode + (nx - 1) - nxs) & 0x0F) + 0x10 * (ny - 1 - nys);
+            } else {
+              tileCode = (mappedBaseCode & ~0x0F) + ((mappedBaseCode + nxs) & 0x0F) + 0x10 * (ny - 1 - nys);
+            }
+          } else {
+            if (flipX) {
+              tileCode = (mappedBaseCode & ~0x0F) + ((mappedBaseCode + (nx - 1) - nxs) & 0x0F) + 0x10 * nys;
+            } else {
+              tileCode = (mappedBaseCode & ~0x0F) + ((mappedBaseCode + nxs) & 0x0F) + 0x10 * nys;
+            }
+          }
+
+          // Local pixel within the tile (accounting for flip)
+          const px = x - sx;
+          const py = y - sy;
+          const localX = flipX ? (15 - px) : px;
+          const localY = flipY ? (15 - py) : py;
+
+          // Decode the pixel to get colorIndex
+          const charBase = tileCode * CHAR_SIZE_16;
+          const rowBase = charBase + localY * ROW_STRIDE_8;
+          const halfOffset = localX < 8 ? 0 : 4;
+          const groupBase = rowBase + halfOffset;
+
+          if (groupBase + 3 >= gfxRomLen) continue;
+
+          decodeRow(
+            gfxRom[groupBase]!, gfxRom[groupBase + 1]!,
+            gfxRom[groupBase + 2]!, gfxRom[groupBase + 3]!,
+            rowBuf, 0,
+          );
+
+          const pixelInGroup = localX < 8 ? localX : localX - 8;
+          const colorIndex = rowBuf[pixelInGroup]!;
+
+          // Skip transparent pixels (pen 15) — look through to sprites behind
+          if (colorIndex === 15) continue;
+
+          return {
+            spriteIndex: i,
+            tileCode,
+            rawCode: code,
+            paletteIndex: col,
+            colorIndex,
+            gfxRomOffset: tileCode * CHAR_SIZE_16,
+            localX,
+            localY,
+            flipX: flipX === 1,
+            flipY: flipY === 1,
+            nx,
+            ny,
+            nxs,
+            nys,
+          };
+        }
+      }
+    }
+
+    return null;
+  }
+
+  getGraphicsRom(): Uint8Array {
+    return this.graphicsRom;
+  }
+
+  getVram(): Uint8Array {
+    return this.vram;
+  }
+
+  getCpsaRegs(): Uint8Array {
+    return this.cpsaRegs;
+  }
+
+  getCpsbRegs(): Uint8Array {
+    return this.cpsbRegs;
+  }
+
+  getMapperTable(): GfxRange[] {
+    return this.mapperTable;
+  }
+
+  getBankSizes(): number[] {
+    return this.bankSizes;
+  }
+
+  getBankBases(): number[] {
+    return this.bankBases;
   }
 
   getObjBuffer(): Uint8Array {

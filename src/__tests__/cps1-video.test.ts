@@ -18,6 +18,7 @@ import {
   GFXTYPE_SCROLL2,
   GFXTYPE_SCROLL3,
   CPS1Video,
+  type SpriteInspectResult,
 } from '../video/cps1-video';
 import { SCREEN_WIDTH, SCREEN_HEIGHT, FRAMEBUFFER_SIZE } from '../constants';
 
@@ -349,5 +350,251 @@ describe('CPS1Video.renderFrame', () => {
       if (framebuffer[i] !== 0) nonZero++;
     }
     expect(nonZero).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// inspectSpriteAt — sprite hit-test
+// ---------------------------------------------------------------------------
+
+describe('CPS1Video.inspectSpriteAt', () => {
+  // Helper: create a CPS1Video with an identity mapper (no bank shifting)
+  // so tile code N maps directly to GFX ROM offset N * 128.
+  function createTestVideo(gfxRomSize = 0x10000) {
+    const vram = new Uint8Array(0x30000);
+    const gfxRom = new Uint8Array(gfxRomSize);
+    const cpsaRegs = new Uint8Array(0x40);
+    const cpsbRegs = new Uint8Array(0x40);
+
+    // Identity mapper: single bank covering entire ROM
+    const totalTiles = gfxRomSize / 128;
+    const gfxMapper = {
+      ranges: [{ type: 0x0F, start: 0, end: totalTiles - 1, bank: 0 }],
+      bankSizes: [totalTiles, 0, 0, 0] as [number, number, number, number],
+    };
+
+    const video = new CPS1Video(vram, gfxRom, cpsaRegs, cpsbRegs, undefined, gfxMapper);
+    return { video, vram, gfxRom, cpsaRegs, cpsbRegs };
+  }
+
+  // Helper: write a sprite entry into the OBJ buffer
+  // CPS1 sprites: screen X = (sprX & 0x1FF) - 64, screen Y = (sprY & 0x1FF) - 16
+  // To place a sprite at screen (sx, sy): sprX = sx + 64, sprY = sy + 16
+  function writeSprite(
+    video: CPS1Video,
+    index: number,
+    screenX: number,
+    screenY: number,
+    tileCode: number,
+    palette: number,
+    opts?: { flipX?: boolean; flipY?: boolean; nx?: number; ny?: number },
+  ) {
+    const objBuf = video.getObjBuffer();
+    const off = index * 8;
+    const sprX = screenX + 64; // CPS_HBEND
+    const sprY = screenY + 16; // CPS_VBEND
+
+    objBuf[off] = (sprX >> 8) & 0xFF;
+    objBuf[off + 1] = sprX & 0xFF;
+    objBuf[off + 2] = (sprY >> 8) & 0xFF;
+    objBuf[off + 3] = sprY & 0xFF;
+    objBuf[off + 4] = (tileCode >> 8) & 0xFF;
+    objBuf[off + 5] = tileCode & 0xFF;
+
+    let colour = palette & 0x1F;
+    if (opts?.flipX) colour |= (1 << 5);
+    if (opts?.flipY) colour |= (1 << 6);
+    const nx = (opts?.nx ?? 1) - 1;
+    const ny = (opts?.ny ?? 1) - 1;
+    colour |= (nx << 8) | (ny << 12);
+
+    objBuf[off + 6] = (colour >> 8) & 0xFF;
+    objBuf[off + 7] = colour & 0xFF;
+  }
+
+  // Helper: write end-of-table marker after last sprite
+  function writeEndMarker(video: CPS1Video, afterIndex: number) {
+    const objBuf = video.getObjBuffer();
+    const off = afterIndex * 8;
+    objBuf[off + 6] = 0xFF;
+    objBuf[off + 7] = 0x00;
+  }
+
+  // Helper: fill a tile in GFX ROM with a specific color index
+  function fillTile(gfxRom: Uint8Array, tileCode: number, colorIndex: number) {
+    const base = tileCode * 128;
+    // Each row = 8 bytes (left 4 + right 4), 16 rows
+    // encodeRow inverse: for colorIndex, set bit planes accordingly
+    for (let row = 0; row < 16; row++) {
+      for (let half = 0; half < 2; half++) {
+        const groupOff = base + row * 8 + half * 4;
+        // 8 pixels per half, all set to colorIndex
+        let b0 = 0, b1 = 0, b2 = 0, b3 = 0;
+        for (let px = 0; px < 8; px++) {
+          const bit = 7 - px; // MSB-first
+          if (colorIndex & 1) b0 |= (1 << bit);
+          if (colorIndex & 2) b1 |= (1 << bit);
+          if (colorIndex & 4) b2 |= (1 << bit);
+          if (colorIndex & 8) b3 |= (1 << bit);
+        }
+        gfxRom[groupOff] = b0;
+        gfxRom[groupOff + 1] = b1;
+        gfxRom[groupOff + 2] = b2;
+        gfxRom[groupOff + 3] = b3;
+      }
+    }
+  }
+
+  it('returns null when no sprite at position', () => {
+    const { video } = createTestVideo();
+    // No sprites in OBJ buffer (all zeros), end marker at entry 0
+    writeEndMarker(video, 0);
+    expect(video.inspectSpriteAt(100, 100)).toBeNull();
+  });
+
+  it('returns null for out-of-bounds coordinates', () => {
+    const { video } = createTestVideo();
+    expect(video.inspectSpriteAt(-1, 0)).toBeNull();
+    expect(video.inspectSpriteAt(0, -1)).toBeNull();
+    expect(video.inspectSpriteAt(384, 0)).toBeNull();
+    expect(video.inspectSpriteAt(0, 224)).toBeNull();
+  });
+
+  it('returns correct tileCode for a known sprite entry', () => {
+    const { video, gfxRom } = createTestVideo();
+    // Place sprite at screen (100, 50), tile code 0x10, palette 3
+    writeSprite(video, 0, 100, 50, 0x10, 3);
+    writeEndMarker(video, 1);
+    // Fill tile 0x10 with color index 5 (non-transparent)
+    fillTile(gfxRom, 0x10, 5);
+
+    const result = video.inspectSpriteAt(108, 58);
+    expect(result).not.toBeNull();
+    expect(result!.tileCode).toBe(0x10);
+    expect(result!.paletteIndex).toBe(3);
+    expect(result!.colorIndex).toBe(5);
+    expect(result!.spriteIndex).toBe(0);
+    expect(result!.gfxRomOffset).toBe(0x10 * 128);
+  });
+
+  it('returns null for transparent pixels (color index 15)', () => {
+    const { video, gfxRom } = createTestVideo();
+    writeSprite(video, 0, 100, 50, 0x10, 3);
+    writeEndMarker(video, 1);
+    // Fill tile 0x10 with color index 15 (transparent)
+    fillTile(gfxRom, 0x10, 15);
+
+    expect(video.inspectSpriteAt(108, 58)).toBeNull();
+  });
+
+  it('handles flipX correctly (localX is flipped)', () => {
+    const { video, gfxRom } = createTestVideo();
+    writeSprite(video, 0, 100, 50, 0x10, 3, { flipX: true });
+    writeEndMarker(video, 1);
+    fillTile(gfxRom, 0x10, 7);
+
+    const result = video.inspectSpriteAt(100, 50);
+    expect(result).not.toBeNull();
+    expect(result!.flipX).toBe(true);
+    // Screen pixel (100, 50) is at px=0 from sprite start
+    // With flipX, localX = 15 - 0 = 15
+    expect(result!.localX).toBe(15);
+  });
+
+  it('handles flipY correctly (localY is flipped)', () => {
+    const { video, gfxRom } = createTestVideo();
+    writeSprite(video, 0, 100, 50, 0x10, 3, { flipY: true });
+    writeEndMarker(video, 1);
+    fillTile(gfxRom, 0x10, 7);
+
+    const result = video.inspectSpriteAt(100, 50);
+    expect(result).not.toBeNull();
+    expect(result!.flipY).toBe(true);
+    // Screen pixel at py=0 from sprite start → localY = 15 - 0 = 15
+    expect(result!.localY).toBe(15);
+  });
+
+  it('handles multi-tile sprites (nx>1 or ny>1)', () => {
+    const { video, gfxRom } = createTestVideo();
+    // 2x2 multi-tile sprite at screen (100, 50), base tile code 0x10
+    writeSprite(video, 0, 100, 50, 0x10, 3, { nx: 2, ny: 2 });
+    writeEndMarker(video, 1);
+
+    // Fill all 4 sub-tiles with different colors
+    // Sub-tile (0,0) = tile 0x10, (1,0) = 0x11, (0,1) = 0x20, (1,1) = 0x21
+    fillTile(gfxRom, 0x10, 1);
+    fillTile(gfxRom, 0x11, 2);
+    fillTile(gfxRom, 0x20, 3);
+    fillTile(gfxRom, 0x21, 4);
+
+    // Hit top-left sub-tile (nxs=0, nys=0)
+    const r0 = video.inspectSpriteAt(108, 58);
+    expect(r0).not.toBeNull();
+    expect(r0!.tileCode).toBe(0x10);
+    expect(r0!.colorIndex).toBe(1);
+    expect(r0!.nxs).toBe(0);
+    expect(r0!.nys).toBe(0);
+
+    // Hit top-right sub-tile (nxs=1, nys=0) — at screen x = 100+16 = 116
+    const r1 = video.inspectSpriteAt(120, 58);
+    expect(r1).not.toBeNull();
+    expect(r1!.tileCode).toBe(0x11);
+    expect(r1!.colorIndex).toBe(2);
+    expect(r1!.nxs).toBe(1);
+    expect(r1!.nys).toBe(0);
+
+    // Hit bottom-left sub-tile (nxs=0, nys=1) — at screen y = 50+16 = 66
+    const r2 = video.inspectSpriteAt(108, 70);
+    expect(r2).not.toBeNull();
+    expect(r2!.tileCode).toBe(0x20);
+    expect(r2!.colorIndex).toBe(3);
+    expect(r2!.nxs).toBe(0);
+    expect(r2!.nys).toBe(1);
+  });
+
+  it('returns the frontmost sprite when two overlap', () => {
+    const { video, gfxRom } = createTestVideo();
+    // Sprite 0 (front) and sprite 1 (back) at same position
+    writeSprite(video, 0, 100, 50, 0x10, 5);
+    writeSprite(video, 1, 100, 50, 0x20, 7);
+    writeEndMarker(video, 2);
+    // Fill both with different non-transparent colors
+    fillTile(gfxRom, 0x10, 3);
+    fillTile(gfxRom, 0x20, 8);
+
+    const result = video.inspectSpriteAt(108, 58);
+    expect(result).not.toBeNull();
+    // Sprite 0 (index 0) is frontmost (drawn last = on top)
+    expect(result!.spriteIndex).toBe(0);
+    expect(result!.tileCode).toBe(0x10);
+    expect(result!.paletteIndex).toBe(5);
+  });
+
+  it('sees through transparent front sprite to opaque back sprite', () => {
+    const { video, gfxRom } = createTestVideo();
+    writeSprite(video, 0, 100, 50, 0x10, 5);
+    writeSprite(video, 1, 100, 50, 0x20, 7);
+    writeEndMarker(video, 2);
+    // Front sprite is transparent (index 15), back is opaque (index 8)
+    fillTile(gfxRom, 0x10, 15);
+    fillTile(gfxRom, 0x20, 8);
+
+    const result = video.inspectSpriteAt(108, 58);
+    expect(result).not.toBeNull();
+    expect(result!.spriteIndex).toBe(1);
+    expect(result!.tileCode).toBe(0x20);
+  });
+
+  it('returns correct localX/localY for interior pixel', () => {
+    const { video, gfxRom } = createTestVideo();
+    writeSprite(video, 0, 100, 50, 0x10, 3);
+    writeEndMarker(video, 1);
+    fillTile(gfxRom, 0x10, 5);
+
+    // Click on screen pixel (105, 57) → local (5, 7) within the tile
+    const result = video.inspectSpriteAt(105, 57);
+    expect(result).not.toBeNull();
+    expect(result!.localX).toBe(5);
+    expect(result!.localY).toBe(7);
   });
 });

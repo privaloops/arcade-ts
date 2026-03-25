@@ -51,6 +51,15 @@
 - [ ] **OKI sample crackling** — Slight crackling on some OKI samples, may need better interpolation
 - [ ] **Volume per channel** — Allow user to adjust YM2151 / OKI / QSound balance
 
+## ROM Editor
+
+- [x] **RomStore** — Central mutable ROM manager with ZIP export ([#22](https://github.com/privaloops/arcade-ts/issues/22))
+- [x] **Sprite Pixel Editor** — WYSIWYG sprite editing with palette & tile tools ([#27](https://github.com/privaloops/arcade-ts/issues/27))
+- [ ] **FM Patch Editor** — Live synth UI, ROM-level editing (depends on RomStore) ([#20](https://github.com/privaloops/arcade-ts/issues/20))
+- [ ] **Scroll Layer Editor** — Edit scroll 1/2/3 tiles (same architecture as sprite editor)
+- [ ] **Tile Allocation Manager** — Track free/used tiles across entire GFX ROM
+- [ ] **Image Import** — PNG → tile conversion with palette quantization
+
 ## UI / UX
 
 - [ ] **Mobile touch controls** — Virtual d-pad and buttons for phones/tablets

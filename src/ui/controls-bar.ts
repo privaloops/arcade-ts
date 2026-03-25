@@ -5,6 +5,7 @@
 import type { Emulator } from "../emulator";
 import { DebugPanel } from "../debug/debug-panel";
 import { AudioPanel } from "../audio/audio-panel";
+import { SpriteEditorUI } from "../editor/sprite-editor-ui";
 import type { GameScreen } from "../video/GameScreen";
 import { openSsModal } from "./save-state-ui";
 
@@ -23,6 +24,7 @@ export interface ControlsBarDeps {
   audBtn: HTMLButtonElement;
   quitBtn: HTMLButtonElement;
   exportBtn: HTMLButtonElement;
+  editBtn: HTMLButtonElement;
   hamburgerBtn: HTMLButtonElement;
   hamburgerMenu: HTMLDivElement;
   crtToggle: HTMLInputElement;
@@ -37,6 +39,8 @@ export interface ControlsBarDeps {
   setAudioPanel(p: AudioPanel | null): void;
   getGameScreen(): GameScreen | null;
   setGameScreen(gs: GameScreen | null): void;
+  getSpriteEditor(): SpriteEditorUI | null;
+  setSpriteEditor(se: SpriteEditorUI | null): void;
   setStatus(msg: string): void;
 }
 
@@ -61,6 +65,15 @@ export function toggleDebug(deps: ControlsBarDeps): void {
   debugPanel.toggle();
 }
 
+export function toggleSpriteEditor(deps: ControlsBarDeps): void {
+  let spriteEditor = deps.getSpriteEditor();
+  if (!spriteEditor) {
+    spriteEditor = new SpriteEditorUI(deps.emulator, deps.canvas);
+    deps.setSpriteEditor(spriteEditor);
+  }
+  spriteEditor.toggle();
+}
+
 export function toggleAudio(deps: ControlsBarDeps): void {
   let audioPanel = deps.getAudioPanel();
   if (!audioPanel) {
@@ -73,7 +86,7 @@ export function toggleAudio(deps: ControlsBarDeps): void {
 export function initControlsBar(deps: ControlsBarDeps): void {
   const {
     emulator, canvas, domScreen, dropZone, controlsEl, canvasWrapper,
-    pauseBtn, muteBtn, saveBtnCtrl, loadBtnCtrl, debugBtn, audBtn, quitBtn, exportBtn,
+    pauseBtn, muteBtn, saveBtnCtrl, loadBtnCtrl, debugBtn, audBtn, quitBtn, exportBtn, editBtn,
     hamburgerBtn, hamburgerMenu,
     crtToggle, tateToggle, gameSelect, loadBtn,
     getMuted, setMuted, getDebugPanel, setDebugPanel, getAudioPanel, setAudioPanel,
@@ -132,6 +145,7 @@ export function initControlsBar(deps: ControlsBarDeps): void {
 
   debugBtn.addEventListener("click", () => toggleDebug(deps));
   audBtn.addEventListener("click", () => toggleAudio(deps));
+  editBtn.addEventListener("click", () => toggleSpriteEditor(deps));
 
   // Export ROM
   exportBtn.addEventListener("click", async () => {

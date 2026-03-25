@@ -8,6 +8,7 @@ import { Emulator } from "./emulator";
 import { DEFAULT_GP_MAPPING, DEFAULT_P1_MAPPING, DEFAULT_P2_MAPPING, type AutofireKey } from "./input/input";
 import { DebugPanel } from "./debug/debug-panel";
 import { AudioPanel } from "./audio/audio-panel";
+import type { SpriteEditorUI } from "./editor/sprite-editor-ui";
 import type { GameScreen } from "./video/GameScreen";
 
 import { showOverlay, hideOverlay } from "./ui/modal";
@@ -17,7 +18,7 @@ import { initSaveStateUI, openSsModal, closeSsModal, isSsModalOpen } from "./ui/
 import { renderDipList } from "./ui/dip-switch-ui";
 import { initDropZone, handleRomFile } from "./ui/drop-zone";
 import { getRendererMode, setupDomRenderer, initRendererToggle } from "./ui/renderer-toggle";
-import { initControlsBar, toggleFullscreen, toggleDebug, toggleAudio } from "./ui/controls-bar";
+import { initControlsBar, toggleFullscreen, toggleDebug, toggleAudio, toggleSpriteEditor } from "./ui/controls-bar";
 import { initShortcuts } from "./ui/shortcuts";
 
 // ── DOM lookups ──────────────────────────────────────────────────────────────
@@ -45,6 +46,7 @@ const debugBtn = getElement<HTMLButtonElement>("dbg-btn");
 const audBtn = getElement<HTMLButtonElement>("aud-btn");
 const quitBtn = getElement<HTMLButtonElement>("quit-btn");
 const exportBtn = getElement<HTMLButtonElement>("export-btn");
+const editBtn = getElement<HTMLButtonElement>("edit-btn");
 const hamburgerBtn = getElement<HTMLButtonElement>("hamburger-btn");
 const hamburgerMenu = getElement<HTMLDivElement>("hamburger-menu");
 const crtToggle = getElement<HTMLInputElement>("crt-toggle");
@@ -83,6 +85,7 @@ let muted = false;
 let debugPanel: DebugPanel | null = new DebugPanel(emulator, canvas);
 let audioPanel: AudioPanel | null = new AudioPanel(emulator);
 let gameScreen: GameScreen | null = null;
+let spriteEditor: SpriteEditorUI | null = null;
 let lastRomFile: File | null = null;
 
 function setStatus(msg: string): void { statusEl.textContent = msg; }
@@ -94,6 +97,8 @@ const getAudioPanel = (): AudioPanel | null => audioPanel;
 const setAudioPanel = (p: AudioPanel | null): void => { audioPanel = p; };
 const getGameScreen = (): GameScreen | null => gameScreen;
 const setGameScreen = (gs: GameScreen | null): void => { gameScreen = gs; };
+const getSpriteEditor = (): SpriteEditorUI | null => spriteEditor;
+const setSpriteEditor = (se: SpriteEditorUI | null): void => { spriteEditor = se; };
 const getLastRomFile = (): File | null => lastRomFile;
 const setLastRomFile = (f: File | null): void => { lastRomFile = f; };
 
@@ -190,11 +195,11 @@ ctrlResetBtn.addEventListener("click", () => {
 const rendererDeps = { emulator, canvas, domScreen, getGameScreen, setGameScreen, setStatus };
 const controlsBarDeps = {
   emulator, canvas, domScreen, dropZone, controlsEl, canvasWrapper,
-  pauseBtn, muteBtn, saveBtnCtrl, loadBtnCtrl, debugBtn, audBtn, quitBtn, exportBtn,
+  pauseBtn, muteBtn, saveBtnCtrl, loadBtnCtrl, debugBtn, audBtn, quitBtn, exportBtn, editBtn,
   hamburgerBtn, hamburgerMenu,
   crtToggle, tateToggle, gameSelect, loadBtn,
   getMuted, setMuted, getDebugPanel, setDebugPanel, getAudioPanel, setAudioPanel,
-  getGameScreen, setGameScreen, setStatus,
+  getGameScreen, setGameScreen, getSpriteEditor, setSpriteEditor, setStatus,
 };
 
 initKeyboardCapture(emulator);
@@ -203,7 +208,7 @@ initControlsBar(controlsBarDeps);
 initSaveStateUI({ emulator, ssOverlay, ssTitle, ssSlots, ssCloseBtn, canvasWrapper, appEl, getMuted, setStatus });
 initDropZone({
   emulator, canvas, domScreen, dropZone, fileInput, controlsEl, canvasWrapper,
-  tateToggle, gameSelect, loadBtn, romControls, exportBtn, statusEl,
+  tateToggle, gameSelect, loadBtn, romControls, exportBtn, editBtn, statusEl,
   getRendererMode, setupDomRenderer: () => setupDomRenderer(rendererDeps),
   getDebugPanel, setDebugPanel, getAudioPanel: () => audioPanel, setLastRomFile, getLastRomFile, setStatus,
 });
@@ -215,6 +220,7 @@ initShortcuts({
   openSsModal, closeSsModal,
   toggleDebug: () => toggleDebug(controlsBarDeps),
   toggleAudio: () => toggleAudio(controlsBarDeps),
+  toggleSpriteEditor: () => toggleSpriteEditor(controlsBarDeps),
   toggleFullscreen: () => toggleFullscreen(canvasWrapper),
   isCtrlModalOpen: () => ctrlOverlay.classList.contains("open"),
   isSsModalOpen, setStatus,
