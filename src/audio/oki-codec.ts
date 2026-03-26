@@ -96,7 +96,7 @@ export function decodeSample(rom: Uint8Array, phrase: PhraseInfo): Float32Array 
 
 /** Encode PCM Float32Array (mono, any sample rate) to OKI ADPCM bytes.
  *  Resamples to 7575 Hz if needed. Returns packed ADPCM (high nibble first). */
-export function encodeSample(pcm: Float32Array, srcRate: number): Uint8Array {
+export function encodeSample(pcm: Float32Array, srcRate: number, boost = false): Uint8Array {
   // Resample to OKI rate
   let resampled = srcRate === OKI_SAMPLE_RATE ? pcm : resampleLinear(pcm, srcRate, OKI_SAMPLE_RATE);
 
@@ -112,20 +112,27 @@ export function encodeSample(pcm: Float32Array, srcRate: number): Uint8Array {
     resampled[i] = prev;
   }
 
-  // 2. Normalize + soft-clip: match the hot mastering of original CPS1 samples
+  // 2. Normalize (+ optional soft-clip for mic recording)
   let peak = 0;
   for (let i = 0; i < resampled.length; i++) {
     const abs = Math.abs(resampled[i]!);
     if (abs > peak) peak = abs;
   }
   if (peak > 0.001) {
-    // Boost to 1.8x peak (intentional overdrive like originals), then soft-clip
-    const gain = 1.8 / peak;
-    for (let i = 0; i < resampled.length; i++) {
-      let s = resampled[i]! * gain;
-      // tanh soft-clip — pushes everything loud like arcade samples
-      s = Math.tanh(s * 2.0);
-      resampled[i] = s;
+    if (boost) {
+      // Mic mode: boost to 1.8x peak + tanh soft-clip (match arcade sample loudness)
+      const gain = 1.8 / peak;
+      for (let i = 0; i < resampled.length; i++) {
+        let s = resampled[i]! * gain;
+        s = Math.tanh(s * 2.0);
+        resampled[i] = s;
+      }
+    } else {
+      // WAV import: normalize to peak without overdrive
+      const gain = 1.0 / peak;
+      for (let i = 0; i < resampled.length; i++) {
+        resampled[i] = resampled[i]! * gain;
+      }
     }
   }
 

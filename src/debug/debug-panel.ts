@@ -61,10 +61,9 @@ export class DebugPanel {
     this.buildDOM();
     this.bindEvents();
 
-    // If panel was pre-opened via HTML class, sync state
+    // If panel was pre-opened via HTML class, fully initialize
     if (this.container.classList.contains("open")) {
-      this.active = true;
-      this.debugBtn.classList.add("active");
+      this.open();
     }
   }
 
@@ -157,53 +156,30 @@ export class DebugPanel {
     // Header
     const header = el("div", "dbg-header");
     const title = el("h2");
-    title.textContent = "Video";
+    title.textContent = "Tile Editor";
     const closeBtn = el("button", "dbg-close");
     closeBtn.textContent = "\u00D7";
     closeBtn.addEventListener("click", () => this.toggle());
     header.append(title, closeBtn);
     c.appendChild(header);
 
-    // Frame controls
-    const frameCtrls = el("div", "dbg-frame-controls");
-
-    this.playPauseBtn = el("button", "ctrl-btn") as HTMLButtonElement;
-    this.playPauseBtn.textContent = "Pause";
-
-    const stepBtn = el("button", "ctrl-btn") as HTMLButtonElement;
-    stepBtn.textContent = "Step";
-
-    this.frameCounter = el("span", "dbg-frame-count");
-    this.frameCounter.textContent = "Frame: 0";
-
-    frameCtrls.append(this.playPauseBtn, stepBtn, this.frameCounter);
-    c.appendChild(frameCtrls);
-
-    this.playPauseBtn.addEventListener("click", () => {
-      if (this.emulator.isPaused()) {
-        this.emulator.resume();
-        this.playPauseBtn!.textContent = "Pause";
-      } else {
-        this.emulator.pause();
-        this.playPauseBtn!.textContent = "Play";
-      }
-    });
-
-    stepBtn.addEventListener("click", () => {
+    // Frame counter (displayed in header, updated from here)
+    this.frameCounter = document.getElementById('frame-counter');
+    // Step button (moved to header)
+    const stepBtn = document.getElementById('step-btn') as HTMLButtonElement | null;
+    stepBtn?.addEventListener("click", () => {
+      const pauseBtn = document.getElementById('pause-btn');
       if (!this.emulator.isPaused()) {
         this.emulator.pause();
-        this.playPauseBtn!.textContent = "Play";
+        this.emulator.suspendAudio();
+        if (pauseBtn) pauseBtn.textContent = "Resume (P)";
       }
       this.emulator.stepFrame();
     });
 
-    // ── Sprite Editor (open by default, first section) ──
+    // ── Sprite / Tile Editor (injected directly, no collapsible wrapper) ──
     {
-      const [sec, content] = collapsibleSection("Sprite Editor",
-        "Click on a sprite in the game to select its tile.\n" +
-        "Paint pixels with pencil, fill, eraser tools.\n" +
-        "Changes are written directly to the GFX ROM and visible immediately.\n\n" +
-        "Shortcuts: B=pencil, G=fill, I=eyedropper, X=eraser, [/]=colors", true);
+      const content = el("div");
 
       this.spriteEditorUI = new SpriteEditorUI(this.emulator, this.canvas);
       this.spriteEditorUI.getEditor().setLayerVisibilityFilter((id) => this.renderer.isLayerEnabled(id));
@@ -223,7 +199,7 @@ export class DebugPanel {
       });
       this.spriteEditorUI.buildInto(content);
 
-      c.appendChild(sec);
+      c.appendChild(content);
     }
 
     // Layers + 3D Exploded View moved to left panel (layer-panel.ts)
@@ -555,7 +531,7 @@ export class DebugPanel {
 
       // Update frame counter every 10 frames
       if (tick % 10 === 0 && this.frameCounter) {
-        this.frameCounter.textContent = `Frame: ${this.emulator.getFrameCount()}`;
+        this.frameCounter.textContent = `Frame: ${this.emulator.getFrameCount()} | ${this.emulator.getFpsDisplay()} FPS`;
       }
 
       // Update draw order every 30 frames
@@ -567,11 +543,6 @@ export class DebugPanel {
             .map(id => LAYER_SHORT[id] ?? "?")
             .join(" > ");
         }
-      }
-
-      // Update play/pause button state
-      if (tick % 15 === 0 && this.playPauseBtn) {
-        this.playPauseBtn.textContent = this.emulator.isPaused() ? "Play" : "Pause";
       }
 
       // Update palette grid every 15 frames (~4Hz)

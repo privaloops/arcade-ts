@@ -279,7 +279,9 @@ export class AudioPanel {
     exportBtn.textContent = "Export Set";
     exportBtn.style.cssText = "font-size:0.6rem;padding:3px 8px;";
     exportBtn.addEventListener("click", () => this.exportSamples());
-    actions.append(importBtn, exportBtn);
+    const fmtHint = el("span", "smp-fmt-hint");
+    fmtHint.textContent = "WAV mono 7575 Hz";
+    actions.append(importBtn, exportBtn, fmtHint);
     sc.appendChild(actions);
 
     // Table
@@ -621,7 +623,7 @@ export class AudioPanel {
         const pcm = audioBuf.getChannelData(0);
         const rom = this.emulator.getOkiRom();
         if (!rom) return;
-        const adpcm = encodeSample(pcm, audioBuf.sampleRate);
+        const adpcm = encodeSample(pcm, audioBuf.sampleRate, true);
         const result = replaceSampleInRom(rom, this.micPhraseId, adpcm);
         if (result.success) {
           this.emulator.updateOkiRom(rom);

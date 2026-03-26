@@ -459,10 +459,19 @@
         body.layer-active #app { margin-left: 0; }
       }
 
-      .layer-panel-header h2 {
-        font: 700 0.9rem "Courier New", Courier, monospace; color: var(--color-accent);
-        letter-spacing: 0.1em; text-transform: uppercase; margin: 0 0 10px;
+      .layer-panel-header {
+        display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;
       }
+      .layer-panel-header h2 {
+        font: 700 0.85rem "Courier New", Courier, monospace; color: var(--color-text);
+        letter-spacing: 0.1em; text-transform: uppercase; margin: 0;
+      }
+      .layer-close {
+        background: transparent; border: 1px solid var(--color-border-strong); color: var(--color-text-dim);
+        font-size: 0.8rem; width: 24px; height: 24px; border-radius: 3px;
+        cursor: pointer; transition: all 0.15s; display: flex; align-items: center; justify-content: center;
+      }
+      .layer-close:hover { border-color: var(--color-text); color: var(--color-text); }
 
       .layer-empty { font: 0.7rem var(--font-system); color: var(--color-text-muted); padding: 12px 0; }
 
@@ -555,8 +564,8 @@
 
       .dbg-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
       .dbg-header h2 {
-        font: 700 1.1rem "Courier New", Courier, monospace; color: var(--color-accent);
-        letter-spacing: 0.15em; text-transform: uppercase; margin: 0;
+        font: 700 0.85rem "Courier New", Courier, monospace; color: var(--color-text);
+        letter-spacing: 0.1em; text-transform: uppercase; margin: 0;
       }
       .dbg-close {
         background: transparent; border: 1px solid var(--color-border-strong); color: var(--color-text-dim);
@@ -565,13 +574,9 @@
       }
       .dbg-close:hover { border-color: var(--color-accent); color: var(--color-accent); }
 
-      .dbg-frame-controls {
-        display: flex; align-items: center; gap: 6px; padding-bottom: 12px;
-        border-bottom: 1px solid var(--color-border-row);
-      }
-      .dbg-frame-controls .ctrl-btn { font-size: 0.65rem; padding: 3px 8px; }
-      .dbg-frame-count {
-        font: 0.7rem "Courier New", monospace; color: var(--color-text-disabled); margin-left: auto;
+      .header-frame-counter {
+        font: 0.65rem "Courier New", monospace; color: var(--color-text-dim);
+        margin-left: 4px; display: inline-flex; align-items: center; line-height: 1;
       }
 
       .dbg-section-title {
@@ -731,7 +736,8 @@
       .aud-tab-btn:hover { border-color: var(--color-text-muted); color: var(--color-text-muted); }
       .aud-tab-btn.active { border-color: var(--color-accent); color: var(--color-accent); background: var(--color-accent-bg); }
 
-      .smp-actions { display: flex; gap: 6px; margin-bottom: 8px; }
+      .smp-actions { display: flex; gap: 6px; margin-bottom: 8px; align-items: center; }
+      .smp-fmt-hint { font: 0.55rem var(--font-mono); color: var(--color-text-muted); margin-left: 4px; }
 
       .aud-channels { display: flex; flex-direction: column; gap: 1px; }
 
@@ -1026,8 +1032,9 @@
       }
 
       .edit-tools { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
-      .edit-tool-btn { font-size: 0.75rem; padding: 4px 10px; }
+      .edit-tool-btn { font-size: 0.7rem; padding: 4px 8px; display: inline-flex; align-items: center; gap: 4px; }
       .edit-tool-btn.active { background: var(--color-accent); color: #fff; }
+      .edit-tool-icon { font-size: 0.85rem; line-height: 1; }
 
       .edit-section-label {
         font: 600 0.7rem var(--font-system); color: var(--color-text-muted);
