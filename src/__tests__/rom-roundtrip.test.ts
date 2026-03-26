@@ -6,8 +6,10 @@
  */
 
 import { describe, it, expect, beforeAll } from 'vitest';
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'fs';
+import { execSync } from 'child_process';
 import { resolve } from 'path';
+import { tmpdir } from 'os';
 import { loadRomFromZip, type RomSet } from '../memory/rom-loader';
 import { RomStore } from '../rom-store';
 import { writePixel, readPixel, readTile } from '../editor/tile-encoder';
@@ -290,4 +292,57 @@ describe('combined round-trip', () => {
       expect(okiDecodedAfter[i]).toBeCloseTo(okiDecodedBefore[i]!, 6);
     }
   });
+});
+
+// ---------------------------------------------------------------------------
+// MAME validation — skip if MAME is not installed
+// ---------------------------------------------------------------------------
+
+function hasMame(): boolean {
+  try {
+    execSync('which mame', { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+describe.skipIf(!hasMame())('MAME validation', () => {
+  it('modified ROM boots in MAME without errors', async () => {
+    const store = new RomStore(originalRomSet);
+
+    // Apply modifications (same as combined test)
+    const tileCode = 500;
+    for (let y = 0; y < 16; y++) {
+      for (let x = 0; x < 16; x++) {
+        writePixel(store.graphicsRom, tileCode, x, y, (x + y) % 16);
+      }
+    }
+
+    const phrases = parsePhraseTable(store.okiRom);
+    const testPcm = new Float32Array(Math.floor(OKI_SAMPLE_RATE * 0.05));
+    for (let i = 0; i < testPcm.length; i++) {
+      testPcm[i] = Math.sin(2 * Math.PI * 1000 * i / OKI_SAMPLE_RATE);
+    }
+    replaceSampleInRom(store.okiRom, phrases[0]!.id, encodeSample(testPcm, OKI_SAMPLE_RATE));
+
+    // Export modified ROM to temp directory
+    const exported = await store.exportZipAsArrayBuffer();
+    const mameDir = resolve(tmpdir(), 'romstudio-mame-test');
+    mkdirSync(mameDir, { recursive: true });
+    writeFileSync(resolve(mameDir, 'ffight.zip'), Buffer.from(exported));
+
+    try {
+      // Run MAME headless: -bench 2 implies -video none -sound none -nothrottle
+      const output = execSync(
+        `mame ffight -rompath "${mameDir}" -bench 2 -skip_gameinfo`,
+        { timeout: 30_000, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] },
+      );
+
+      // MAME outputs "Average speed: X%" on success
+      expect(output).toContain('Average speed');
+    } finally {
+      rmSync(mameDir, { recursive: true, force: true });
+    }
+  }, 30_000);
 });
