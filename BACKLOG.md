@@ -450,6 +450,7 @@ Integration tests (`tests/e2e/daw.spec.ts` — Playwright):
 - [x] **FPS counter** — Optional display
 - [ ] **Screenshot button** — Save current frame as PNG
 - [ ] **Rewind** — Save N frames in circular buffer, hold button to rewind
+- [ ] **Sprite highlight colors** — Unique color per detected multi-tile sprite to distinguish overlapping characters
 
 ## Platform expansion
 
