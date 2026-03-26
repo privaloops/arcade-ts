@@ -88,6 +88,11 @@ export class LayerPanel {
     document.body.classList.remove('layer-active');
   }
 
+  destroy(): void {
+    this.hide();
+    this.container.remove();
+  }
+
   /**
    * Rebuild the panel contents from the current layer groups.
    */

@@ -259,6 +259,8 @@ export class SpriteEditorUI {
 
   destroy(): void {
     this.deactivate();
+    this.layerPanel?.destroy();
+    this.layerPanel = null;
   }
 
   // -- Activate / Deactivate (overlay + shortcuts, no panel creation) --
