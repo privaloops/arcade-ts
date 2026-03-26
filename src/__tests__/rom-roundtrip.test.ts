@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, beforeAll } from 'vitest';
-import { readFileSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { resolve } from 'path';
 import { loadRomFromZip, type RomSet } from '../memory/rom-loader';
 import { RomStore } from '../rom-store';
@@ -14,14 +14,35 @@ import { writePixel, readPixel, readTile } from '../editor/tile-encoder';
 import { encodeColor, decodeColor, writeColor, readPalette } from '../editor/palette-editor';
 import { parsePhraseTable, decodeSample, encodeSample, replaceSampleInRom, OKI_SAMPLE_RATE } from '../audio/oki-codec';
 
-const ROM_PATH = resolve(__dirname, '../../public/roms/ffight.zip');
+const ROM_URL = 'https://archive.org/download/mame-0.260-roms-non-merged/MAME%200.260%20ROMs%20%28non-merged%29/MAME%200.260%20ROMs%20%28non-merged%29/ffight.zip';
+const CACHE_DIR = resolve(__dirname, '../../.rom-cache');
+const CACHE_PATH = resolve(CACHE_DIR, 'ffight.zip');
+const LOCAL_PATH = resolve(__dirname, '../../public/roms/ffight.zip');
+
+async function getRomBuffer(): Promise<ArrayBuffer> {
+  // Prefer local ROM if available
+  if (existsSync(LOCAL_PATH)) {
+    return readFileSync(LOCAL_PATH).buffer as ArrayBuffer;
+  }
+  // Use cached download
+  if (existsSync(CACHE_PATH)) {
+    return readFileSync(CACHE_PATH).buffer as ArrayBuffer;
+  }
+  // Download and cache
+  const res = await fetch(ROM_URL);
+  if (!res.ok) throw new Error(`Failed to download ROM: ${res.status} ${res.statusText}`);
+  const buffer = await res.arrayBuffer();
+  mkdirSync(CACHE_DIR, { recursive: true });
+  writeFileSync(CACHE_PATH, Buffer.from(buffer));
+  return buffer;
+}
 
 let originalRomSet: RomSet;
 
 beforeAll(async () => {
-  const zipBuffer = readFileSync(ROM_PATH).buffer as ArrayBuffer;
+  const zipBuffer = await getRomBuffer();
   originalRomSet = await loadRomFromZip(zipBuffer);
-});
+}, 60_000);
 
 // ---------------------------------------------------------------------------
 // Tile round-trip
