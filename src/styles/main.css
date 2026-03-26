@@ -467,7 +467,9 @@
       .layer-empty { font: 0.7rem var(--font-system); color: var(--color-text-muted); padding: 12px 0; }
 
       .layer-group { margin-bottom: 12px; }
-      .layer-group-active { }
+      .layer-group-active > .layer-group-header {
+        color: var(--color-accent); border-left: 3px solid var(--color-accent); padding-left: 4px;
+      }
       .layer-group-collapsed .layer-list,
       .layer-group-collapsed .layer-group-actions,
       .layer-group-collapsed .layer-drop-zone { display: none; }
@@ -520,9 +522,10 @@
       .layer-group-actions { padding: 2px 0; }
 
       .layer-drop-zone {
-        font: 0.6rem var(--font-system); color: var(--color-text-muted);
-        text-align: center; padding: 6px; margin-top: 4px;
+        font: 0.65rem var(--font-system); color: var(--color-text-muted);
+        text-align: center; padding: 12px 6px; margin-top: 4px;
         border: 1px dashed var(--color-border); border-radius: var(--radius-sm);
+        cursor: pointer;
         cursor: default;
       }
       .layer-drop-zone.layer-drop-active { border-color: var(--color-accent); color: var(--color-accent); }

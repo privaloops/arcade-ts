@@ -176,8 +176,27 @@ export class LayerPanel {
       const spriteNeedsCapture = group.type === 'sprite' && !group.spriteCapture?.poses.length;
       const dropZone = document.createElement('div');
       dropZone.className = 'layer-drop-zone';
-      dropZone.textContent = spriteNeedsCapture ? 'Capture poses first' : '+ Drop photo here';
+      dropZone.textContent = spriteNeedsCapture ? 'Capture poses first' : '+ Drop or click to add image';
       if (spriteNeedsCapture) dropZone.classList.add('layer-drop-disabled');
+
+      // File input (hidden) for click-to-browse
+      const fileInput = document.createElement('input');
+      fileInput.type = 'file';
+      fileInput.accept = 'image/*';
+      fileInput.style.display = 'none';
+      fileInput.onchange = () => {
+        const file = fileInput.files?.[0];
+        if (file) this.callbacks.onDropPhoto(gi, file);
+        fileInput.value = '';
+      };
+      dropZone.appendChild(fileInput);
+
+      // Click to open file picker
+      dropZone.addEventListener('click', () => {
+        if (!spriteNeedsCapture) fileInput.click();
+      });
+
+      // Drag & drop
       dropZone.addEventListener('dragover', (e) => { if (spriteNeedsCapture) return; e.preventDefault(); dropZone.classList.add('layer-drop-active'); });
       dropZone.addEventListener('dragleave', () => { dropZone.classList.remove('layer-drop-active'); });
       dropZone.addEventListener('drop', (e) => {

@@ -666,6 +666,16 @@ export class SpriteEditorUI {
       this.refreshNeighbors();
       this.refreshInfoBar();
       this.refreshUndoButtons();
+
+      // Highlight the corresponding layer group in the left panel
+      const groupIdx = this.layerGroups.findIndex(g => {
+        if (info.layerId === LAYER_OBJ) return g.type === 'sprite';
+        return g.layerId === info.layerId;
+      });
+      if (groupIdx !== -1 && groupIdx !== this.activeGroupIndex) {
+        this.activeGroupIndex = groupIdx;
+        this.refreshLayerPanel();
+      }
     }
   }
 
