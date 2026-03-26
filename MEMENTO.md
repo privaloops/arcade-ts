@@ -21,7 +21,9 @@ Et l'idée folle : un renderer DOM où **chaque sprite est un `<div>`**, le jeu 
 | J3 | 19 mars 2026 | 22 | DOM renderer, React puis vanilla, tests Tom Harte |
 | J4 | 20 mars 2026 | 19 | QSound, Kabuki, TATE mode, batch OPM |
 | J5 | 21 mars 2026 | 1 (squashé) | QSound audio fonctionne ! Bug Z80 préfixe opcode trouvé via MAME debugger |
-| **Total** | **5 jours** | **100 commits** | **~20 000 lignes TS+C, ~30K insertions source** |
+| J6 | 25 mars 2026 | ~15 | Sprite Pixel Editor, audio timeline, FM Patch Editor, mic recording, palette ROM patching |
+| J7 | 26 mars 2026 | ~15 | Sprite Analyzer, Sprite Sheet Viewer, photo import scroll layers, UI overhaul |
+| **Total** | **7 jours** | **~130 commits** | **~22 000+ lignes TS+C, ~35K insertions source** |
 
 ---
 
@@ -245,6 +247,120 @@ En IM 0, le Z80 n'appelait jamais l'ISR à 0x0038. L'ISR ne capturait jamais les
 
 ---
 
+## Jour 6 — L'editeur graphique prend forme (25 mars)
+
+### Le Sprite Pixel Editor : une premiere mondiale
+
+La session du matin attaque le chantier le plus ambitieux depuis le rendu video : l'edition de sprites **en temps reel**, dans un jeu CPS1 qui tourne. Aucun emulateur au monde ne propose ca — les outils de romhacking existants (YY-CHR, TilEd) travaillent offline sur des ROMs figees.
+
+L'architecture est un empilage de couches :
+- `inspectSpriteAt()` sur CPS1Video — hit-test des sprites front-to-back avec metadonnees completes (tileCode, paletteIndex, gfxRomOffset, flip, multi-tile info)
+- `tile-encoder.ts` — `encodeRow()` (inverse de `decodeRow()`), `writePixel()`, `readPixel()`, `readTile()`. L'encodage 4bpp planar CPS1 est l'inverse exact du decodage qui existait deja
+- `palette-editor.ts` — `readPalette()`, `writeColor()`, `encodeColor()` avec conversion lossy RGB vers CPS1 16-bit
+- `sprite-editor-ui.ts` — Panneau 360px avec grille tile 16x16 zoomee, outils pencil/fill/eyedropper/eraser, sidebar palette avec color picker, navigation entre tiles voisins, undo/redo (100 niveaux), frame stepping
+- Overlay canvas pour la selection de sprite — hover highlight (cyan), tile selectionne (rouge), contours multi-tile
+
+Le systeme de **Tile Reference Counter** (`tile-refs.ts`) est une piece critique : avant d'ecrire un pixel, il faut verifier si le tile est partage par plusieurs sprites. Si oui, dupliquer le tile vers un slot libre avant d'ecrire, sinon on corromprait tous les sprites qui partagent ce tile.
+
+### L'audio timeline et le debt-based timing
+
+En parallele, la timeline audio recoit un ruler frame-synced avec des ticks mineurs (60 frames) et majeurs avec labels (600 frames). Le scroll est lie au `frameCount` de l'emulateur, s'arrete en pause, et va dans le sens inverse (nouvelles donnees a gauche).
+
+Le vrai fix de cette session : **Firefox audio lag**. Le `setInterval(16.77ms)` naif ne fonctionne pas sur Firefox qui throttle les timers differemment de Chrome. Remplacement par un tick 4ms + accumulateur de dette de frames. Le Worker rattrape les frames manquees au lieu de les dropper. Le ring buffer est double de 8192 a 16384 samples (~340ms de marge).
+
+### La soiree : FM Patch Editor — trois approches, trois echecs
+
+L'ambition de la soiree : un editeur de patches FM. Lire les voices du driver son CPS1, modifier les parametres (ADSR, algorithme, niveaux operateurs), entendre le resultat en temps reel.
+
+**Le parser fonctionne** — `cps1-sound-driver.ts` decode le format voice 40-byte du driver v4.x, trouve la table de voices par pointeur de base ou scan brute-force. L'UI macro avec les 4 operateurs, les enveloppes, l'algorithme — tout est la.
+
+**Le playback echoue**. Trois approches tentees :
+
+1. **ROM patching** — Ecrire les registres du patch directement dans la ROM du driver son. Probleme : le Z80 cache les donnees de voice en work RAM. Modifier la ROM n'a aucun effet tant que le Z80 n'a pas recharge la voice.
+
+2. **fmOverride** — Intercepter les ecritures YM2151 dans le Worker et substituer les registres du patch. Partiellement fonctionnel mais sonne faux : le Z80 ajuste dynamiquement les TL (Total Level) pour les enveloppes de volume. Nos valeurs statiques ecrasent ces ajustements dynamiques.
+
+3. **Shadow registers** — Maintenir un miroir des registres YM2151 et ne substituer que les parametres de timbre (DT, MUL, AR, DR, etc.) en preservant les TL du Z80. Trop de cas limites : le driver change les TL pour le volume ET le timbre (carrier vs modulator).
+
+**Verdict** : l'onglet Synth est code mais cache dans l'UI. Le playback temps reel necessite le reverse-engineering du sequenceur musical Z80 — ajoute au backlog comme projet DAW complet.
+
+### Mic recording et la decouverte des palettes CPS1
+
+Le remplacement de samples OKI par enregistrement micro fonctionne du premier coup : `getUserMedia()` → buffer 3s → low-pass 3kHz → normalize → tanh soft-clip → encode ADPCM. Le traitement lo-fi donne un caractere arcade authentique.
+
+La **palette ROM patching** revele un detail hardware meconnu : les palettes CPS1 ont un **nibble de luminosite** (brightness). Le programme 68K applique un fade de luminosite via une boucle `ADD.W D2, (A0)+` a PC=0x2A6A. La recherche de palette dans la program ROM doit stripper ce nibble avant de comparer, sinon les couleurs editees ne sont pas retrouvees apres un changement de round.
+
+### Le YM2151 WASM et la sensibilite du address latch
+
+Decouverte d'un comportement subtil de Nuked OPM : l'adresse du registre est latchee par `_opm_write_address`, et la donnee par `_opm_write_data`. Si on ecrit l'adresse sans ecrire de donnee, le latch reste. Si on ecrit une donnee sans avoir ecrit d'adresse, elle va au dernier registre latche. Le code du FM Patch Editor supposait des ecritures atomiques (addr+data en paire), mais le Z80 peut ecrire l'adresse, faire autre chose, puis revenir ecrire la donnee bien plus tard. Source de bugs subtils dans l'override de patches.
+
+---
+
+## Jour 7 — Le Sprite Sheet Viewer et la chasse au pen 15 (26 mars)
+
+### Sprite Analyzer : regrouper ce que le hardware disperse
+
+Le CPS1 ne connait pas les "personnages". Il n'a que des OBJ entries de 16x16 pixels dans une table VRAM. Un personnage comme Ryu dans SF2 est un assemblage de 8-12 OBJ entries positionnees en grille. Le **Sprite Analyzer** (`sprite-analyzer.ts`) reconstruit les personnages a partir des primitives :
+
+1. **Groupement par palette** — Flood-fill sur la liste OBJ : deux sprites adjacents avec la meme palette appartiennent probablement au meme personnage
+2. **Proximite spatiale** — Les sprites du meme groupe doivent etre physiquement proches (tolerance de quelques pixels pour les gaps entre tiles)
+3. **Contour rouge** — Overlay de debug montrant le rectangle englobant de chaque groupe detecte
+4. **Center-tracking** — Le centre du groupe est suivi frame a frame, permettant de voir le personnage bouger
+
+### Pose Capture : enregistrer le gameplay
+
+Le Sprite Analyzer capture les poses **pendant que le joueur joue**. A chaque frame, il assemble le personnage suivi, calcule un hash de tile codes (ignorant les miroirs — flip horizontal ne change pas la pose), et compare aux poses deja vues. Les poses uniques sont stockees dans une galerie.
+
+La deduplication par hash est critique : sans elle, une seconde de gameplay a 60fps genererait 60 entries presque identiques. Avec, on capture typiquement 15-30 poses uniques pour un personnage (idle, marche, coups, sauts, touches, KO).
+
+### Sprite Sheet Viewer : l'editeur plein ecran
+
+Le viewer remplace le canvas du jeu par un editeur plein ecran. A gauche, la sidebar avec toutes les poses capturees en miniature. Au centre, le sprite zoome a 4x CSS avec la grille de tiles horizontale en dessous. Cliquer sur un tile dans le strip l'ouvre dans l'editeur pixel existant.
+
+L'architecture est un **mode switch** : le canvas du jeu est cache (`display: none`), le viewer est affiche. L'emulateur reste en pause en arriere-plan. Le bouton "Edit sprites" dans le header permet de revenir au viewer depuis le mode jeu.
+
+### La chasse au pen 15 : le bug le plus traitre de la session
+
+`assembleCharacter` construisait l'image composite du personnage en assemblant les tiles individuels. Pour chaque pixel, il lisait le `colorIdx` du tile decode. **Le bug : `colorIdx === 0` etait traite comme transparent.**
+
+Mais le hardware CPS1 utilise **pen 15** comme transparent, pas pen 0. Le renderer du jeu le sait — ligne 892 de `cps1-video.ts` : `if (colorIdx === 15) continue; // transparent pen`. Mais `assembleCharacter` dans sprite-analyzer.ts avait ete ecrit independamment, avec l'hypothese (fausse) que pen 0 = transparent.
+
+**Symptome** : les cheveux et la ceinture de Ryu apparaissaient comme des trous noirs dans le preview du Sprite Sheet Viewer. La palette etait correcte (debug logs confirmaient les changements de couleur), mais le preview ne se mettait pas a jour. Parce que les pixels pen 0 (cheveux noirs) etaient effaces au lieu d'etre dessines.
+
+**Fix** : 1 ligne dans `sprite-analyzer.ts` — `colorIdx === 0` → `colorIdx === 15`. Et la meme correction dans la grille de tiles du viewer.
+
+### Photo import sur scroll layers : le combat des coordonnees
+
+Le systeme de photo import permet de dropper une image sur un scroll layer, de la redimensionner/deplacer en overlay RGBA, puis de la merger dans les tiles GFX ROM via dithering Atkinson et quantization vers la palette CPS1 16 couleurs.
+
+**Le premier bug majeur** : les photos "suivaient la camera". Le systeme positionnait les overlays en coordonnees ecran. Quand le joueur bougeait et que le scroll defilait, la photo restait fixe a l'ecran au lieu d'etre ancree dans le monde du jeu.
+
+**Fix** : helper `getGroupScroll()` lisant les registres de scroll CPS-A. Toutes les interactions (click, drag, resize) sont converties en coordonnees monde. Le render de l'overlay soustrait le scroll courant pour afficher au bon endroit. Les photos restent ancrees a leur position dans le decor.
+
+**Le Tile Allocator** (`tile-allocator.ts`) resout un probleme insidieux : sur les scroll layers, plusieurs positions de la tilemap peuvent referencer le meme tile dans la GFX ROM. Si on merge une photo sur un tile partage, on corrompt tous les endroits qui utilisent ce tile. Le Tile Allocator cree des copies privees avant le merge, avec expansion automatique de la GFX ROM si necessaire. Le reverse bank mapping pour scroll1 (interleave) est particulierement delicat.
+
+### Les commits perdus
+
+Deux commits (`d42971e`, `e5ad1e9`) n'avaient pas ete pushes avant le merge de la PR. Le worktree local les avait, mais la branche mergee sur GitHub ne les contenait pas. Recuperation via cherry-pick depuis les refs orphelines — un rappel que `git push` avant `gh pr merge` n'est pas optionnel.
+
+### WAV import saturation : le boost qui n'aurait pas du etre la
+
+`encodeSample()` appliquait un gain 1.8x + tanh soft-clip a **tous** les WAV importes. Ce traitement avait ete concu pour le micro (signal faible, besoin de boost pour matcher le "hot mastering" des samples CPS1 originaux). Mais pour un WAV deja normalise, ca saturait completement.
+
+**Fix** : parametre `boost` optionnel (default `false`). Le boost n'est applique que pour l'enregistrement micro. Les imports WAV passent sans traitement.
+
+### UI overhaul : les details qui comptent
+
+La fin de session est un marathon de polish UI :
+- **Tool cursors** — Curseurs canvas generes programmatiquement en PNG data URL pour chaque outil (pencil, bucket, eyedropper, eraser). Plus de curseur par defaut quand on peint.
+- **Layer panel open by default** — Le panneau de layers est visible au lancement avec bouton de fermeture.
+- **Hamburger menu** — "Video (F2)" toggle les deux colonnes, suppression de l'entree "Sprite Editor" redondante.
+- **F2/F3 shortcuts** — Fonctionnent maintenant sans ROM chargee (les panneaux sont independants de l'etat du jeu).
+- **Panel titles** — "Video" renomme "Tile Editor" pour le panneau droit, styles harmonises.
+- **HW layer checkboxes** remplaces par des icones oeil, coherents avec les toggles de sous-layers.
+
+---
+
 ## Patterns et observations
 
 ### Ce qui a bien marché
@@ -306,10 +422,11 @@ En IM 0, le Z80 n'appelait jamais l'ISR à 0x0038. L'ISR ne capturait jamais les
 
 | Métrique | Valeur |
 |----------|--------|
-| Durée totale | 5 jours (17-21 mars 2026) |
-| Commits | 104 |
-| Lignes TypeScript | ~18 500 |
-| Insertions source totales | ~28 000 |
+| Durée totale | 7 jours (17-26 mars 2026) |
+| Commits | ~130 |
+| Lignes TypeScript | ~22 000+ |
+| Insertions source totales | ~35 000+ |
+| Fichiers éditeur (src/editor/) | 11 |
 | Jeux supportés (GameDefs) | 41 parents |
 | Jeux dans le catalogue | 245 |
 | Vecteurs de test M68000 | 16 800 (84 × 200) |
@@ -489,5 +606,5 @@ Ce commit squash regroupe :
 
 ---
 
-*Dernière mise à jour : 21 mars 2026*
-*QSound audio fonctionnel — Dino et Punisher jouables avec son.*
+*Derniere mise a jour : 26 mars 2026*
+*Sprite Analyzer, Sprite Sheet Viewer, photo import sur scroll layers, UI overhaul. Le studio prend forme.*

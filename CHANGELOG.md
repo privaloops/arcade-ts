@@ -7,6 +7,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **Sprite Analyzer** — Character grouping by palette + spatial proximity, red contour overlay, center-tracking across frames
+- **Pose Capture** — Gameplay recording of unique sprite poses with deduplication by tile code hash (mirrors = same pose)
+- **Sprite Sheet Viewer** — Fullscreen pose editor replacing game canvas. Left sidebar with all poses, central zoomed sprite at 4x CSS scale, horizontal tile strip, click-to-edit tiles
+- **Export/Import PNG** — Export any pose as transparent PNG at native resolution. Import PNG with nearest-color quantization to CPS1 16-color palette (pen 15 = transparent)
+- **Photo Import on Scroll Layers** — Multi-layer photo system with Photoshop-like layers. Drop photo → RGBA overlay → resize/move → Atkinson dithering quantization → merge into GFX ROM tiles
+- **Tile Allocator** — Private tile copies to prevent shared-tile corruption on merge. Auto GFX ROM expansion when needed. Reverse bank mapping for scroll1 interleave
+- **Layer Panel** — Left sidebar with per-group layers, visibility toggles (eye icons), drag-drop reorder, quantize/delete per layer, 3D exploded view slider, GFX ROM memory indicator
+- **Tool Cursors** — Per-tool canvas cursors (pencil, bucket, eyedropper, eraser) generated programmatically as PNG data URLs
+- **"Edit sprites" button** — Re-enter sprite sheet viewer from game mode after capture
+- **OKI codec unit tests** — Encoder/decoder roundtrip, ADPCM step table, phrase table parsing
+
+### Fixed
+- **Transparent pen** — `assembleCharacter` and tile grid used pen 0 as transparent, but CPS1 hardware uses pen 15. Hair/belt appeared as black holes in sprite preview
+- **Photo layer world coordinates** — Photo layers now positioned in scroll-relative world coords, not fixed screen coords. Photos stay anchored to the game world when scrolling
+- **HW layer visibility** — Checkboxes reset to "visible" on every panel refresh. Now tracked in persistent state
+- **Click suppression** — Drag/resize mouseup no longer triggers group-switching click event (capture phase suppression)
+- **Shift+click all groups** — Layer selection now searches ALL groups, not just the active one
+- **WAV import saturation** — 1.8x gain boost + tanh soft-clip now only applied for mic recording, not WAV file import
+- **F2/F3 shortcuts** — Now work without a ROM loaded (panels toggle independently of game state)
+
+### Changed
+- **Panel titles** — "Video" → "Tile Editor" (right panel), harmonized styles (0.85rem, neutral color instead of red)
+- **Pause/Step/Frame moved to header** — Removed from right panel, added as header control buttons
+- **Layer panel open by default** — Visible at app launch with close button
+- **HW layer checkboxes → eye icons** — Consistent with sub-layer visibility toggles
+- **Hamburger menu** — "Video (F2)" toggles both columns, removed "Sprite Editor" entry
+- **WAV format hint** — "WAV mono 7575 Hz" shown next to Import/Export Set buttons
+- **OKI encoding** — `encodeSample` takes optional `boost` param (true for mic only)
+
+---
+
+### Added (March 25 — evening)
 - **FM Patch Editor** (code present, UI tab hidden) — CPS1 sound driver voice read/write (40-byte format), macro controls (volume, brightness, ADSR), algorithm selection, ROM export. Voice table auto-detection via base pointer or brute-force scan.
 - **Mic recording** — Record OKI samples from microphone with 3s auto-stop, lo-fi processing (3kHz low-pass + normalize + tanh soft-clip) to match arcade hardware character
 - **Audio panel enhancements** — Mute/solo per FM/OKI channel, FM timeline visualization, OKI waveforms, sortable sample table (click column headers)
@@ -20,7 +52,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 - **Synth tab hidden** — FM Patch Editor UI deferred (real-time register override conflicts with Z80 sound driver; see LEARNINGS.md)
-- **OKI sample encoding** — Boosted gain (1.8x + tanh 2.0 soft-clip) to match hot mastering of original CPS1 samples
+- **OKI sample encoding** — Boosted gain (1.8x + tanh 2.0 soft-clip) now mic-only. `encodeSample` takes optional `boost` param (default false). WAV file imports are no longer saturated.
 
 ### Not shipped (investigated, deferred)
 - **FM Patch Editor real-time playback** — Multiple approaches attempted (ROM patching, fmOverride, Z80 write interception with shadow registers). Fundamental conflict: Z80 caches voice data in work RAM and continuously adjusts TL for volume envelopes. Intercepting timbre writes works partially but sounds wrong because the Z80's dynamic volume offsets are lost. Deferred until Z80 music sequencer format is reverse-engineered.

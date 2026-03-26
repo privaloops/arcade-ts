@@ -48,6 +48,12 @@ src/
     sprite-editor.ts  # Sprite editor logic: tools, undo, paint, flood fill
     sprite-editor-ui.ts # DOM panel, tile grid, overlay, shortcuts
     tile-refs.ts      # Tile reference counter + duplication
+    sprite-analyzer.ts  # Character grouping, pose capture, sprite sheet viewer
+    photo-import.ts   # Multi-layer photo import with Atkinson dithering
+    layer-model.ts    # Layer group model for photo overlays
+    layer-panel.ts    # Left sidebar layer panel with visibility/reorder
+    tile-allocator.ts # Private tile allocation, GFX ROM expansion
+    tool-cursors.ts   # Per-tool canvas cursors (pencil, bucket, eyedropper, eraser)
   input/
     input.ts        # Keyboard + Gamepad API + device assignment + autofire
   game-catalog.ts   # 245 CPS1 games (source: MAME 0.286)
@@ -152,6 +158,15 @@ ROMs loaded from public/roms/ (not included in the repo).
 | Right Arrow | Step 1 frame |
 | Shift+Right | Step 10 frames |
 | Escape | Close editor |
+
+## Sprite Sheet Viewer shortcuts (when viewer is active)
+
+| Key | Action |
+|-----|--------|
+| Arrow Up/Down | Navigate between poses |
+| Arrow Left/Right | Navigate between tiles |
+| Escape | Back to game |
+| B, G, I, X | Tool shortcuts (same as editor) |
 
 ## Audio architecture
 

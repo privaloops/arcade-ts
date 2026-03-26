@@ -39,6 +39,23 @@
 - [x] 3D drag fix — overlay pointer-events disabled in exploded mode
 - [x] Layer grid default off
 
+## Done (session March 26)
+
+- [x] Sprite Analyzer — character grouping (palette + proximity), red contour overlay, center-tracking
+- [x] Pose Capture — gameplay recording of unique sprite poses, deduplication by tile code hash
+- [x] Sprite Sheet Viewer — fullscreen pose editor, sidebar with all poses, zoomed editing at 4x
+- [x] Export/Import PNG — export pose as transparent PNG, import with nearest-color quantization
+- [x] Photo Import on Scroll Layers — multi-layer system, Atkinson dithering, world coords positioning
+- [x] Tile Allocator — private tile copies, auto GFX ROM expansion, reverse bank mapping
+- [x] Layer Panel — left sidebar, visibility eye icons, drag-drop reorder, 3D slider, memory indicator
+- [x] Tool Cursors — per-tool canvas cursors generated as PNG data URLs
+- [x] OKI codec unit tests — encoder/decoder roundtrip, ADPCM step table, phrase table parsing
+- [x] FPS counter display
+- [x] UI overhaul — panels, hamburger menu, F2/F3 shortcuts without ROM, header controls
+- [x] Transparent pen fix (pen 15, not pen 0)
+- [x] Photo layer world coordinates fix
+- [x] WAV import saturation fix (boost mic-only)
+
 ## M68000 CPU — Tom Harte test failures
 
 - [ ] **ADDX.b/MOVE.b/MOVEA with -(A7)/(A7)+** — 68000 forces A7 even: decrement/increment by 2 for byte ops on A7
@@ -422,15 +439,15 @@ Integration tests (`tests/e2e/daw.spec.ts` — Playwright):
 - [ ] Playback: press play → notes scroll, keyboard animates
 - [ ] Basic edit flow: select note → change pitch via keyboard → verify updated in grid
 - [x] **Scroll Layer Editor** — Works via existing sprite editor (click scroll tile → edit → patches GFX ROM)
-- [ ] **Sprite Analyzer** — Select a multi-tile sprite → scan GFX ROM for all similar tile groups (animation frames, poses). Compare pixel-by-pixel, assemble nx×ny layout, score >70% = match. Display all variants in a gallery panel. Stores tile addresses for batch operations.
-- [ ] **Photo Import** — Upload photo → background removal → resize to sprite dimensions (nx×16 × ny×16) → quantize to sprite's 16-color palette → write pixels across all tiles. Combined with Sprite Analyzer: apply to ALL found variants (every animation frame gets the new face).
-- [ ] **Tile Allocation Manager** — Track free/used tiles across entire GFX ROM
+- [x] **Sprite Analyzer** — Select a multi-tile sprite → scan GFX ROM for all similar tile groups (animation frames, poses). Compare pixel-by-pixel, assemble nx×ny layout, score >70% = match. Display all variants in a gallery panel. Stores tile addresses for batch operations.
+- [x] **Photo Import** — Upload photo → background removal → resize to sprite dimensions (nx×16 × ny×16) → quantize to sprite's 16-color palette → write pixels across all tiles. Combined with Sprite Analyzer: apply to ALL found variants (every animation frame gets the new face).
+- [x] **Tile Allocation Manager** — Track free/used tiles across entire GFX ROM
 
 ## UI / UX
 
 - [ ] **Mobile touch controls** — Virtual d-pad and buttons for phones/tablets
 - [ ] **Speed control** — Fast forward / slow motion
-- [ ] **FPS counter** — Optional display
+- [x] **FPS counter** — Optional display
 - [ ] **Screenshot button** — Save current frame as PNG
 - [ ] **Rewind** — Save N frames in circular buffer, hold button to rewind
 
