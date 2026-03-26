@@ -267,12 +267,16 @@ export class RomStore {
       zip.file(entry.odd, oddData);
     }
 
-    // ROM_LOAD16_WORD_SWAP entries (if any)
+    // ROM_LOAD16_WORD_SWAP entries: the loader byte-swaps on load
+    // (little-endian file → big-endian 68K in memory), so we must
+    // re-swap on export to restore the original file byte order.
     if (def.wordSwapEntries) {
       for (const entry of def.wordSwapEntries) {
-        // These files are stored as-is (possibly byte-swapped on load)
-        // Export as big-endian (the format in our programRom buffer)
-        const data = rom.slice(entry.offset, entry.offset + entry.size);
+        const data = new Uint8Array(entry.size);
+        for (let i = 0; i < entry.size; i += 2) {
+          data[i] = rom[entry.offset + i + 1] ?? 0;
+          data[i + 1] = rom[entry.offset + i] ?? 0;
+        }
         zip.file(entry.file, data);
       }
     }
