@@ -1,5 +1,5 @@
 /**
- * Controls bar — pause, mute, save/load, debug, audio, quit, CRT, TATE toggles.
+ * Controls bar — emu bar (on canvas) + studio tools (in header).
  */
 
 import type { Emulator } from "../emulator";
@@ -13,7 +13,7 @@ export interface ControlsBarDeps {
   canvas: HTMLCanvasElement;
   domScreen: HTMLDivElement;
   dropZone: HTMLDivElement;
-  controlsEl: HTMLDivElement;
+  emuBar: HTMLDivElement;
   canvasWrapper: HTMLDivElement;
   pauseBtn: HTMLButtonElement;
   muteBtn: HTMLButtonElement;
@@ -24,8 +24,6 @@ export interface ControlsBarDeps {
   quitBtn: HTMLButtonElement;
   exportBtn: HTMLButtonElement;
   editBtn: HTMLButtonElement;
-  hamburgerBtn: HTMLButtonElement;
-  hamburgerMenu: HTMLDivElement;
   crtToggle: HTMLInputElement;
   tateToggle: HTMLInputElement;
   gameSelect: HTMLSelectElement;
@@ -63,7 +61,6 @@ export function toggleDebug(deps: ControlsBarDeps): void {
 }
 
 export function toggleSpriteEditor(deps: ControlsBarDeps): void {
-  // Sprite editor is integrated in the debug panel — just open it
   toggleDebug(deps);
 }
 
@@ -76,66 +73,59 @@ export function toggleAudio(deps: ControlsBarDeps): void {
   audioPanel.toggle();
 }
 
+/** Update pause button icon and state. */
+export function updatePauseBtn(pauseBtn: HTMLButtonElement, emuBar: HTMLDivElement, paused: boolean): void {
+  pauseBtn.textContent = paused ? "▶" : "⏸";
+  pauseBtn.title = paused ? "Resume (P)" : "Pause (P)";
+  pauseBtn.classList.toggle("active", paused);
+  emuBar.classList.toggle("paused", paused);
+}
+
 export function initControlsBar(deps: ControlsBarDeps): void {
   const {
-    emulator, canvas, domScreen, dropZone, controlsEl, canvasWrapper,
+    emulator, canvas, domScreen, dropZone, emuBar, canvasWrapper,
     pauseBtn, muteBtn, saveBtnCtrl, loadBtnCtrl, debugBtn, audBtn, quitBtn, exportBtn, editBtn,
-    hamburgerBtn, hamburgerMenu,
     crtToggle, tateToggle, gameSelect, loadBtn,
     getMuted, setMuted, getDebugPanel, setDebugPanel, getAudioPanel, setAudioPanel,
     getGameScreen, setGameScreen, setStatus,
   } = deps;
 
-  // Hamburger menu toggle
-  function closeHamburger(): void { hamburgerMenu.classList.remove("open"); }
-
-  hamburgerBtn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    hamburgerMenu.classList.toggle("open");
-  });
-
-  document.addEventListener("click", (e) => {
-    if (!hamburgerMenu.contains(e.target as Node) && e.target !== hamburgerBtn) {
-      closeHamburger();
-    }
-  });
-
-  window.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && hamburgerMenu.classList.contains("open")) {
-      closeHamburger();
-    }
-  });
-
-  // Close hamburger when any button inside is clicked
-  hamburgerMenu.querySelectorAll(".ctrl-btn").forEach(btn => {
-    btn.addEventListener("click", () => closeHamburger());
-  });
-
+  // Pause
   pauseBtn.addEventListener("click", () => {
     if (emulator.isRunning()) {
       emulator.pause();
       emulator.suspendAudio();
-      pauseBtn.textContent = "Resume (P)";
-      pauseBtn.classList.add("active");
+      updatePauseBtn(pauseBtn, emuBar, true);
       setStatus("Paused");
     } else if (emulator.isPaused()) {
       emulator.resume();
       if (!getMuted()) emulator.resumeAudio();
-      pauseBtn.textContent = "Pause (P)";
-      pauseBtn.classList.remove("active");
+      updatePauseBtn(pauseBtn, emuBar, false);
       setStatus("Running");
     }
   });
 
+  // Mute
   muteBtn.addEventListener("click", () => {
     setMuted(!getMuted());
-    if (getMuted()) { emulator.suspendAudio(); muteBtn.classList.add("active"); setStatus("Muted"); }
-    else { emulator.resumeAudio(); muteBtn.classList.remove("active"); setStatus("Running"); }
+    if (getMuted()) {
+      emulator.suspendAudio();
+      muteBtn.textContent = "🔇";
+      muteBtn.classList.add("active");
+      setStatus("Muted");
+    } else {
+      emulator.resumeAudio();
+      muteBtn.textContent = "🔊";
+      muteBtn.classList.remove("active");
+      setStatus("Running");
+    }
   });
 
+  // Save / Load state
   saveBtnCtrl.addEventListener("click", () => openSsModal("save"));
   loadBtnCtrl.addEventListener("click", () => openSsModal("load"));
 
+  // Studio tools
   debugBtn.addEventListener("click", () => toggleDebug(deps));
   audBtn.addEventListener("click", () => toggleAudio(deps));
   editBtn.addEventListener("click", () => toggleSpriteEditor(deps));
@@ -185,9 +175,9 @@ export function initControlsBar(deps: ControlsBarDeps): void {
     canvas.style.visibility = "hidden";
     domScreen.style.display = "none";
     setGameScreen(null);
-    controlsEl.classList.remove("visible");
-    pauseBtn.textContent = "Pause (P)";
-    pauseBtn.classList.remove("active");
+    emuBar.classList.remove("visible");
+    emuBar.classList.remove("paused");
+    updatePauseBtn(pauseBtn, emuBar, false);
     loadBtn.disabled = !gameSelect.value;
     setStatus("");
   });

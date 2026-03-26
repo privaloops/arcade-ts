@@ -14,7 +14,7 @@ export interface DropZoneDeps {
   domScreen: HTMLDivElement;
   dropZone: HTMLDivElement;
   fileInput: HTMLInputElement;
-  controlsEl: HTMLDivElement;
+  emuBar: HTMLDivElement;
   canvasWrapper: HTMLDivElement;
   tateToggle: HTMLInputElement;
   gameSelect: HTMLSelectElement;
@@ -38,7 +38,7 @@ let _deps: DropZoneDeps | null = null;
 async function handleRomFile(file: File): Promise<void> {
   if (!_deps) return;
   const {
-    emulator, dropZone, controlsEl, canvas, domScreen,
+    emulator, dropZone, emuBar, canvas, domScreen,
     canvasWrapper, tateToggle, getRendererMode, setupDomRenderer,
     getDebugPanel, setDebugPanel, getAudioPanel, setLastRomFile, setStatus,
   } = _deps;
@@ -56,7 +56,7 @@ async function handleRomFile(file: File): Promise<void> {
     await emulator.loadRom(file);
     emulator.resumeAudio();
     dropZone.classList.add("hidden");
-    controlsEl.classList.add("visible");
+    emuBar.classList.add("visible");
     _deps.exportBtn.style.display = "";
     _deps.editBtn.style.display = "";
 

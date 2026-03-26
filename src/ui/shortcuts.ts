@@ -4,10 +4,12 @@
 
 import type { Emulator } from "../emulator";
 import { downloadTextFile } from "../utils/trace-export";
+import { updatePauseBtn } from "./controls-bar";
 
 export interface ShortcutsDeps {
   emulator: Emulator;
   canvasWrapper: HTMLDivElement;
+  emuBar: HTMLDivElement;
   pauseBtn: HTMLButtonElement;
   muteBtn: HTMLButtonElement;
   getMuted(): boolean;
@@ -30,7 +32,7 @@ export interface ShortcutsDeps {
 
 export function initShortcuts(deps: ShortcutsDeps): void {
   const {
-    emulator, canvasWrapper,
+    emulator, canvasWrapper, emuBar,
     pauseBtn, muteBtn,
     getMuted, setMuted,
     openControlsModal, closeControlsModal,
@@ -75,8 +77,17 @@ export function initShortcuts(deps: ShortcutsDeps): void {
     // M = Mute / Unmute
     if (key === "m") {
       setMuted(!getMuted());
-      if (getMuted()) { emulator.suspendAudio(); muteBtn.classList.add("active"); setStatus("Muted"); }
-      else { emulator.resumeAudio(); muteBtn.classList.remove("active"); setStatus("Running"); }
+      if (getMuted()) {
+        emulator.suspendAudio();
+        muteBtn.textContent = "🔇";
+        muteBtn.classList.add("active");
+        setStatus("Muted");
+      } else {
+        emulator.resumeAudio();
+        muteBtn.textContent = "🔊";
+        muteBtn.classList.remove("active");
+        setStatus("Running");
+      }
       return;
     }
 
@@ -85,14 +96,12 @@ export function initShortcuts(deps: ShortcutsDeps): void {
       if (emulator.isRunning()) {
         emulator.pause();
         emulator.suspendAudio();
-        pauseBtn.textContent = "Resume (P)";
-        pauseBtn.classList.add("active");
+        updatePauseBtn(pauseBtn, emuBar, true);
         setStatus("Paused");
       } else if (emulator.isPaused()) {
         emulator.resume();
         if (!getMuted()) emulator.resumeAudio();
-        pauseBtn.textContent = "Pause (P)";
-        pauseBtn.classList.remove("active");
+        updatePauseBtn(pauseBtn, emuBar, false);
         setStatus("Running");
       }
       return;

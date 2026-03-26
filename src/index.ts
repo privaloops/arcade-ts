@@ -33,7 +33,7 @@ const domScreen = getElement<HTMLDivElement>("dom-screen");
 const dropZone = getElement<HTMLDivElement>("drop-zone");
 const statusEl = getElement<HTMLParagraphElement>("status");
 const fileInput = getElement<HTMLInputElement>("file-input");
-const controlsEl = getElement<HTMLDivElement>("controls");
+const emuBar = getElement<HTMLDivElement>("emu-bar");
 const canvasWrapper = getElement<HTMLDivElement>("canvas-wrapper");
 const gamepadStatusEl = getElement<HTMLSpanElement>("gamepad-status");
 const appEl = getElement<HTMLDivElement>("app");
@@ -46,8 +46,6 @@ const audBtn = getElement<HTMLButtonElement>("aud-btn");
 const quitBtn = getElement<HTMLButtonElement>("quit-btn");
 const exportBtn = getElement<HTMLButtonElement>("export-btn");
 const editBtn = getElement<HTMLButtonElement>("edit-btn");
-const hamburgerBtn = getElement<HTMLButtonElement>("hamburger-btn");
-const hamburgerMenu = getElement<HTMLDivElement>("hamburger-menu");
 const appVersion = document.getElementById("app-version");
 if (appVersion) appVersion.textContent = `v${__APP_VERSION__}`;
 const crtToggle = getElement<HTMLInputElement>("crt-toggle");
@@ -192,9 +190,8 @@ ctrlResetBtn.addEventListener("click", () => {
 
 const rendererDeps = { emulator, canvas, domScreen, getGameScreen, setGameScreen, setStatus };
 const controlsBarDeps = {
-  emulator, canvas, domScreen, dropZone, controlsEl, canvasWrapper,
+  emulator, canvas, domScreen, dropZone, emuBar, canvasWrapper,
   pauseBtn, muteBtn, saveBtnCtrl, loadBtnCtrl, debugBtn, audBtn, quitBtn, exportBtn, editBtn,
-  hamburgerBtn, hamburgerMenu,
   crtToggle, tateToggle, gameSelect, loadBtn,
   getMuted, setMuted, getDebugPanel, setDebugPanel, getAudioPanel, setAudioPanel,
   getGameScreen, setGameScreen, setStatus,
@@ -205,13 +202,13 @@ initRendererToggle(rendererDeps);
 initControlsBar(controlsBarDeps);
 initSaveStateUI({ emulator, ssOverlay, ssTitle, ssSlots, ssCloseBtn, canvasWrapper, appEl, getMuted, setStatus });
 initDropZone({
-  emulator, canvas, domScreen, dropZone, fileInput, controlsEl, canvasWrapper,
+  emulator, canvas, domScreen, dropZone, fileInput, emuBar, canvasWrapper,
   tateToggle, gameSelect, loadBtn, romControls, exportBtn, editBtn, statusEl,
   getRendererMode, setupDomRenderer: () => setupDomRenderer(rendererDeps),
   getDebugPanel, setDebugPanel, getAudioPanel: () => audioPanel, setLastRomFile, getLastRomFile, setStatus,
 });
 initShortcuts({
-  emulator, canvasWrapper, pauseBtn, muteBtn, getMuted, setMuted,
+  emulator, canvasWrapper, emuBar, pauseBtn, muteBtn, getMuted, setMuted,
   togglePause: () => pauseBtn.click(),
   toggleMute: () => muteBtn.click(),
   openControlsModal, closeControlsModal,

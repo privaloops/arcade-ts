@@ -88,105 +88,41 @@
         letter-spacing: 0.05em;
       }
 
-      /* ── Hamburger menu ────────────────────────────────── */
-      .hamburger-wrapper {
-        position: relative;
-        margin-left: auto;
+      /* ── Studio tools (header right) ──────────────────── */
+      .studio-tools { display: flex; gap: 6px; margin-left: auto; }
+      .studio-quit { color: var(--color-accent) !important; }
+      .header-gh-link { color: var(--color-text-muted); transition: color 0.15s; margin-left: 4px; display: flex; align-items: center; }
+      .header-gh-link:hover { color: var(--color-accent); }
+      .header-version { font: 0.65rem var(--font-mono); color: var(--color-text-dim); margin-left: 4px; }
+
+      /* ── Emu bar (on canvas) ─────────────────────────── */
+      .emu-bar {
+        display: none; align-items: center; justify-content: center; gap: 6px;
+        position: absolute; bottom: 0; left: 0; right: 0; z-index: 9998;
+        padding: 5px 12px;
+        background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(4px);
+        opacity: 0; transition: opacity 0.3s;
       }
+      .emu-bar.visible { display: flex; }
+      #canvas-wrapper:hover .emu-bar.visible,
+      .emu-bar.paused { opacity: 1; }
 
-      .hamburger-btn {
-        display: flex; align-items: center; justify-content: center;
-        width: 34px; height: 34px; padding: 0;
-      }
-
-      .hamburger-icon,
-      .hamburger-icon::before,
-      .hamburger-icon::after {
-        display: block;
-        width: 16px; height: 2px;
-        background: currentColor;
-        border-radius: 1px;
-        transition: transform 0.2s;
-      }
-
-      .hamburger-icon { position: relative; }
-      .hamburger-icon::before,
-      .hamburger-icon::after {
-        content: '';
-        position: absolute;
-        left: 0;
-      }
-      .hamburger-icon::before { top: -5px; }
-      .hamburger-icon::after { top: 5px; }
-
-      .hamburger-menu {
-        display: none;
-        position: absolute;
-        top: calc(100% + 6px);
-        right: 0;
-        min-width: 160px;
-        background: var(--color-bg-elevated);
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-lg);
-        padding: 6px;
-        flex-direction: column;
-        gap: 2px;
-        z-index: 10001;
-        opacity: 0;
-        transform: translateY(-4px);
-        transition: opacity 0.15s, transform 0.15s;
-      }
-
-      .hamburger-menu.open {
-        display: flex;
-        opacity: 1;
-        transform: translateY(0);
-      }
-
-      .hamburger-menu .ctrl-btn {
-        width: 100%;
-        text-align: left;
-        border: none;
-        padding: 8px 12px;
-        border-radius: var(--radius-sm);
-      }
-
-      .hamburger-menu .ctrl-btn:hover {
-        background: var(--color-bg-surface);
-        border: none;
-      }
-
-      .hamburger-quit { color: var(--color-accent) !important; }
-
-      .hamburger-link {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 8px 12px;
-        color: var(--color-text-muted);
-        text-decoration: none;
-        font-size: 0.75rem;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.03em;
-        border-radius: var(--radius-sm);
+      .emu-btn {
+        width: 30px; height: 26px; padding: 0;
+        background: transparent; border: 1px solid rgba(255,255,255,0.2);
+        color: #ccc; border-radius: 3px; cursor: pointer;
+        font-size: 13px; display: flex; align-items: center; justify-content: center;
         transition: all 0.15s;
       }
+      .emu-btn:hover { border-color: var(--color-accent); color: var(--color-accent); }
+      .emu-btn.active { border-color: var(--color-accent); color: var(--color-accent); }
 
-      .hamburger-link:hover {
-        color: var(--color-accent);
-        background: var(--color-bg-surface);
-      }
+      .emu-bar-sep { width: 1px; height: 16px; background: rgba(255,255,255,0.15); }
+      .emu-frame-counter { font: 0.6rem var(--font-mono); color: rgba(255,255,255,0.5); margin-left: auto; }
 
-      .hamburger-link svg { width: 16px; height: 16px; fill: currentColor; }
-
-      .hamburger-version {
-        display: block;
-        padding: 4px 12px;
-        font-size: 0.7rem;
-        color: var(--color-text-dim);
-        font-family: var(--font-mono);
-      }
+      /* Emu bar in fullscreen */
+      #canvas-wrapper:fullscreen .emu-bar { cursor: default; }
+      #canvas-wrapper:fullscreen .emu-bar .emu-btn { cursor: pointer; }
 
       /* ── Canvas wrapper ────────────────────────────────── */
       #canvas-wrapper {
@@ -267,7 +203,7 @@
       body.pseudo-fullscreen { padding: 0; }
       body.pseudo-fullscreen #app { padding: 0; gap: 0; max-width: none; justify-content: center; height: 100dvh; }
       body.pseudo-fullscreen header, body.pseudo-fullscreen #status,
-      body.pseudo-fullscreen #controls, body.pseudo-fullscreen footer { display: none; }
+      body.pseudo-fullscreen footer { display: none; }
       body.pseudo-fullscreen #canvas-wrapper { max-width: none; border: none; width: 100%; height: 100%; }
       body.pseudo-fullscreen #screen, body.pseudo-fullscreen #dom-screen {
         width: 100%; height: 100%; object-fit: contain; background: #000;
@@ -312,8 +248,7 @@
       #load-btn:disabled { background: #333; color: var(--color-text-dim); cursor: default; }
 
       /* ── Control bar ───────────────────────────────────── */
-      #controls { display: none; gap: 6px; justify-content: center; flex-wrap: wrap; }
-      #controls.visible { display: flex; }
+      /* #controls removed — emu bar is now inside #canvas-wrapper */
 
       .ctrl-btn {
         background: transparent; border: 1px solid var(--color-border-strong); color: var(--color-text-label);
@@ -349,7 +284,7 @@
 
       @media (max-height: 500px) and (orientation: landscape) {
         #app { padding: 4px; gap: 4px; }
-        header, #controls, footer { display: none; }
+        header, footer { display: none; }
         #canvas-wrapper { max-width: none; height: calc(100dvh - 30px); width: auto; aspect-ratio: 384 / 224; }
         #status { font-size: 0.7rem; }
       }
@@ -573,11 +508,6 @@
         cursor: pointer; transition: all 0.15s; display: flex; align-items: center; justify-content: center;
       }
       .dbg-close:hover { border-color: var(--color-accent); color: var(--color-accent); }
-
-      .header-frame-counter {
-        font: 0.65rem "Courier New", monospace; color: var(--color-text-dim);
-        margin-left: 4px; display: inline-flex; align-items: center; line-height: 1;
-      }
 
       .dbg-section-title {
         font: 600 0.7rem -apple-system, BlinkMacSystemFont, sans-serif; color: var(--color-text-disabled);
