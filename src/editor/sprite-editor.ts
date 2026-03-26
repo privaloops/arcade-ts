@@ -122,29 +122,31 @@ export class SpriteEditor {
 
     const isVisible = this._isLayerVisible ?? (() => true);
 
-    // Try sprites first (if visible)
-    const sprInfo = isVisible(LAYER_OBJ) ? video.inspectSpriteAt(screenX, screenY, true) : null;
-    if (sprInfo) {
-      this._currentTile = {
-        layerId: LAYER_OBJ,
-        tileCode: sprInfo.tileCode,
-        rawCode: sprInfo.rawCode,
-        paletteIndex: sprInfo.paletteIndex,
-        gfxRomOffset: sprInfo.gfxRomOffset,
-        tileW: 16, tileH: 16,
-        charSize: CHAR_SIZE_16,
-        flipX: sprInfo.flipX,
-        flipY: sprInfo.flipY,
-        paletteBase,
-        spriteIndex: sprInfo.spriteIndex,
-        nx: sprInfo.nx, ny: sprInfo.ny,
-        nxs: sprInfo.nxs, nys: sprInfo.nys,
-      };
+    const makeSpriteCtx = (sprInfo: NonNullable<ReturnType<typeof video.inspectSpriteAt>>): TileContext => ({
+      layerId: LAYER_OBJ,
+      tileCode: sprInfo.tileCode,
+      rawCode: sprInfo.rawCode,
+      paletteIndex: sprInfo.paletteIndex,
+      gfxRomOffset: sprInfo.gfxRomOffset,
+      tileW: 16, tileH: 16,
+      charSize: CHAR_SIZE_16,
+      flipX: sprInfo.flipX,
+      flipY: sprInfo.flipY,
+      paletteBase,
+      spriteIndex: sprInfo.spriteIndex,
+      nx: sprInfo.nx, ny: sprInfo.ny,
+      nxs: sprInfo.nxs, nys: sprInfo.nys,
+    });
+
+    // Step 1: Try sprites — opaque pixels only
+    const sprOpaque = isVisible(LAYER_OBJ) ? video.inspectSpriteAt(screenX, screenY, false) : null;
+    if (sprOpaque) {
+      this._currentTile = makeSpriteCtx(sprOpaque);
       this.onTileChanged?.();
       return this._currentTile;
     }
 
-    // Try scroll layers (front-to-back based on layer order)
+    // Step 2: Try scroll layers (front-to-back based on layer order)
     const layerOrder = video.getLayerOrder();
     for (let slot = layerOrder.length - 1; slot >= 0; slot--) {
       const lid = layerOrder[slot]!;
@@ -169,6 +171,14 @@ export class SpriteEditor {
         this.onTileChanged?.();
         return this._currentTile;
       }
+    }
+
+    // Step 3: Fallback — sprite bounds only (transparent pixel)
+    const sprBounds = isVisible(LAYER_OBJ) ? video.inspectSpriteAt(screenX, screenY, true) : null;
+    if (sprBounds) {
+      this._currentTile = makeSpriteCtx(sprBounds);
+      this.onTileChanged?.();
+      return this._currentTile;
     }
 
     return null;
