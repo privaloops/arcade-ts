@@ -112,6 +112,7 @@ export class SpriteEditorUI {
   private lastPaintPos: { x: number; y: number } | null = null;
   private overlayRafId = 0;
   private gridLayers: Map<number, boolean> = new Map();
+  private hwLayerVisible: Map<number, boolean> = new Map();
   private _isInteractionBlocked: (() => boolean) | null = null;
   private _onHwLayerToggle: ((layerId: number, visible: boolean) => void) | null = null;
   private _onSpreadChange: ((value: number) => void) | null = null;
@@ -356,6 +357,7 @@ export class SpriteEditorUI {
         this.importPhoto(file);
       },
       onToggleHwLayer: (layerId, visible) => {
+        this.hwLayerVisible.set(layerId, visible);
         this._onHwLayerToggle?.(layerId, visible);
       },
       onToggleGrid: (layerId, visible) => {
@@ -380,8 +382,8 @@ export class SpriteEditorUI {
       grid: this.gridLayers,
       drawOrder,
     };
-    // Default all visible (we don't track this directly — the renderer does)
-    for (let i = 0; i < 4; i++) hwState.visible.set(i, true);
+    // Use tracked HW visibility (default to true if not yet toggled)
+    for (let i = 0; i < 4; i++) hwState.visible.set(i, this.hwLayerVisible.get(i) !== false);
 
     this.layerPanel?.refresh(this.layerGroups, this.activeGroupIndex, this.activeLayerIndex, gfxRom, hwState);
   }
@@ -426,16 +428,20 @@ export class SpriteEditorUI {
       const pos = this.screenCoordsFromEvent(e);
       if (!pos) return;
 
-      // Shift+click: select the topmost layer under cursor
+      // Shift+click: select the topmost layer under cursor (search ALL groups, world coords)
       if (e.shiftKey) {
-        const group = this.activeGroup;
-        if (group) {
-          // Search top-to-bottom (last layer = topmost)
+        for (let gi = this.layerGroups.length - 1; gi >= 0; gi--) {
+          const group = this.layerGroups[gi]!;
+          const sc = this.getGroupScroll(group);
+          // Convert screen pos to world pos for this group
+          const wx = pos.x + sc.sx;
+          const wy = pos.y + sc.sy;
           for (let i = group.layers.length - 1; i >= 0; i--) {
             const l = group.layers[i]!;
             if (!l.visible) continue;
-            if (pos.x >= l.offsetX && pos.x < l.offsetX + l.width
-                && pos.y >= l.offsetY && pos.y < l.offsetY + l.height) {
+            if (wx >= l.offsetX && wx < l.offsetX + l.width
+                && wy >= l.offsetY && wy < l.offsetY + l.height) {
+              this.activeGroupIndex = gi;
               this.activeLayerIndex = i;
               this.refreshLayerPanel();
               e.preventDefault();
@@ -450,6 +456,11 @@ export class SpriteEditorUI {
       const layer = this.activeLayer;
       if (!layer) return;
 
+      // Convert screen coords to world coords for the active group
+      const agScroll = this.activeGroup ? this.getGroupScroll(this.activeGroup) : { sx: 0, sy: 0 };
+      const wx = pos.x + agScroll.sx;
+      const wy = pos.y + agScroll.sy;
+
       // Check resize handles first (4 corners, tolerance of 5 game pixels)
       const ht = 5;
       const lx = layer.offsetX, ly = layer.offsetY;
@@ -459,37 +470,37 @@ export class SpriteEditorUI {
         ['bl', lx, ly + lh], ['br', lx + lw, ly + lh],
       ];
       for (const [corner, cx, cy] of corners) {
-        if (Math.abs(pos.x - cx) <= ht && Math.abs(pos.y - cy) <= ht) {
+        if (Math.abs(wx - cx) <= ht && Math.abs(wy - cy) <= ht) {
           this.resizingLayer = true;
           this.resizeCorner = corner;
           this.resizeStartW = lw;
           this.resizeStartH = lh;
-          this.resizeStartX = pos.x;
-          this.resizeStartY = pos.y;
+          this.resizeStartX = wx;
+          this.resizeStartY = wy;
           e.preventDefault();
           e.stopPropagation();
           return;
         }
       }
 
-      const inBounds = pos.x >= lx && pos.x < lx + lw && pos.y >= ly && pos.y < ly + lh;
+      const inBounds = wx >= lx && wx < lx + lw && wy >= ly && wy < ly + lh;
       if (!inBounds) return;
 
-      // Click on layer = drag to move
+      // Click on layer = drag to move (store world coords)
       this.draggingLayer = true;
-      this.dragLastX = pos.x;
-      this.dragLastY = pos.y;
+      this.dragLastX = wx;
+      this.dragLastY = wy;
       e.preventDefault();
       e.stopPropagation();
     });
     cvs.addEventListener('mouseup', () => {
-      if (this.resizingLayer) {
+      if (this.resizingLayer || this.draggingLayer) {
         this.resizingLayer = false;
-        this.refreshLayerPanel();
-      }
-      if (this.draggingLayer) {
         this.draggingLayer = false;
         this.refreshLayerPanel();
+        // Suppress the click event that follows mouseup to prevent group switch
+        // Use capture phase to fire before the existing boundOverlayClick handler
+        cvs.addEventListener('click', (ev) => { ev.stopImmediatePropagation(); ev.preventDefault(); }, { once: true, capture: true });
       }
     });
 
@@ -527,7 +538,13 @@ export class SpriteEditorUI {
     this.captureGallery = el('div', 'edit-analyzer-gallery') as HTMLDivElement;
     this.capturePanel.appendChild(this.captureGallery);
 
+    // Head/layer editor section (used by scroll layer photo import)
+    this.headSection = el('div', 'edit-head-section') as HTMLDivElement;
+    this.headSection.style.display = 'none';
+    this.capturePanel.appendChild(this.headSection);
+
     wrapper.appendChild(this.capturePanel);
+    this.setupDropZone();
   }
 
   private removeOverlay(): void {
@@ -622,15 +639,34 @@ export class SpriteEditorUI {
     return { x, y };
   }
 
+  /** Get scroll offset for a layer group. Scroll groups return world scroll; sprites return (0,0). */
+  private getGroupScroll(group: LayerGroup): { sx: number; sy: number } {
+    if (group.type === 'sprite' || group.layerId === undefined) return { sx: 0, sy: 0 };
+    const video = this.emulator.getVideo();
+    if (!video) return { sx: 0, sy: 0 };
+    const cpsaRegs = video.getCpsaRegs();
+    const regMap: Record<number, [number, number]> = {
+      [LAYER_SCROLL1]: [0x0C, 0x0E],
+      [LAYER_SCROLL2]: [0x10, 0x12],
+      [LAYER_SCROLL3]: [0x14, 0x16],
+    };
+    const regs = regMap[group.layerId];
+    if (!regs) return { sx: 0, sy: 0 };
+    const sx = (readWord(cpsaRegs, regs[0]) + 64) & 0xFFFF;
+    const sy = (readWord(cpsaRegs, regs[1]) + 16) & 0xFFFF;
+    return { sx, sy };
+  }
+
   private handleOverlayMove(e: MouseEvent): void {
     if (this._isInteractionBlocked?.()) return;
 
-    // Handle layer corner resize
+    // Handle layer corner resize (resizeStartX/Y are in world coords, deltas are the same)
     if (this.resizingLayer && this.activeLayer) {
       const pos = this.screenCoordsFromEvent(e);
       if (pos) {
-        const dx = pos.x - this.resizeStartX;
-        const dy = pos.y - this.resizeStartY;
+        const agScroll = this.activeGroup ? this.getGroupScroll(this.activeGroup) : { sx: 0, sy: 0 };
+        const dx = (pos.x + agScroll.sx) - this.resizeStartX;
+        const dy = (pos.y + agScroll.sy) - this.resizeStartY;
         // Use the larger delta to maintain aspect ratio
         const delta = Math.abs(dx) > Math.abs(dy) ? dx : dy;
         const sign = this.resizeCorner === 'tl' || this.resizeCorner === 'bl' ? -1 : 1;
@@ -661,14 +697,17 @@ export class SpriteEditorUI {
       return;
     }
 
-    // Handle layer dragging
+    // Handle layer dragging (world coords)
     if (this.draggingLayer && this.activeLayer) {
       const pos = this.screenCoordsFromEvent(e);
       if (pos) {
-        this.activeLayer.offsetX += pos.x - this.dragLastX;
-        this.activeLayer.offsetY += pos.y - this.dragLastY;
-        this.dragLastX = pos.x;
-        this.dragLastY = pos.y;
+        const agScroll = this.activeGroup ? this.getGroupScroll(this.activeGroup) : { sx: 0, sy: 0 };
+        const wx = pos.x + agScroll.sx;
+        const wy = pos.y + agScroll.sy;
+        this.activeLayer.offsetX += wx - this.dragLastX;
+        this.activeLayer.offsetY += wy - this.dragLastY;
+        this.dragLastX = wx;
+        this.dragLastY = wy;
       }
       return;
     }
@@ -702,6 +741,19 @@ export class SpriteEditorUI {
 
     const pos = this.screenCoordsFromEvent(e);
     if (!pos) return;
+
+    // If there's an active photo layer under the cursor, don't switch groups (world coords)
+    const layer = this.activeLayer;
+    if (layer) {
+      const agScroll = this.activeGroup ? this.getGroupScroll(this.activeGroup) : { sx: 0, sy: 0 };
+      const wx = pos.x + agScroll.sx;
+      const wy = pos.y + agScroll.sy;
+      if (wx >= layer.offsetX && wx < layer.offsetX + layer.width
+          && wy >= layer.offsetY && wy < layer.offsetY + layer.height) {
+        return;
+      }
+    }
+
     const info = this.editor.selectTileAt(pos.x, pos.y);
     if (info) {
       this.refreshTileGrid();
@@ -847,14 +899,17 @@ export class SpriteEditorUI {
           tmpCtx.putImageData(layer.rgbaData, 0, 0);
         }
 
-        // Draw on overlay at layer offset
+        // Draw on overlay at layer offset (world coords → screen coords for scroll groups)
+        const scroll = this.getGroupScroll(group);
+        const screenX = layer.offsetX - scroll.sx;
+        const screenY = layer.offsetY - scroll.sy;
         ctx.imageSmoothingEnabled = false;
-        ctx.drawImage(tmpCvs, layer.offsetX, layer.offsetY);
+        ctx.drawImage(tmpCvs, screenX, screenY);
 
         // Draw selection outline + resize handles for active layer
         if (layer === this.activeLayer) {
-          const lx = layer.offsetX;
-          const ly = layer.offsetY;
+          const lx = screenX;
+          const ly = screenY;
           const lw = layer.width;
           const lh = layer.height;
 
@@ -2355,14 +2410,16 @@ export class SpriteEditorUI {
 
       // Phase 1: Find which tilemap entries need private copies
       // (entries that have at least one non-transparent photo pixel)
+      // Layer offsets are in world coords — convert to screen for inspectScrollAt
+      const mergeScroll = this.getGroupScroll(group);
       const entriesToCopy = new Set<number>();
       for (const layer of group.layers) {
         if (!layer.quantized) continue;
         for (let ly = 0; ly < layer.height; ly++) {
           for (let lx = 0; lx < layer.width; lx++) {
             if (layer.pixels[ly * layer.width + lx] === 0) continue;
-            const sx = lx + layer.offsetX;
-            const sy = ly + layer.offsetY;
+            const sx = lx + layer.offsetX - mergeScroll.sx;
+            const sy = ly + layer.offsetY - mergeScroll.sy;
             if (sx < 0 || sx >= SCREEN_WIDTH || sy < 0 || sy >= SCREEN_HEIGHT) continue;
             const info = video.inspectScrollAt(sx, sy, group.layerId, true);
             if (info) entriesToCopy.add(info.tilemapOffset);
@@ -2419,8 +2476,8 @@ export class SpriteEditorUI {
           for (let lx = 0; lx < layer.width; lx++) {
             const idx = layer.pixels[ly * layer.width + lx]!;
             if (idx === 0) continue;
-            const sx = lx + layer.offsetX;
-            const sy = ly + layer.offsetY;
+            const sx = lx + layer.offsetX - mergeScroll.sx;
+            const sy = ly + layer.offsetY - mergeScroll.sy;
             if (sx < 0 || sx >= SCREEN_WIDTH || sy < 0 || sy >= SCREEN_HEIGHT) continue;
             const info = video.inspectScrollAt(sx, sy, group.layerId, true);
             if (!info) continue;
@@ -2712,11 +2769,13 @@ export class SpriteEditorUI {
     try {
       const rgba = await loadPhotoRgba(file, maxW, maxH);
 
+      // Position in world coords (screen center + scroll offset for scroll groups)
+      const scroll = this.getGroupScroll(group);
       const newLayer = createLayer(
         file.name,
         rgba,
-        Math.round((centerW - rgba.width) / 2),
-        Math.round((centerH - rgba.height) / 2),
+        Math.round((centerW - rgba.width) / 2) + scroll.sx,
+        Math.round((centerH - rgba.height) / 2) + scroll.sy,
       );
       group.layers.push(newLayer);
       this.activeLayerIndex = group.layers.length - 1;
