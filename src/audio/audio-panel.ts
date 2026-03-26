@@ -13,6 +13,7 @@ import { kcToNoteName, type VizReader } from "./audio-viz";
 import { parsePhraseTable, decodeSample, encodeSample, replaceSampleInRom, OKI_SAMPLE_RATE, type PhraseInfo } from "./oki-codec";
 import JSZip from "jszip";
 import type { Emulator } from "../emulator";
+import { showToast } from "../ui/toast";
 
 const FM_CHANNELS = 8;
 const OKI_VOICES = 4;
@@ -657,11 +658,7 @@ export class AudioPanel {
   }
 
   private showToast(message: string, success: boolean): void {
-    const toast = document.createElement("div");
-    toast.className = `smp-toast ${success ? "success" : "error"}`;
-    toast.textContent = message;
-    document.body.appendChild(toast);
-    setTimeout(() => toast.remove(), 3000);
+    showToast(message, success);
   }
 
   private selectFmChannel(ch: number): void {

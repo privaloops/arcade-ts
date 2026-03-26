@@ -19,6 +19,7 @@ import { TileAllocator, buildReverseMap, patchTilemapCode, patchTilemapPalette, 
 import { findTileReferences } from './tile-refs';
 import type { Emulator } from '../emulator';
 import { pencilCursor, fillCursor, eyedropperCursor, eraserCursor } from './tool-cursors';
+import { showToast } from '../ui/toast';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -2073,6 +2074,7 @@ export class SpriteEditorUI {
       this.activeSessions.set(palette, { poses: [], seenHashes: new Set<string>(), refTileCount: group.sprites.length });
       // Capture the initial pose(s)
       this.captureGroupsForPalette(video, palette);
+      showToast(`Recording sprite (palette ${palette})`, true);
     }
 
     this.refreshCapturesPanel();
@@ -2089,6 +2091,9 @@ export class SpriteEditorUI {
       const name = `Sprite #${this.captureCounter}`;
       this.layerGroups.push(createSpriteGroup(name, session.poses, palette));
       this.refreshLayerPanel();
+      showToast(`Captured ${session.poses.length} pose${session.poses.length !== 1 ? 's' : ''} → ${name}`, true);
+    } else {
+      showToast('No poses captured', false);
     }
 
     this.refreshCapturesPanel();
