@@ -128,6 +128,8 @@ function setupCPU(cpu: Z80, bus: TestBus, test: TestVector): void {
     enableInterruptsNext: false,
   });
   (cpu as unknown as { irqLineAsserted: boolean }).irqLineAsserted = false;
+  (cpu as unknown as { wz: number }).wz = init.wz;
+  (cpu as unknown as { q: number }).q = init.q;
 
   // Extract I/O read values from bus cycles (flags contain 'i' for I/O)
   if (test.cycles) {

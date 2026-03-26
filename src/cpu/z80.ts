@@ -142,6 +142,12 @@ export class Z80 {
   // the Z80 accepts it. Survives timer auto-clear unlike irqLineAsserted.
   private pendingIrq = false;
 
+  // Internal WZ/MEMPTR register (undocumented, affects BIT n,(HL) flags)
+  private wz = 0;
+
+  // Q register: tracks whether the last instruction modified F (for SCF/CCF undocumented flags)
+  private q = 0;
+
   private bus: Z80BusInterface;
 
   constructor(bus: Z80BusInterface) {
@@ -170,6 +176,8 @@ export class Z80 {
     this.enableInterruptsNext = false;
     this.irqLineAsserted = false;
     this.pendingIrq = false;
+    this.wz = 0;
+    this.q = 0;
   }
 
   /** Execute one instruction. Returns T-states consumed. */
@@ -919,9 +927,15 @@ export class Z80 {
       case 0x36: this.writeByte(this.getHL(), this.fetchByte()); return 10;
 
       // 0x37 — SCF
-      case 0x37:
-        this.f = (this.f & (F_S | F_Z | F_PV)) | F_C | (this.a & (F_3 | F_5));
+      case 0x37: {
+        // Undocumented: if Q (last instruction set flags), bits 3,5 come only from A
+        // Otherwise bits 3,5 = (old F | A) & (F_3 | F_5)
+        const prevF35 = this.q ? 0 : (this.f & (F_3 | F_5));
+        this.f = (this.f & (F_S | F_Z | F_PV)) | F_C |
+                 ((prevF35 | this.a) & (F_3 | F_5));
+        this.q = 1;
         return 4;
+      }
 
       // 0x38 — JR C,d
       case 0x38: {
@@ -949,11 +963,16 @@ export class Z80 {
       case 0x3E: this.a = this.fetchByte(); return 7;
 
       // 0x3F — CCF
-      case 0x3F:
+      case 0x3F: {
+        const prevF35 = this.q ? 0 : (this.f & (F_3 | F_5));
+        const oldC = this.f & F_C;
         this.f = (this.f & (F_S | F_Z | F_PV)) |
-                 ((this.f & F_C) ? F_H : F_C) |
-                 (this.a & (F_3 | F_5));
+                 (oldC ? F_H : 0) |
+                 (oldC ? 0 : F_C) |
+                 ((prevF35 | this.a) & (F_3 | F_5));
+        this.q = 1;
         return 4;
+      }
 
       // =====================================================================
       // 0x40-0x7F — LD r,r' (except 0x76 = HALT)
@@ -1407,7 +1426,7 @@ export class Z80 {
         this.f = (this.f & F_C) | F_H |
                  (result ? 0 : F_Z | F_PV) |
                  (result & F_S) |
-                 (isMemHL ? 0 : (val & (F_3 | F_5)));
+                 (isMemHL ? ((this.wz >> 8) & (F_3 | F_5)) : (val & (F_3 | F_5)));
         return bitCycles;
       }
 
@@ -1987,6 +2006,10 @@ export class Z80 {
                  ((n & 0x02) ? F_5 : 0);
         if (this.getBC() !== 0) {
           this.pc = (this.pc - 2) & 0xFFFF; // repeat
+          // Undocumented: repeat overrides bits 3,5 from PCH
+          this.f = (this.f & ~(F_3 | F_5)) |
+                   (((this.pc >> 8) & F_3)) |
+                   (((this.pc >> 8) & F_5));
           return 21;
         }
         return 16;
@@ -2021,6 +2044,9 @@ export class Z80 {
                  ((n & 0x02) ? F_5 : 0);
         if (this.getBC() !== 0) {
           this.pc = (this.pc - 2) & 0xFFFF;
+          // Undocumented: repeat overrides bits 3,5 from PCH
+          this.f = (this.f & ~(F_3 | F_5)) |
+                   ((this.pc >> 8) & (F_3 | F_5));
           return 21;
         }
         return 16;
@@ -2061,6 +2087,9 @@ export class Z80 {
                  ((n & 0x02) ? F_5 : 0);
         if (this.getBC() !== 0 && result !== 0) {
           this.pc = (this.pc - 2) & 0xFFFF;
+          // Undocumented: repeat overrides bits 3,5 from PCH
+          this.f = (this.f & ~(F_3 | F_5)) |
+                   ((this.pc >> 8) & (F_3 | F_5));
           return 21;
         }
         return 16;
@@ -2101,6 +2130,9 @@ export class Z80 {
                  ((n & 0x02) ? F_5 : 0);
         if (this.getBC() !== 0 && result !== 0) {
           this.pc = (this.pc - 2) & 0xFFFF;
+          // Undocumented: repeat overrides bits 3,5 from PCH
+          this.f = (this.f & ~(F_3 | F_5)) |
+                   ((this.pc >> 8) & (F_3 | F_5));
           return 21;
         }
         return 16;
@@ -2133,14 +2165,19 @@ export class Z80 {
         this.b = (this.b - 1) & 0xFF;
         this.setHL((this.getHL() + 1) & 0xFFFF);
         const k = val + ((this.c + 1) & 0xFF);
+        const cf = k > 255 ? 1 : 0;
+        const nf = (val & 0x80) ? 1 : 0;
         this.f = (this.b === 0 ? F_Z : 0) |
                  (this.b & F_S) |
                  (this.b & (F_3 | F_5)) |
-                 ((val & 0x80) ? F_N : 0) |
+                 (nf ? F_N : 0) |
                  (parityTable[(k & 7) ^ this.b]! ? F_PV : 0) |
-                 (k > 255 ? F_C | F_H : 0);
+                 (cf ? F_C | F_H : 0);
         if (this.b !== 0) {
           this.pc = (this.pc - 2) & 0xFFFF;
+          // Undocumented: repeat overrides bits 3,5 from PCH and recalculates PV/H
+          this.f = (this.f & ~(F_3 | F_5)) | ((this.pc >> 8) & (F_3 | F_5));
+          this.adjustRepeatIOFlags(cf, nf);
           return 21;
         }
         return 16;
@@ -2169,14 +2206,19 @@ export class Z80 {
         this.b = (this.b - 1) & 0xFF;
         this.setHL((this.getHL() - 1) & 0xFFFF);
         const k = val + ((this.c - 1) & 0xFF);
+        const cf = k > 255 ? 1 : 0;
+        const nf = (val & 0x80) ? 1 : 0;
         this.f = (this.b === 0 ? F_Z : 0) |
                  (this.b & F_S) |
                  (this.b & (F_3 | F_5)) |
-                 ((val & 0x80) ? F_N : 0) |
+                 (nf ? F_N : 0) |
                  (parityTable[(k & 7) ^ this.b]! ? F_PV : 0) |
-                 (k > 255 ? F_C | F_H : 0);
+                 (cf ? F_C | F_H : 0);
         if (this.b !== 0) {
           this.pc = (this.pc - 2) & 0xFFFF;
+          // Undocumented: repeat overrides bits 3,5 from PCH and recalculates PV/H
+          this.f = (this.f & ~(F_3 | F_5)) | ((this.pc >> 8) & (F_3 | F_5));
+          this.adjustRepeatIOFlags(cf, nf);
           return 21;
         }
         return 16;
@@ -2205,14 +2247,19 @@ export class Z80 {
         this.bus.ioWrite(this.getBC(), val);
         this.setHL((this.getHL() + 1) & 0xFFFF);
         const k = val + this.l;
+        const cf = k > 255 ? 1 : 0;
+        const nf = (val & 0x80) ? 1 : 0;
         this.f = (this.b === 0 ? F_Z : 0) |
                  (this.b & F_S) |
                  (this.b & (F_3 | F_5)) |
-                 ((val & 0x80) ? F_N : 0) |
+                 (nf ? F_N : 0) |
                  (parityTable[(k & 7) ^ this.b]! ? F_PV : 0) |
-                 (k > 255 ? F_C | F_H : 0);
+                 (cf ? F_C | F_H : 0);
         if (this.b !== 0) {
           this.pc = (this.pc - 2) & 0xFFFF;
+          // Undocumented: repeat overrides bits 3,5 from PCH and recalculates PV/H
+          this.f = (this.f & ~(F_3 | F_5)) | ((this.pc >> 8) & (F_3 | F_5));
+          this.adjustRepeatIOFlags(cf, nf);
           return 21;
         }
         return 16;
@@ -2241,14 +2288,19 @@ export class Z80 {
         this.bus.ioWrite(this.getBC(), val);
         this.setHL((this.getHL() - 1) & 0xFFFF);
         const k = val + this.l;
+        const cf = k > 255 ? 1 : 0;
+        const nf = (val & 0x80) ? 1 : 0;
         this.f = (this.b === 0 ? F_Z : 0) |
                  (this.b & F_S) |
                  (this.b & (F_3 | F_5)) |
-                 ((val & 0x80) ? F_N : 0) |
+                 (nf ? F_N : 0) |
                  (parityTable[(k & 7) ^ this.b]! ? F_PV : 0) |
-                 (k > 255 ? F_C | F_H : 0);
+                 (cf ? F_C | F_H : 0);
         if (this.b !== 0) {
           this.pc = (this.pc - 2) & 0xFFFF;
+          // Undocumented: repeat overrides bits 3,5 from PCH and recalculates PV/H
+          this.f = (this.f & ~(F_3 | F_5)) | ((this.pc >> 8) & (F_3 | F_5));
+          this.adjustRepeatIOFlags(cf, nf);
           return 21;
         }
         return 16;
@@ -2257,6 +2309,32 @@ export class Z80 {
       default:
         // All undefined ED opcodes are NOPs (8 T-states: 4 for ED prefix + 4 for opcode)
         return 8;
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Helper: Adjust PV and H flags for repeat I/O block instructions
+  // When INIR/INDR/OTIR/OTDR repeat (B != 0), the PV and H flags are
+  // recalculated based on the carry and sign of the transferred byte.
+  // Reference: ares-emulator Z80 implementation
+  // -------------------------------------------------------------------------
+
+  private adjustRepeatIOFlags(cf: number, nf: number): void {
+    const pv = (this.f & F_PV) ? 1 : 0;
+    if (cf && nf) {
+      // CF set, N set: PV = PV XNOR parity((B-1) & 7), H = (B & 0xF) == 0
+      this.f = (this.f & ~(F_PV | F_H)) |
+               ((pv === (parityTable[((this.b - 1) & 0xFF) & 7]! ? 1 : 0)) ? F_PV : 0) |
+               ((this.b & 0x0F) === 0 ? F_H : 0);
+    } else if (cf && !nf) {
+      // CF set, N clear: PV = PV XNOR parity((B+1) & 7), H = (B & 0xF) == 0xF
+      this.f = (this.f & ~(F_PV | F_H)) |
+               ((pv === (parityTable[((this.b + 1) & 0xFF) & 7]! ? 1 : 0)) ? F_PV : 0) |
+               ((this.b & 0x0F) === 0x0F ? F_H : 0);
+    } else {
+      // CF clear: PV = PV XNOR parity(B & 7), H unchanged (but was set to CF=0 so H=0)
+      this.f = (this.f & ~F_PV) |
+               ((pv === (parityTable[this.b & 7]! ? 1 : 0)) ? F_PV : 0);
     }
   }
 
