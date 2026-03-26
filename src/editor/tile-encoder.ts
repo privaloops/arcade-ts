@@ -81,6 +81,57 @@ export function writePixel(
 }
 
 /**
+ * Write a pixel in a scroll tile, handling the scroll1 interleave quirk.
+ * For scroll1 (8x8 tiles, charSize=64), tiles are stored in pairs:
+ * odd columns (tileIndex & 0x20) use a +4 byte offset within each row.
+ */
+export function writeScrollPixel(
+  graphicsRom: Uint8Array,
+  tileCode: number,
+  localX: number,
+  localY: number,
+  colorIndex: number,
+  charSize: number,
+  tileIndex: number,
+  isScroll1: boolean,
+): void {
+  const rowStride = charSize >= 512 ? ROW_STRIDE_32 : ROW_STRIDE_8;
+  const tileOffset = tileCode * charSize;
+
+  // For scroll1: the 4-byte group offset depends on tileIndex, not localX
+  // For scroll2/3: same as writePixel
+  const groupOffset = isScroll1
+    ? ((tileIndex & 0x20) >> 5) * 4
+    : ((localX >> 3) * 4);
+
+  const groupBase = tileOffset + localY * rowStride + groupOffset;
+  if (groupBase + 3 >= graphicsRom.length) return;
+
+  const pixels = new Uint8Array(8);
+  const b0 = graphicsRom[groupBase]!;
+  const b1 = graphicsRom[groupBase + 1]!;
+  const b2 = graphicsRom[groupBase + 2]!;
+  const b3 = graphicsRom[groupBase + 3]!;
+
+  for (let p = 0; p < 8; p++) {
+    const bit = 7 - p;
+    pixels[p] = ((b0 >> bit) & 1)
+              | (((b1 >> bit) & 1) << 1)
+              | (((b2 >> bit) & 1) << 2)
+              | (((b3 >> bit) & 1) << 3);
+  }
+
+  const pixelInGroup = localX & 7;
+  pixels[pixelInGroup] = colorIndex & 0x0F;
+
+  const [nb0, nb1, nb2, nb3] = encodeRow(pixels, 0);
+  graphicsRom[groupBase] = nb0;
+  graphicsRom[groupBase + 1] = nb1;
+  graphicsRom[groupBase + 2] = nb2;
+  graphicsRom[groupBase + 3] = nb3;
+}
+
+/**
  * Read a single pixel from a 16x16 tile in the GFX ROM.
  */
 export function readPixel(

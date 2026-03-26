@@ -81,6 +81,14 @@
 - [x] **FM Patch Editor** — Voice read/write + macro UI done, real-time playback deferred (Z80 conflict). Code in `fm-patch-editor.ts` + `cps1-sound-driver.ts`, Synth tab hidden ([#20](https://github.com/privaloops/arcade-ts/issues/20))
 - [ ] **FM real-time preview** — Requires Z80 music sequencer reverse-engineering to avoid TL/volume conflicts
 - [ ] **Mute/Solo ROM export** — Requires reverse-engineering CPS1 music sequence format (note commands per-track)
+- [x] **Sprite Analyzer** — Character grouping (palette + proximity), contour rouge, tracking, capture poses gameplay, galerie
+- [x] **Photo Import (calque)** — Drop photo → calque RGBA, resize bilinéaire, Atkinson dithering (image-q), déplacement/resize, merge
+- [x] **Multi-calques + panneau gauche** — LayerGroup par layer CPS1, panneau gauche avec visibility/quantize/delete/merge
+- [x] **Tile allocator + GFX ROM expansion** — Allocation de tiles privés pour scroll merge, expansion dynamique ROM, reverse bank mapper
+- [ ] **Custom palette par tile (Plan B)** — Pour les tiles partiellement couverts par une photo sur scroll: calculer une palette optimale de 15 couleurs via median cut qui représente au mieux le mix photo+original. Élimine les artefacts de re-quantization aux bords.
+- [ ] **Recoloration costume** — Palette swap pour changer la couleur des vêtements. Détection de famille de couleurs (même teinte, luminosités différentes), recalcul préservant les rapports de luminosité.
+- [ ] **Déformation faciale (Face Mesh)** — MediaPipe Face Mesh pour générer des variantes de la photo importée (bouche ouverte, yeux plissés) adaptées à chaque pose du sprite
+- [ ] **Mobile Photo Booth** — QR code + caméra mobile + Vercel KV relay pour capturer une photo et l'envoyer au desktop
 
 ### YM2151 Sequencer (browser-first, world's first)
 

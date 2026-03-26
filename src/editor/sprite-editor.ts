@@ -370,6 +370,50 @@ export class SpriteEditor {
     return readTile(gfxRom, tileCode, tileW, tileH, charSize);
   }
 
+  // -- Full sprite (all sub-tiles) --
+
+  /**
+   * Return tile codes and pixels for every sub-tile of the current multi-tile sprite.
+   * Uses the same layout formula as selectNeighborTile().
+   */
+  getFullSpriteTileCodes(): number[] | null {
+    if (!this._currentTile || this._currentTile.layerId !== LAYER_OBJ) return null;
+    const tile = this._currentTile;
+    const nx = tile.nx ?? 1;
+    const ny = tile.ny ?? 1;
+
+    const video = this.emulator.getVideo();
+    if (!video) return null;
+
+    const mappedBaseCode = gfxromBankMapper(
+      GFXTYPE_SPRITES, tile.rawCode,
+      video.getMapperTable(), video.getBankSizes(), video.getBankBases(),
+    );
+    if (mappedBaseCode === -1) return null;
+
+    const tileCodes: number[] = [];
+    for (let nys = 0; nys < ny; nys++) {
+      for (let nxs = 0; nxs < nx; nxs++) {
+        let tileCode: number;
+        if (tile.flipY) {
+          if (tile.flipX) {
+            tileCode = (mappedBaseCode & ~0x0F) + ((mappedBaseCode + (nx - 1) - nxs) & 0x0F) + 0x10 * (ny - 1 - nys);
+          } else {
+            tileCode = (mappedBaseCode & ~0x0F) + ((mappedBaseCode + nxs) & 0x0F) + 0x10 * (ny - 1 - nys);
+          }
+        } else {
+          if (tile.flipX) {
+            tileCode = (mappedBaseCode & ~0x0F) + ((mappedBaseCode + (nx - 1) - nxs) & 0x0F) + 0x10 * nys;
+          } else {
+            tileCode = (mappedBaseCode & ~0x0F) + ((mappedBaseCode + nxs) & 0x0F) + 0x10 * nys;
+          }
+        }
+        tileCodes.push(tileCode);
+      }
+    }
+    return tileCodes;
+  }
+
   // -- Frame stepping --
 
   stepFrames(count: number): void {

@@ -197,6 +197,23 @@ export class DebugPanel {
       this.emulator.stepFrame();
     });
 
+    // ── Sprite Editor (open by default, first section) ──
+    {
+      const [sec, content] = collapsibleSection("Sprite Editor",
+        "Click on a sprite in the game to select its tile.\n" +
+        "Paint pixels with pencil, fill, eraser tools.\n" +
+        "Changes are written directly to the GFX ROM and visible immediately.\n\n" +
+        "Shortcuts: B=pencil, G=fill, I=eyedropper, X=eraser, [/]=colors", true);
+
+      this.spriteEditorUI = new SpriteEditorUI(this.emulator, this.canvas);
+      this.spriteEditorUI.getEditor().setLayerVisibilityFilter((id) => this.renderer.isLayerEnabled(id));
+      this.spriteEditorUI.setInteractionBlocker(() => this.renderer.isExplodedActive());
+      this.spriteEditorUI.setGridLayers(this.gridEnabled);
+      this.spriteEditorUI.buildInto(content);
+
+      c.appendChild(sec);
+    }
+
     // ── Layers (open by default) ──
     {
       const [sec, content] = collapsibleSection("Layers",
@@ -356,23 +373,6 @@ export class DebugPanel {
       this.inspectorInfo = el("div", "dbg-inspector-info") as HTMLDivElement;
       this.inspectorInfo.textContent = "No pixel selected";
       content.appendChild(this.inspectorInfo);
-
-      c.appendChild(sec);
-    }
-
-    // ── Sprite Editor (open by default) ──
-    {
-      const [sec, content] = collapsibleSection("Sprite Editor",
-        "Click on a sprite in the game to select its tile.\n" +
-        "Paint pixels with pencil, fill, eraser tools.\n" +
-        "Changes are written directly to the GFX ROM and visible immediately.\n\n" +
-        "Shortcuts: B=pencil, G=fill, I=eyedropper, X=eraser, [/]=colors", true);
-
-      this.spriteEditorUI = new SpriteEditorUI(this.emulator, this.canvas);
-      this.spriteEditorUI.getEditor().setLayerVisibilityFilter((id) => this.renderer.isLayerEnabled(id));
-      this.spriteEditorUI.setInteractionBlocker(() => this.renderer.isExplodedActive());
-      this.spriteEditorUI.setGridLayers(this.gridEnabled);
-      this.spriteEditorUI.buildInto(content);
 
       c.appendChild(sec);
     }
