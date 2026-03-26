@@ -575,7 +575,8 @@
       .dbg-close:hover { border-color: var(--color-accent); color: var(--color-accent); }
 
       .header-frame-counter {
-        font: 0.65rem "Courier New", monospace; color: var(--color-text-dim); margin-left: 4px;
+        font: 0.65rem "Courier New", monospace; color: var(--color-text-dim);
+        margin-left: 4px; display: inline-flex; align-items: center; line-height: 1;
       }
 
       .dbg-section-title {

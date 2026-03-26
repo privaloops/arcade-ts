@@ -110,19 +110,26 @@ export function initShortcuts(deps: ShortcutsDeps): void {
       return;
     }
 
-    // Function key shortcuts (only when game is active and no modal open)
-    if (!emulator.isRunning() && !emulator.isPaused()) return;
+    // Function key shortcuts (modals block all)
     if (isCtrlModalOpen() || isSsModalOpen()) return;
+
+    // F2/F3: toggle panels (always available, even without ROM)
+    if (e.code === "F2") {
+      e.preventDefault();
+      toggleDebug();
+      return;
+    } else if (e.code === "F3") {
+      e.preventDefault();
+      toggleAudio();
+      return;
+    }
+
+    // Remaining shortcuts require a game running or paused
+    if (!emulator.isRunning() && !emulator.isPaused()) return;
 
     if (e.code === "F1") {
       e.preventDefault();
       openControlsModal();
-    } else if (e.code === "F2") {
-      e.preventDefault();
-      toggleDebug();
-    } else if (e.code === "F3") {
-      e.preventDefault();
-      toggleAudio();
     } else if (e.code === "F4") {
       e.preventDefault();
       toggleSynth();

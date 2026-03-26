@@ -531,7 +531,7 @@ export class DebugPanel {
 
       // Update frame counter every 10 frames
       if (tick % 10 === 0 && this.frameCounter) {
-        this.frameCounter.textContent = `Frame: ${this.emulator.getFrameCount()}`;
+        this.frameCounter.textContent = `Frame: ${this.emulator.getFrameCount()} | ${this.emulator.getFpsDisplay()} FPS`;
       }
 
       // Update draw order every 30 frames
