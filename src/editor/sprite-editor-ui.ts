@@ -219,6 +219,12 @@ export class SpriteEditorUI {
     this.resetBtn.onclick = () => { this.editor.resetTile(); this.refreshUndoButtons(); };
     actions.appendChild(this.resetBtn);
 
+    const importImgBtn = el('button', 'ctrl-btn') as HTMLButtonElement;
+    importImgBtn.innerHTML = '\u{1F4E5} Import';
+    importImgBtn.title = 'Import image onto this tile';
+    importImgBtn.onclick = () => this.importImageOnCurrentTile();
+    actions.appendChild(importImgBtn);
+
     container.appendChild(actions);
     this.refreshUndoButtons();
 
@@ -1684,11 +1690,6 @@ export class SpriteEditorUI {
     exportBtn.onclick = () => this.exportPosePng();
     header.appendChild(exportBtn);
 
-    const importBtn = el('button', 'sprite-sheet-back') as HTMLButtonElement;
-    importBtn.textContent = 'Import PNG';
-    importBtn.onclick = () => this.importPosePng();
-    header.appendChild(importBtn);
-
     const backBtn = el('button', 'sprite-sheet-back') as HTMLButtonElement;
     backBtn.textContent = 'Close';
     backBtn.onclick = () => this.exitSpriteSheetMode();
@@ -1880,7 +1881,8 @@ export class SpriteEditorUI {
 
       // Shared badge
       const refs = findTileReferences(t.mappedCode, objBuf, vram, cpsaRegs, mapperTable, bankSizes, bankBases);
-      if (refs.length > 1) {
+      const isShared = refs.length > 1;
+      if (isShared) {
         const badge = el('div', 'sprite-sheet-tile-shared') as HTMLDivElement;
         badge.textContent = `×${refs.length}`;
         badge.title = `Shared: ${refs.length} references`;
@@ -1986,21 +1988,27 @@ export class SpriteEditorUI {
   }
 
   /** Import a PNG and write it into the GFX ROM tiles of the selected pose. */
-  private importPosePng(): void {
+  /** Import PNG onto a single tile. If image is larger than 16x16, crop from center. */
+  private importTilePng(tileIndex: number, isShared: boolean): void {
+    if (isShared) {
+      showToast('Warning: this tile is shared — editing affects other sprites', false);
+    }
+
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = 'image/png';
+    input.accept = 'image/png,image/jpeg,image/webp';
     input.onchange = () => {
       const file = input.files?.[0];
-      if (file) this.processImportPng(file);
+      if (file) this.processImportTilePng(file, tileIndex);
     };
     input.click();
   }
 
-  private async processImportPng(file: File): Promise<void> {
-    const poses = this.activePoses;
-    const pose = poses[this.sheetSelectedPose];
+  private async processImportTilePng(file: File, tileIndex: number): Promise<void> {
+    const pose = this.activePoses[this.sheetSelectedPose];
     if (!pose) return;
+    const tile = pose.tiles[tileIndex];
+    if (!tile) return;
 
     const gfxRom = this.editor.getGfxRom();
     if (!gfxRom) return;
@@ -2028,15 +2036,105 @@ export class SpriteEditorUI {
     ctx.drawImage(img, 0, 0);
     const imgData = ctx.getImageData(0, 0, img.width, img.height);
 
-    // For each tile in the pose, read the corresponding region from the image
-    // and quantize each pixel to the nearest palette color, then write to GFX ROM
-    for (const tile of pose.tiles) {
+    // If image is larger than 16x16, crop from center
+    const ox = Math.max(0, Math.floor((img.width - 16) / 2));
+    const oy = Math.max(0, Math.floor((img.height - 16) / 2));
+
+    // Write pixels to this single tile
+    for (let ty = 0; ty < 16; ty++) {
+      for (let tx = 0; tx < 16; tx++) {
+        const imgX = ox + tx;
+        const imgY = oy + ty;
+        if (imgX >= img.width || imgY >= img.height) continue;
+
+        const si = (imgY * img.width + imgX) * 4;
+        const r = imgData.data[si]!;
+        const g = imgData.data[si + 1]!;
+        const b = imgData.data[si + 2]!;
+        const a = imgData.data[si + 3]!;
+
+        const romX = tile.flipX ? 15 - tx : tx;
+        const romY = tile.flipY ? 15 - ty : ty;
+
+        // Transparent pixel → pen 15
+        if (a < 128) {
+          writePixelFn(gfxRom, tile.mappedCode, romX, romY, 15);
+          continue;
+        }
+
+        // Find nearest palette color (skip pen 15 = transparent)
+        let bestIdx = 0;
+        let bestDist = Infinity;
+        for (let c = 0; c < 15; c++) {
+          const [pr, pg, pb] = palette[c] ?? [0, 0, 0];
+          const dist = (r - pr) ** 2 + (g - pg) ** 2 + (b - pb) ** 2;
+          if (dist < bestDist) { bestDist = dist; bestIdx = c; }
+        }
+
+        writePixelFn(gfxRom, tile.mappedCode, romX, romY, bestIdx);
+      }
+    }
+
+    showToast('Tile imported', true);
+    this.refreshSheetAfterEdit();
+    this.emulator.rerender();
+  }
+
+  /** Import image onto the currently selected tile in the main editor. */
+  private importImageOnCurrentTile(): void {
+    const tile = this.editor.currentTile;
+    if (!tile) { showToast('No tile selected', false); return; }
+
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/png,image/jpeg,image/webp';
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+
+      const gfxRom = this.editor.getGfxRom();
+      if (!gfxRom) return;
+      const video = this.emulator.getVideo();
+      if (!video) return;
+      const bufs = this.emulator.getBusBuffers();
+
+      // Get palette for this tile
+      const paletteIdx = tile.paletteIndex;
+      const palette = readPalette(bufs.vram, video.getPaletteBase(), paletteIdx);
+
+      // Check shared
+      const objBuf = video.getObjBuffer();
+      const refs = findTileReferences(tile.tileCode, objBuf, bufs.vram, video.getCpsaRegs(), video.getMapperTable(), video.getBankSizes(), video.getBankBases());
+      if (refs.length > 1) {
+        showToast(`Warning: tile shared (×${refs.length}) — editing affects other sprites`, false);
+      }
+
+      // Load image
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error('Failed to load image'));
+        img.src = url;
+      });
+      URL.revokeObjectURL(url);
+
+      const cvs = document.createElement('canvas');
+      cvs.width = img.width;
+      cvs.height = img.height;
+      const ctx = cvs.getContext('2d')!;
+      ctx.drawImage(img, 0, 0);
+      const imgData = ctx.getImageData(0, 0, img.width, img.height);
+
+      // Crop from center if larger than 16x16
+      const ox = Math.max(0, Math.floor((img.width - 16) / 2));
+      const oy = Math.max(0, Math.floor((img.height - 16) / 2));
+
       for (let ty = 0; ty < 16; ty++) {
         for (let tx = 0; tx < 16; tx++) {
-          // Image coords (account for tile flip — write to ROM in unflipped order)
-          const imgX = tile.relX + tx;
-          const imgY = tile.relY + ty;
-          if (imgX < 0 || imgX >= img.width || imgY < 0 || imgY >= img.height) continue;
+          const imgX = ox + tx;
+          const imgY = oy + ty;
+          if (imgX >= img.width || imgY >= img.height) continue;
 
           const si = (imgY * img.width + imgX) * 4;
           const r = imgData.data[si]!;
@@ -2044,15 +2142,11 @@ export class SpriteEditorUI {
           const b = imgData.data[si + 2]!;
           const a = imgData.data[si + 3]!;
 
-          // Transparent pixel → pen 15
           if (a < 128) {
-            const romX = tile.flipX ? 15 - tx : tx;
-            const romY = tile.flipY ? 15 - ty : ty;
-            writePixelFn(gfxRom, tile.mappedCode, romX, romY, 15);
+            writePixelFn(gfxRom, tile.tileCode, tx, ty, 15);
             continue;
           }
 
-          // Find nearest palette color (skip pen 15 = transparent)
           let bestIdx = 0;
           let bestDist = Infinity;
           for (let c = 0; c < 15; c++) {
@@ -2061,16 +2155,15 @@ export class SpriteEditorUI {
             if (dist < bestDist) { bestDist = dist; bestIdx = c; }
           }
 
-          const romX = tile.flipX ? 15 - tx : tx;
-          const romY = tile.flipY ? 15 - ty : ty;
-          writePixelFn(gfxRom, tile.mappedCode, romX, romY, bestIdx);
+          writePixelFn(gfxRom, tile.tileCode, tx, ty, bestIdx);
         }
       }
-    }
 
-    // Refresh everything
-    this.refreshSheetAfterEdit();
-    this.emulator.rerender();
+      showToast('Tile imported', true);
+      this.refreshTileGrid();
+      this.emulator.rerender();
+    };
+    input.click();
   }
 
   // -- Sprite Analyzer --
