@@ -29,6 +29,14 @@ function romsListPlugin(): Plugin {
 }
 
 export default defineConfig({
+  test: {
+    exclude: [
+      '**/node_modules/**',
+      '**/dist/**',
+      '.claude/**',
+      'tests/e2e/**',
+    ],
+  },
   root: ".",
   publicDir: "public",
   build: {
