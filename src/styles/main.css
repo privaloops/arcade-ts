@@ -1297,3 +1297,32 @@
         cursor: pointer;
       }
       .sprite-sheet-back:hover { background: var(--color-surface-hover, #333); }
+
+      /* Captured Sprites section (inside right debug panel) */
+      .edit-captures-section { margin-top: 12px; }
+      .edit-captures-list { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; max-height: 300px; overflow-y: auto; }
+
+      .edit-capture-card {
+        display: flex; align-items: center; gap: 8px; padding: 6px;
+        background: var(--color-surface); border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm); cursor: pointer; transition: border-color 0.15s;
+      }
+      .edit-capture-card:hover { border-color: var(--color-accent); }
+      .edit-capture-card.edit-capture-active { border-color: #ff324a; animation: capture-pulse 1.5s ease-in-out infinite; }
+      @keyframes capture-pulse { 0%, 100% { border-color: #ff324a; } 50% { border-color: #ff324a80; } }
+
+      .edit-capture-thumb {
+        width: 48px; height: 48px; object-fit: contain;
+        image-rendering: pixelated;
+        background: repeating-conic-gradient(#222 0% 25%, #1a1a1a 0% 50%) 50% / 4px 4px;
+        border-radius: 2px; flex-shrink: 0;
+      }
+
+      .edit-capture-info { flex: 1; min-width: 0; }
+      .edit-capture-name {
+        font: 600 0.7rem var(--font-system); color: var(--color-text);
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      }
+      .edit-capture-count { font: 0.6rem var(--font-system); color: var(--color-text-dim); margin-top: 2px; }
+      .edit-capture-hint { font: 0.6rem var(--font-system); color: var(--color-text-dim); margin-bottom: 4px; }
+      .edit-capture-empty { font: 0.65rem var(--font-system); color: var(--color-text-dim); text-align: center; padding: 12px 0; }

@@ -9,7 +9,7 @@
 import { SpriteEditor, type EditorTool } from './sprite-editor';
 import { SCREEN_WIDTH, SCREEN_HEIGHT } from '../constants';
 import { LAYER_OBJ, LAYER_SCROLL1, LAYER_SCROLL2, LAYER_SCROLL3, GFXTYPE_SCROLL1, GFXTYPE_SCROLL2, GFXTYPE_SCROLL3, readWord, type CPS1Video } from '../video/cps1-video';
-import { readAllSprites, groupCharacter, trackCharacter, poseHash, capturePose, assembleCharacter, type SpriteGroup as SpriteGroupData, type CapturedPose } from './sprite-analyzer';
+import { readAllSprites, groupCharacter, poseHash, capturePose, assembleCharacter, type SpriteGroup as SpriteGroupData, type CapturedPose } from './sprite-analyzer';
 import { loadPhotoRgba, resizeRgba, quantizeWithDithering, placePhotoOnTiles } from './photo-import';
 import { readPixel as readPixelFn, writePixel as writePixelFn, writeScrollPixel, readTile as readTileFn } from './tile-encoder';
 import { readPalette } from './palette-editor';
@@ -62,20 +62,16 @@ export class SpriteEditorUI {
   private redoBtn: HTMLButtonElement | null = null;
   private resetBtn: HTMLButtonElement | null = null;
   private neighborGrid: HTMLDivElement | null = null;
-  private captureBtn: HTMLButtonElement | null = null;
-  private editSpritesBtn: HTMLButtonElement | null = null;
   private capturePanel: HTMLDivElement | null = null;
   private captureGallery: HTMLDivElement | null = null;
   private captureStatus: HTMLDivElement | null = null;
-
-  // Capture state
-  private capturing = false;
-  private capturedPoses: CapturedPose[] = [];
+  private capturesSection: HTMLDivElement | null = null;
+  private capturesList: HTMLDivElement | null = null;
   private selectedPoseIndex = 0;
-  private captureSeenHashes = new Set<string>();
-  private capturePalette = -1;
-  private captureCenterX = 0;
-  private captureCenterY = 0;
+
+  // Capture state — multiple simultaneous captures keyed by palette
+  private activeSessions = new Map<number, { poses: CapturedPose[]; seenHashes: Set<string>; refTileCount: number }>();
+  private captureCounter = 0;
 
   // Head editor
   private headSection: HTMLDivElement | null = null;
@@ -108,6 +104,7 @@ export class SpriteEditorUI {
   private sheetSelectedTile = -1;
   private sheetZoomCanvas: HTMLCanvasElement | null = null;
   private sheetZoomCtx: CanvasRenderingContext2D | null = null;
+  private wasPausedBeforeSheet = false;
 
   private get activeGroup(): LayerGroup | undefined { return this.layerGroups[this.activeGroupIndex]; }
   private get activeLayer(): PhotoLayer | undefined { return this.activeGroup?.layers[this.activeLayerIndex]; }
@@ -223,6 +220,18 @@ export class SpriteEditorUI {
 
     container.appendChild(actions);
     this.refreshUndoButtons();
+
+    // Captured sprites section
+    this.capturesSection = el('div', 'edit-captures-section') as HTMLDivElement;
+    const capturesLabel = el('div', 'edit-section-label');
+    capturesLabel.textContent = 'Captured Sprites';
+    this.capturesSection.appendChild(capturesLabel);
+    const capturesHint = el('div', 'edit-capture-hint') as HTMLDivElement;
+    capturesHint.textContent = 'Shift+click a sprite to capture';
+    this.capturesSection.appendChild(capturesHint);
+    this.capturesList = el('div', 'edit-captures-list') as HTMLDivElement;
+    this.capturesSection.appendChild(this.capturesList);
+    container.appendChild(this.capturesSection);
   }
 
   toggle(): void {
@@ -275,6 +284,7 @@ export class SpriteEditorUI {
     this.ensureLayerPanel();
     this.layerPanel?.show();
     this.refreshLayerPanel();
+    this.refreshCapturesPanel();
   }
 
   deactivate(): void {
@@ -295,15 +305,7 @@ export class SpriteEditorUI {
       createScrollGroup('Scroll 2', LAYER_SCROLL2),
       createScrollGroup('Scroll 3', LAYER_SCROLL3),
     );
-    // Sprites (OBJ) group is added dynamically via capture
-    // But add a placeholder so it shows in the panel
-    if (!this.layerGroups.some(g => g.type === 'sprite')) {
-      this.layerGroups.push({
-        type: 'sprite',
-        name: 'Sprites (OBJ)',
-        layers: [],
-      });
-    }
+    // Sprite groups are created dynamically via capture — no placeholder needed
     this.activeGroupIndex = 0;
   }
 
@@ -398,6 +400,85 @@ export class SpriteEditorUI {
     this.layerPanel?.refresh(this.layerGroups, this.activeGroupIndex, this.activeLayerIndex, gfxRom, hwState);
   }
 
+  private refreshCapturesPanel(): void {
+    if (!this.capturesList) return;
+    this.capturesList.innerHTML = '';
+
+    let hasEntries = false;
+
+    // Completed captures first (stable order)
+    for (let gi = 0; gi < this.layerGroups.length; gi++) {
+      const group = this.layerGroups[gi]!;
+      if (group.type !== 'sprite' || !group.spriteCapture || group.spriteCapture.poses.length === 0) continue;
+      hasEntries = true;
+
+      const card = el('div', 'edit-capture-card') as HTMLDivElement;
+      card.onclick = () => {
+        this.activeGroupIndex = gi;
+        this.activeLayerIndex = -1;
+        this.enterSpriteSheetMode();
+      };
+
+      const thumb = document.createElement('canvas');
+      thumb.className = 'edit-capture-thumb';
+      const pose = group.spriteCapture.poses[0]!;
+      thumb.width = pose.w;
+      thumb.height = pose.h;
+      const ctx = thumb.getContext('2d');
+      if (ctx) ctx.putImageData(pose.preview, 0, 0);
+      card.appendChild(thumb);
+
+      const info = el('div', 'edit-capture-info') as HTMLDivElement;
+      const name = el('div', 'edit-capture-name') as HTMLDivElement;
+      name.textContent = group.name;
+      info.appendChild(name);
+      const count = el('div', 'edit-capture-count') as HTMLDivElement;
+      count.textContent = `${group.spriteCapture.poses.length} pose${group.spriteCapture.poses.length !== 1 ? 's' : ''}`;
+      info.appendChild(count);
+      card.appendChild(info);
+
+      this.capturesList.appendChild(card);
+    }
+
+    // Active capture sessions at the bottom (recording indicator)
+    for (const [palette, session] of this.activeSessions) {
+      hasEntries = true;
+      const card = el('div', 'edit-capture-card edit-capture-active') as HTMLDivElement;
+      card.onclick = () => this.stopCaptureForPalette(palette);
+
+      const thumb = document.createElement('canvas');
+      thumb.className = 'edit-capture-thumb';
+      if (session.poses.length > 0) {
+        const pose = session.poses[0]!;
+        thumb.width = pose.w;
+        thumb.height = pose.h;
+        const ctx = thumb.getContext('2d');
+        if (ctx) ctx.putImageData(pose.preview, 0, 0);
+      } else {
+        thumb.width = 16;
+        thumb.height = 16;
+      }
+      card.appendChild(thumb);
+
+      const info = el('div', 'edit-capture-info') as HTMLDivElement;
+      const name = el('div', 'edit-capture-name') as HTMLDivElement;
+      name.textContent = `Palette ${palette}`;
+      info.appendChild(name);
+      const count = el('div', 'edit-capture-count') as HTMLDivElement;
+      count.textContent = `Recording... ${session.poses.length} pose${session.poses.length !== 1 ? 's' : ''}`;
+      info.appendChild(count);
+      card.appendChild(info);
+
+      this.capturesList.appendChild(card);
+    }
+
+    if (!hasEntries) {
+      const empty = el('div', 'edit-capture-empty') as HTMLDivElement;
+      empty.textContent = 'No captures yet';
+      this.capturesList.appendChild(empty);
+    }
+  }
+
   // -- Overlay --
 
   private startOverlayLoop(): void {
@@ -411,7 +492,6 @@ export class SpriteEditorUI {
       this.drawAllSpriteBounds();
       this.drawSelectedOverlay();
       this.drawPhotoLayers();
-      this.positionCaptureButton();
       this.captureFrame();
       this.overlayRafId = requestAnimationFrame(loop);
     };
@@ -522,23 +602,7 @@ export class SpriteEditorUI {
   }
 
   private createCapturePanel(wrapper: HTMLElement): void {
-    // Floating "Capture" button next to selected sprite
-    this.captureBtn = document.createElement('button');
-    this.captureBtn.className = 'edit-analyze-float';
-    this.captureBtn.textContent = 'Start Capture';
-    this.captureBtn.style.display = 'none';
-    this.captureBtn.onclick = (e) => { e.stopPropagation(); this.toggleCapture(); };
-    wrapper.appendChild(this.captureBtn);
-
-    // Floating "Edit sprites" button — appears when captures exist
-    this.editSpritesBtn = document.createElement('button');
-    this.editSpritesBtn.className = 'edit-analyze-float';
-    this.editSpritesBtn.textContent = 'Edit sprites';
-    this.editSpritesBtn.style.display = 'none';
-    this.editSpritesBtn.onclick = (e) => { e.stopPropagation(); this.enterSpriteSheetMode(); };
-    wrapper.appendChild(this.editSpritesBtn);
-
-    // Floating gallery panel
+    // Floating panel (used for head/layer editor in photo import)
     this.capturePanel = el('div', 'edit-analyzer-float') as HTMLDivElement;
     this.capturePanel.style.display = 'none';
 
@@ -564,75 +628,11 @@ export class SpriteEditorUI {
     this.overlay.remove();
     this.overlay = null;
     this.overlayCtx = null;
-    this.stopCapture();
-    this.captureBtn?.remove();
-    this.captureBtn = null;
-    this.editSpritesBtn?.remove();
-    this.editSpritesBtn = null;
+    this.stopAllCaptures();
     this.capturePanel?.remove();
     this.capturePanel = null;
   }
 
-  /** Position the "Start/Stop Capture" button next to the selected sprite's group. */
-  private positionCaptureButton(): void {
-    if (!this.captureBtn) return;
-
-    // Hide both buttons in sprite sheet mode
-    if (this.spriteSheetMode) {
-      this.captureBtn.style.display = 'none';
-      if (this.editSpritesBtn) this.editSpritesBtn.style.display = 'none';
-      return;
-    }
-
-    // During capture, pin button next to the tracked character
-    if (this.capturing) {
-      if (this.editSpritesBtn) this.editSpritesBtn.style.display = 'none';
-      const video = this.emulator.getVideo();
-      if (video) {
-        const rightEdgePct = (this.captureCenterX + 20) / SCREEN_WIDTH * 100;
-        const centerYPct = this.captureCenterY / SCREEN_HEIGHT * 100;
-        this.captureBtn.style.display = '';
-        this.captureBtn.style.left = `${rightEdgePct}%`;
-        this.captureBtn.style.top = `${centerYPct}%`;
-        this.captureBtn.style.transform = 'translateY(-50%)';
-      }
-      return;
-    }
-
-    const tile = this.editor.currentTile;
-    const isSprite = tile && tile.layerId === LAYER_OBJ && tile.spriteIndex !== undefined;
-    if (!isSprite) {
-      this.captureBtn.style.display = 'none';
-      return;
-    }
-
-    // Position next to the character group bounding box
-    const video = this.emulator.getVideo();
-    if (!video) { this.captureBtn.style.display = 'none'; return; }
-
-    const allSprites = readAllSprites(video);
-    const group = groupCharacter(allSprites, tile.spriteIndex!);
-    if (!group) { this.captureBtn.style.display = 'none'; return; }
-
-    const rightEdgePct = (group.bounds.x + group.bounds.w + 4) / SCREEN_WIDTH * 100;
-    const centerYPct = (group.bounds.y + group.bounds.h / 2) / SCREEN_HEIGHT * 100;
-
-    this.captureBtn.style.display = '';
-    this.captureBtn.style.left = `${rightEdgePct}%`;
-    this.captureBtn.style.top = `${centerYPct}%`;
-    this.captureBtn.style.transform = 'translateY(-50%)';
-
-    // Show "Edit sprites" button below capture button when poses exist
-    if (this.editSpritesBtn) {
-      const hasPoses = this.activePoses.length > 0;
-      this.editSpritesBtn.style.display = hasPoses ? '' : 'none';
-      if (hasPoses) {
-        this.editSpritesBtn.style.left = `${rightEdgePct}%`;
-        this.editSpritesBtn.style.top = `calc(${centerYPct}% + 28px)`;
-        this.editSpritesBtn.style.transform = '';
-      }
-    }
-  }
 
   private clearOverlay(): void {
     if (!this.overlayCtx || !this.overlay) return;
@@ -765,6 +765,12 @@ export class SpriteEditorUI {
 
     const info = this.editor.selectTileAt(pos.x, pos.y);
     if (info) {
+      // Shift+click or Alt+click on an OBJ sprite toggles capture for its palette
+      if ((e.shiftKey || e.altKey) && info.layerId === LAYER_OBJ && info.spriteIndex !== undefined) {
+        this.toggleCaptureForSprite(info.spriteIndex);
+        return;
+      }
+
       this.refreshTileGrid();
       this.refreshPalette();
       this.refreshNeighbors();
@@ -806,27 +812,15 @@ export class SpriteEditorUI {
       ctx.strokeStyle = '#ff1a50';
       ctx.lineWidth = 2;
       ctx.strokeRect(tileScreenX, tileScreenY, 16, 16);
-
-      // Character group contour (red) — all sprites belonging to the same character
-      this.drawCharacterContour(ctx, video, tile.spriteIndex);
     }
   }
 
-  /** Draw red outline around each sprite in the character group. */
+  /** Draw dashed outline around the full character group bounding box. */
   private drawCharacterContour(ctx: CanvasRenderingContext2D, video: CPS1Video, spriteIndex: number): void {
     const allSprites = readAllSprites(video);
     const group = groupCharacter(allSprites, spriteIndex);
     if (!group) return;
 
-    // Draw each tile of the group with a red border
-    ctx.strokeStyle = '#ff0000';
-    ctx.lineWidth = 1.5;
-
-    for (const sprite of group.sprites) {
-      ctx.strokeRect(sprite.screenX + 0.5, sprite.screenY + 0.5, 15, 15);
-    }
-
-    // Draw the full bounding box with a thicker dashed red line
     ctx.strokeStyle = 'rgba(255, 0, 0, 0.7)';
     ctx.lineWidth = 2;
     ctx.setLineDash([4, 3]);
@@ -977,6 +971,36 @@ export class SpriteEditorUI {
         if (sx + w <= 0 || sx >= SCREEN_WIDTH || sy + h <= 0 || sy >= SCREEN_HEIGHT) continue;
         ctx.strokeRect(sx + 0.5, sy + 0.5, w - 1, h - 1);
       }
+    }
+
+    // Red bounds + REC indicator for sprites being captured
+    if (this.activeSessions.size > 0) {
+      const allSprites = readAllSprites(video);
+      const visited = new Set<number>();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = 'rgba(255, 50, 80, 0.8)';
+      for (const sprite of allSprites) {
+        if (!this.activeSessions.has(sprite.palette)) continue;
+        if (visited.has(sprite.index)) continue;
+        const group = groupCharacter(allSprites, sprite.index);
+        if (!group) continue;
+        for (const s of group.sprites) visited.add(s.index);
+
+        const { x, y, w, h } = group.bounds;
+        ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+
+        // REC indicator
+        const rx = x + w + 2;
+        const ry = y + 1;
+        ctx.fillStyle = '#ff324a';
+        ctx.beginPath();
+        ctx.arc(rx + 3, ry + 3, 3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.font = '7px sans-serif';
+        ctx.fillText('REC', rx + 8, ry + 6);
+      }
+      ctx.lineWidth = 1;
     }
 
     // Scroll layers — draw tile grid based on scroll position
@@ -1496,13 +1520,22 @@ export class SpriteEditorUI {
     const poses = this.activePoses;
     if (poses.length === 0) return;
 
+    // Clean up any existing sheet container from a previous session
+    if (this.sheetContainer) {
+      this.sheetContainer.remove();
+      this.sheetContainer = null;
+    }
+
     this.spriteSheetMode = true;
     this.sheetZoomed = true;
     this.sheetSelectedPose = 0;
     this.sheetSelectedTile = -1;
+    this.sheetZoomCanvas = null;
+    this.sheetZoomCtx = null;
 
-    // Pause the game (frames + audio)
-    if (!this.emulator.isPaused()) {
+    // Pause the game (frames + audio), remembering prior state
+    this.wasPausedBeforeSheet = this.emulator.isPaused();
+    if (!this.wasPausedBeforeSheet) {
       this.emulator.pause();
       this.emulator.suspendAudio();
     }
@@ -1540,7 +1573,7 @@ export class SpriteEditorUI {
     header.appendChild(title);
 
     const backBtn = el('button', 'sprite-sheet-back') as HTMLButtonElement;
-    backBtn.textContent = 'Back to game';
+    backBtn.textContent = 'Close';
     backBtn.onclick = () => this.exitSpriteSheetMode();
     header.appendChild(backBtn);
     main.appendChild(header);
@@ -1656,7 +1689,7 @@ export class SpriteEditorUI {
     header.appendChild(importBtn);
 
     const backBtn = el('button', 'sprite-sheet-back') as HTMLButtonElement;
-    backBtn.textContent = 'Back to game';
+    backBtn.textContent = 'Close';
     backBtn.onclick = () => this.exitSpriteSheetMode();
     header.appendChild(backBtn);
     main.appendChild(header);
@@ -1886,8 +1919,8 @@ export class SpriteEditorUI {
     this.gameCanvas.style.display = '';
     if (this.overlay) this.overlay.style.display = '';
 
-    // Resume game (frames + audio)
-    if (this.emulator.isPaused()) {
+    // Resume game only if it wasn't paused before entering the sheet viewer
+    if (!this.wasPausedBeforeSheet && this.emulator.isPaused()) {
       this.emulator.resume();
       this.emulator.resumeAudio();
     }
@@ -2021,77 +2054,50 @@ export class SpriteEditorUI {
 
   // -- Pose Capture --
 
-  private toggleCapture(): void {
-    if (this.capturing) {
-      this.stopCapture();
-    } else {
-      this.startCapture();
-    }
-  }
-
-  private startCapture(): void {
-    const tile = this.editor.currentTile;
-    if (!tile || tile.layerId !== LAYER_OBJ || tile.spriteIndex === undefined) return;
-
+  /** Toggle capture for the sprite at the given OBJ index. */
+  private toggleCaptureForSprite(spriteIndex: number): void {
     const video = this.emulator.getVideo();
     if (!video) return;
 
-    // Identify the character group at this moment
     const allSprites = readAllSprites(video);
-    const group = groupCharacter(allSprites, tile.spriteIndex);
+    const group = groupCharacter(allSprites, spriteIndex);
     if (!group) return;
 
-    this.capturing = true;
-    this.capturedPoses = [];
-    this.captureSeenHashes.clear();
-    this.capturePalette = group.palette;
-    this.captureCenterX = group.bounds.x + group.bounds.w / 2;
-    this.captureCenterY = group.bounds.y + group.bounds.h / 2;
+    const palette = group.palette;
 
-    this.captureBtn!.textContent = 'Stop Capture';
-    this.captureBtn!.classList.add('edit-capture-active');
-    this.capturePanel!.style.display = '';
-    this.captureGallery!.innerHTML = '';
-    this.captureStatus!.textContent = 'Capturing... Play the game!';
+    if (this.activeSessions.has(palette)) {
+      // Stop capturing this palette
+      this.stopCaptureForPalette(palette);
+    } else {
+      // Start capturing this palette, remembering the initial group size
+      this.activeSessions.set(palette, { poses: [], seenHashes: new Set<string>(), refTileCount: group.sprites.length });
+      // Capture the initial pose(s)
+      this.captureGroupsForPalette(video, palette);
+    }
 
-    // Capture the initial pose
-    this.captureCurrentFrame(video, group);
-
-    // Resume game if paused
-    if (this.emulator.isPaused()) this.emulator.resume();
+    this.refreshCapturesPanel();
   }
 
-  private stopCapture(): void {
-    if (!this.capturing) return;
-    this.capturing = false;
-    if (this.captureBtn) {
-      this.captureBtn.textContent = 'Start Capture';
-      this.captureBtn.classList.remove('edit-capture-active');
-    }
-    if (this.capturedPoses.length > 0) {
-      // Find or update the sprite group with the captured poses
-      let spriteGroupIdx = this.layerGroups.findIndex(g => g.type === 'sprite');
-      if (spriteGroupIdx === -1) {
-        this.layerGroups.push(createSpriteGroup(
-          `Sprites (${this.capturedPoses.length} poses)`,
-          this.capturedPoses,
-          this.capturePalette,
-        ));
-        spriteGroupIdx = this.layerGroups.length - 1;
-      } else {
-        const g = this.layerGroups[spriteGroupIdx]!;
-        g.name = `Sprites (${this.capturedPoses.length} poses)`;
-        g.spriteCapture = { poses: this.capturedPoses, palette: this.capturePalette, selectedPoseIndex: 0 };
-      }
-      this.activeGroupIndex = spriteGroupIdx;
-      this.activeLayerIndex = -1;
+  /** Stop capture for a specific palette and save the group. */
+  private stopCaptureForPalette(palette: number): void {
+    const session = this.activeSessions.get(palette);
+    if (!session) return;
+    this.activeSessions.delete(palette);
 
-      // Hide the capture floating panel — sprite sheet viewer takes over
-      if (this.capturePanel) this.capturePanel.style.display = 'none';
-      if (this.captureBtn) this.captureBtn.style.display = 'none';
-
+    if (session.poses.length > 0) {
+      this.captureCounter++;
+      const name = `Sprite #${this.captureCounter}`;
+      this.layerGroups.push(createSpriteGroup(name, session.poses, palette));
       this.refreshLayerPanel();
-      this.enterSpriteSheetMode();
+    }
+
+    this.refreshCapturesPanel();
+  }
+
+  /** Stop all active captures. */
+  private stopAllCaptures(): void {
+    for (const palette of [...this.activeSessions.keys()]) {
+      this.stopCaptureForPalette(palette);
     }
   }
 
@@ -2231,7 +2237,7 @@ export class SpriteEditorUI {
    * Pencil paints on the layer. Eyedropper reads from composite.
    */
   private headPixelAction(px: number, py: number): void {
-    if (this.capturedPoses.length === 0 || !this.activeLayer) return;
+    if (this.activePoses.length === 0 || !this.activeLayer) return;
     const pose = this.activePose!;
     if (px < 0 || py < 0 || px >= pose.w || py >= pose.h) return;
 
@@ -2672,42 +2678,70 @@ export class SpriteEditorUI {
   }
 
   /**
-   * Called every frame from the overlay loop. If capturing, tracks
-   * the character and captures new unique poses.
+   * Called every frame from the overlay loop. Captures unique poses
+   * for all active palette sessions.
    */
   private captureFrame(): void {
-    if (!this.capturing) return;
+    if (this.activeSessions.size === 0) return;
 
     const video = this.emulator.getVideo();
     if (!video) return;
 
-    // Track the character by palette + closest center
-    const group = trackCharacter(video, this.capturePalette, this.captureCenterX, this.captureCenterY);
-    if (!group) return;
+    let changed = false;
+    for (const palette of this.activeSessions.keys()) {
+      if (this.captureGroupsForPalette(video, palette)) changed = true;
+    }
 
-    // Update tracking center for next frame
-    this.captureCenterX = group.bounds.x + group.bounds.w / 2;
-    this.captureCenterY = group.bounds.y + group.bounds.h / 2;
-
-    this.captureCurrentFrame(video, group);
+    if (changed) this.refreshCapturesPanel();
   }
 
-  private captureCurrentFrame(video: CPS1Video, group: SpriteGroupData): void {
-    const hash = poseHash(group);
-    if (this.captureSeenHashes.has(hash)) return; // already captured
-    this.captureSeenHashes.add(hash);
+  /** Capture all connected sprite groups for a palette. Returns true if new poses were found. */
+  private captureGroupsForPalette(video: CPS1Video, palette: number): boolean {
+    const session = this.activeSessions.get(palette);
+    if (!session) return false;
+
+    const allSprites = readAllSprites(video);
+    const samePalette = allSprites.filter(s => s.palette === palette);
+    if (samePalette.length === 0) return false;
 
     const gfxRom = this.editor.getGfxRom();
-    if (!gfxRom) return;
-
+    if (!gfxRom) return false;
     const bufs = this.emulator.getBusBuffers();
-    const palette = readPalette(bufs.vram, video.getPaletteBase(), group.palette);
-    const pose = capturePose(gfxRom, group, palette);
 
-    this.capturedPoses.push(pose);
-    this.addPoseCard(pose, this.capturedPoses.length - 1);
+    // Find all connected groups for this palette
+    const visited = new Set<number>();
+    const groups: SpriteGroupData[] = [];
+    for (const sprite of samePalette) {
+      if (visited.has(sprite.index)) continue;
+      const group = groupCharacter(allSprites, sprite.index);
+      if (!group) continue;
+      for (const s of group.sprites) visited.add(s.index);
+      groups.push(group);
+    }
 
-    this.captureStatus!.textContent = `Capturing... ${this.capturedPoses.length} unique pose${this.capturedPoses.length !== 1 ? 's' : ''}`;
+    if (groups.length === 0) return false;
+
+    // Pick the group closest in tile count to the initial capture (filters fragments + multi-char merges)
+    const ref = session.refTileCount;
+    let bestGroup: SpriteGroupData | null = null;
+    let bestDiff = Infinity;
+    for (const g of groups) {
+      const diff = Math.abs(g.sprites.length - ref);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        bestGroup = g;
+      }
+    }
+
+    if (!bestGroup) return false;
+
+    const hash = poseHash(bestGroup);
+    if (session.seenHashes.has(hash)) return false;
+    session.seenHashes.add(hash);
+
+    const pal = readPalette(bufs.vram, video.getPaletteBase(), bestGroup.palette);
+    session.poses.push(capturePose(gfxRom, bestGroup, pal));
+    return true;
   }
 
   private addPoseCard(pose: CapturedPose, index: number): void {

@@ -156,7 +156,7 @@ export class DebugPanel {
     // Header
     const header = el("div", "dbg-header");
     const title = el("h2");
-    title.textContent = "Tile Editor";
+    title.textContent = "Sprites & Tiles";
     const closeBtn = el("button", "dbg-close");
     closeBtn.textContent = "\u00D7";
     closeBtn.addEventListener("click", () => this.toggle());
