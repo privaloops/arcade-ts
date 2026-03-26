@@ -87,6 +87,8 @@
 - [x] **Tile allocator + GFX ROM expansion** — Allocation de tiles privés pour scroll merge, expansion dynamique ROM, reverse bank mapper
 - [ ] **Custom palette par tile (Plan B)** — Pour les tiles partiellement couverts par une photo sur scroll: calculer une palette optimale de 15 couleurs via median cut qui représente au mieux le mix photo+original. Élimine les artefacts de re-quantization aux bords.
 - [ ] **Recoloration costume** — Palette swap pour changer la couleur des vêtements. Détection de famille de couleurs (même teinte, luminosités différentes), recalcul préservant les rapports de luminosité.
+- [ ] **Sauvegarde des éditions (persistance)** — Diff par région ROM (`graphics`, `program`, `oki`, `audio`) entre `mutableRom` et `originalRom` du RomStore. Stockage IndexedDB (localStorage trop limité). 100 tiles modifiés = ~12.8 KB de diff. Auto-save + restore au chargement du jeu. Slots nommés par jeu.
+- [ ] **Undo complet** — Actuellement seuls les pixel edits ont un undo (128 bytes/tile via pushUndo). Manque : `editPaletteColor` (écrit VRAM + program ROM sans undo), merge photo→tiles (écrit N tiles sans pushUndo). Aussi : groupement par stroke (1 drag = 1 undo), persistance de l'undo stack entre sessions.
 - [ ] **Déformation faciale (Face Mesh)** — MediaPipe Face Mesh pour générer des variantes de la photo importée (bouche ouverte, yeux plissés) adaptées à chaque pose du sprite
 - [ ] **Mobile Photo Booth** — QR code + caméra mobile + Vercel KV relay pour capturer une photo et l'envoyer au desktop
 
