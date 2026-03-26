@@ -13,7 +13,7 @@
     <title>Arcade.ts — CPS1 emulator with debug mode</title>
     <link rel="stylesheet" href="../src/styles/main.css" />
   </head>
-  <body class="dbg-active aud-active">
+  <body class="dbg-active aud-active layer-active">
     <div id="app">
       <header>
         <h1>ROMstudio</h1>
@@ -29,14 +29,16 @@
           <button id="save-btn" class="ctrl-btn">Save (F5)</button>
           <button id="load-btn-ss" class="ctrl-btn">Load (F8)</button>
           <button id="pause-btn" class="ctrl-btn">Pause (P)</button>
+          <button id="step-btn" class="ctrl-btn">Step</button>
           <button id="mute-btn" class="ctrl-btn">Mute (M)</button>
+          <span id="frame-counter" class="header-frame-counter"></span>
         </div>
         <div class="hamburger-wrapper">
           <button id="hamburger-btn" class="ctrl-btn hamburger-btn" title="More options">
             <span class="hamburger-icon"></span>
           </button>
           <div id="hamburger-menu" class="hamburger-menu">
-            <button id="dbg-btn" class="ctrl-btn">Video (F2)</button>
+            <button id="dbg-btn" class="ctrl-btn">Tile Editor (F2)</button>
             <button id="aud-btn" class="ctrl-btn">Audio (F3)</button>
             <button id="edit-btn" class="ctrl-btn" style="display:none;">Sprite Editor (E)</button>
             <button id="export-btn" class="ctrl-btn" style="display:none;">Export ROM</button>
@@ -136,7 +138,12 @@
       Built with TypeScript + WebGL2 + WASM
     </footer>
 
-    <div id="layer-panel" class="layer-panel"></div>
+    <div id="layer-panel" class="layer-panel open">
+      <div class="layer-panel-header">
+        <h2>Layers</h2>
+        <button class="layer-close" onclick="this.closest('.layer-panel').classList.remove('open');document.body.classList.remove('layer-active');">&times;</button>
+      </div>
+    </div>
     <div id="dbg-panel" class="dbg-panel open"></div>
     <div id="aud-panel" class="aud-panel open"></div>
     <script type="module" src="../src/index.ts"></script>

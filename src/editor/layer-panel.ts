@@ -46,13 +46,24 @@ export class LayerPanel {
       document.body.appendChild(this.container);
     }
 
-    // Header
-    const header = document.createElement('div');
-    header.className = 'layer-panel-header';
-    const title = document.createElement('h2');
-    title.textContent = 'Layers';
-    header.appendChild(title);
-    this.container.appendChild(header);
+    // Header with close button (may already exist from HTML)
+    if (!this.container.querySelector('.layer-panel-header')) {
+      const header = document.createElement('div');
+      header.className = 'layer-panel-header';
+      const title = document.createElement('h2');
+      title.textContent = 'Layers';
+      header.appendChild(title);
+      const closeBtn = document.createElement('button');
+      closeBtn.className = 'layer-close';
+      closeBtn.textContent = '\u00D7';
+      closeBtn.addEventListener('click', () => this.hide());
+      header.appendChild(closeBtn);
+      this.container.insertBefore(header, this.container.firstChild);
+    } else {
+      // Wire close button from HTML
+      const closeBtn = this.container.querySelector('.layer-close');
+      if (closeBtn) closeBtn.addEventListener('click', () => this.hide());
+    }
 
     // Content area
     this.content = document.createElement('div');
@@ -118,13 +129,20 @@ export class LayerPanel {
         const hwControls = document.createElement('span');
         hwControls.className = 'layer-hw-controls';
 
-        const eyeCb = document.createElement('input');
-        eyeCb.type = 'checkbox';
-        eyeCb.checked = hwLayerState.visible.get(hwLayerId) !== false;
-        eyeCb.title = 'Show/hide layer';
-        eyeCb.className = 'layer-hw-cb';
-        eyeCb.onclick = (e) => { e.stopPropagation(); this.callbacks.onToggleHwLayer(hwLayerId, eyeCb.checked); };
-        hwControls.appendChild(eyeCb);
+        const isVisible = hwLayerState.visible.get(hwLayerId) !== false;
+        const eyeBtn = document.createElement('button');
+        eyeBtn.className = 'layer-eye-btn';
+        eyeBtn.textContent = '\u{1F441}';
+        eyeBtn.title = isVisible ? 'Hide layer' : 'Show layer';
+        eyeBtn.style.opacity = isVisible ? '1' : '0.3';
+        eyeBtn.onclick = (e) => {
+          e.stopPropagation();
+          const newVisible = eyeBtn.style.opacity === '0.3';
+          eyeBtn.style.opacity = newVisible ? '1' : '0.3';
+          eyeBtn.title = newVisible ? 'Hide layer' : 'Show layer';
+          this.callbacks.onToggleHwLayer(hwLayerId, newVisible);
+        };
+        hwControls.appendChild(eyeBtn);
 
         const gridCb = document.createElement('input');
         gridCb.type = 'checkbox';

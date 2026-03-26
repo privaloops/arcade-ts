@@ -17,6 +17,7 @@ import { createLayer, createSpriteGroup, createScrollGroup, type PhotoLayer, typ
 import { LayerPanel } from './layer-panel';
 import { TileAllocator, buildReverseMap, patchTilemapCode, patchTilemapPalette, getTileStats } from './tile-allocator';
 import type { Emulator } from '../emulator';
+import { pencilCursor, fillCursor, eyedropperCursor, eraserCursor } from './tool-cursors';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -24,12 +25,19 @@ import type { Emulator } from '../emulator';
 
 const GRID_SIZE = 256; // fixed canvas size
 
-const TOOL_DEFS: { id: EditorTool; label: string; key: string }[] = [
-  { id: 'pencil',     label: 'Pencil',     key: 'B' },
-  { id: 'fill',       label: 'Fill',       key: 'G' },
-  { id: 'eyedropper', label: 'Eyedropper', key: 'I' },
-  { id: 'eraser',     label: 'Eraser',     key: 'X' },
+const TOOL_DEFS: { id: EditorTool; label: string; key: string; icon: string }[] = [
+  { id: 'pencil',     label: 'Pencil',     key: 'B', icon: '\u270F\uFE0F' },
+  { id: 'fill',       label: 'Fill',       key: 'G', icon: '\u{1F4A7}' },
+  { id: 'eyedropper', label: 'Eyedropper', key: 'I', icon: '\u{1F4CD}' },
+  { id: 'eraser',     label: 'Eraser',     key: 'X', icon: '\u{1F6AB}' },
 ];
+
+const TOOL_CURSORS: Record<string, string> = {
+  pencil: pencilCursor,
+  fill: fillCursor,
+  eyedropper: eyedropperCursor,
+  eraser: eraserCursor,
+};
 
 // ---------------------------------------------------------------------------
 // SpriteEditorUI
@@ -151,7 +159,6 @@ export class SpriteEditorUI {
 
     // Info bar
     this.infoBar = el('div', 'edit-info') as HTMLDivElement;
-    this.infoBar.textContent = 'Click a sprite on the game screen';
     container.appendChild(this.infoBar);
 
     // Tile grid canvas
@@ -170,7 +177,7 @@ export class SpriteEditorUI {
     const toolsBar = el('div', 'edit-tools');
     for (const def of TOOL_DEFS) {
       const btn = el('button', 'ctrl-btn edit-tool-btn') as HTMLButtonElement;
-      btn.textContent = def.label;
+      btn.innerHTML = `<span class="edit-tool-icon">${def.icon}</span> ${def.label}`;
       btn.title = `${def.label} (${def.key})`;
       btn.dataset['tool'] = def.id;
       btn.onclick = () => this.editor.setTool(def.id);
@@ -544,7 +551,6 @@ export class SpriteEditorUI {
     this.capturePanel.appendChild(this.headSection);
 
     wrapper.appendChild(this.capturePanel);
-    this.setupDropZone();
   }
 
   private removeOverlay(): void {
@@ -1240,7 +1246,7 @@ export class SpriteEditorUI {
     if (!this.infoBar) return;
     const tile = this.editor.currentTile;
     if (!tile) {
-      this.infoBar.textContent = 'Click a sprite on the game screen';
+      this.infoBar.textContent = '';
       return;
     }
     const layerNames = ['Sprites', 'Scroll 1', 'Scroll 2', 'Scroll 3'];
@@ -1252,9 +1258,13 @@ export class SpriteEditorUI {
   }
 
   private refreshToolButtons(): void {
+    const currentTool = this.editor.tool;
     for (const [tool, btn] of this.toolBtns) {
-      btn.classList.toggle('active', tool === this.editor.tool);
+      btn.classList.toggle('active', tool === currentTool);
     }
+    // Update cursor on tile canvas only (tools only work there)
+    const cursor = TOOL_CURSORS[currentTool] ?? 'crosshair';
+    if (this.tileCanvas) this.tileCanvas.style.cursor = cursor;
   }
 
   private refreshUndoButtons(): void {
