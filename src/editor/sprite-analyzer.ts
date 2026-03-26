@@ -394,7 +394,7 @@ function blitTile(
       const srcX = flipX ? 15 - px : px;
       const srcY = flipY ? 15 - py : py;
       const colorIdx = pixels[srcY * 16 + srcX]!;
-      if (colorIdx === 0) continue; // transparent
+      if (colorIdx === 15) continue; // transparent pen (CPS1 uses pen 15, not pen 0)
 
       const imgX = dx + px;
       const imgY = dy + py;

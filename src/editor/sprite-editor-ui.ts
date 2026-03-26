@@ -11,7 +11,7 @@ import { SCREEN_WIDTH, SCREEN_HEIGHT } from '../constants';
 import { LAYER_OBJ, LAYER_SCROLL1, LAYER_SCROLL2, LAYER_SCROLL3, GFXTYPE_SCROLL1, GFXTYPE_SCROLL2, GFXTYPE_SCROLL3, readWord, type CPS1Video } from '../video/cps1-video';
 import { readAllSprites, groupCharacter, trackCharacter, poseHash, capturePose, assembleCharacter, type SpriteGroup as SpriteGroupData, type CapturedPose } from './sprite-analyzer';
 import { loadPhotoRgba, resizeRgba, quantizeWithDithering, placePhotoOnTiles } from './photo-import';
-import { readPixel as readPixelFn, writePixel as writePixelFn, writeScrollPixel } from './tile-encoder';
+import { readPixel as readPixelFn, writePixel as writePixelFn, writeScrollPixel, readTile as readTileFn } from './tile-encoder';
 import { readPalette } from './palette-editor';
 import { createLayer, createSpriteGroup, createScrollGroup, type PhotoLayer, type LayerGroup } from './layer-model';
 import { LayerPanel } from './layer-panel';
@@ -54,6 +54,7 @@ export class SpriteEditorUI {
   private resetBtn: HTMLButtonElement | null = null;
   private neighborGrid: HTMLDivElement | null = null;
   private captureBtn: HTMLButtonElement | null = null;
+  private editSpritesBtn: HTMLButtonElement | null = null;
   private capturePanel: HTMLDivElement | null = null;
   private captureGallery: HTMLDivElement | null = null;
   private captureStatus: HTMLDivElement | null = null;
@@ -90,6 +91,15 @@ export class SpriteEditorUI {
   private resizeStartX = 0;
   private resizeStartY = 0;
 
+  // Sprite Sheet Viewer
+  private spriteSheetMode = false;
+  private sheetContainer: HTMLDivElement | null = null;
+  private sheetZoomed = false;  // true = viewing single zoomed pose, false = grid view
+  private sheetSelectedPose = 0;
+  private sheetSelectedTile = -1;
+  private sheetZoomCanvas: HTMLCanvasElement | null = null;
+  private sheetZoomCtx: CanvasRenderingContext2D | null = null;
+
   private get activeGroup(): LayerGroup | undefined { return this.layerGroups[this.activeGroupIndex]; }
   private get activeLayer(): PhotoLayer | undefined { return this.activeGroup?.layers[this.activeLayerIndex]; }
   private get activePoses(): CapturedPose[] { return this.activeGroup?.spriteCapture?.poses ?? []; }
@@ -122,7 +132,11 @@ export class SpriteEditorUI {
     this.boundOverlayClick = (e) => this.handleOverlayClick(e);
     this.boundOverlayLeave = () => this.clearOverlay();
 
-    this.editor.setOnTileChanged(() => { this.refreshTileGrid(); this.emulator.rerender(); });
+    this.editor.setOnTileChanged(() => {
+      this.refreshTileGrid();
+      this.emulator.rerender();
+      if (this.spriteSheetMode) this.refreshSheetAfterEdit();
+    });
     this.editor.setOnToolChanged(() => this.refreshToolButtons());
     this.editor.setOnColorChanged(() => this.refreshPalette());
   }
@@ -253,6 +267,7 @@ export class SpriteEditorUI {
   }
 
   deactivate(): void {
+    if (this.spriteSheetMode) this.exitSpriteSheetMode();
     this.editor.deactivate();
     cancelAnimationFrame(this.overlayRafId);
     document.body.classList.remove('edit-active');
@@ -494,6 +509,14 @@ export class SpriteEditorUI {
     this.captureBtn.onclick = (e) => { e.stopPropagation(); this.toggleCapture(); };
     wrapper.appendChild(this.captureBtn);
 
+    // Floating "Edit sprites" button — appears when captures exist
+    this.editSpritesBtn = document.createElement('button');
+    this.editSpritesBtn.className = 'edit-analyze-float';
+    this.editSpritesBtn.textContent = 'Edit sprites';
+    this.editSpritesBtn.style.display = 'none';
+    this.editSpritesBtn.onclick = (e) => { e.stopPropagation(); this.enterSpriteSheetMode(); };
+    wrapper.appendChild(this.editSpritesBtn);
+
     // Floating gallery panel
     this.capturePanel = el('div', 'edit-analyzer-float') as HTMLDivElement;
     this.capturePanel.style.display = 'none';
@@ -504,13 +527,7 @@ export class SpriteEditorUI {
     this.captureGallery = el('div', 'edit-analyzer-gallery') as HTMLDivElement;
     this.capturePanel.appendChild(this.captureGallery);
 
-    // Head extraction section (hidden until extraction)
-    this.headSection = el('div', 'edit-head-section') as HTMLDivElement;
-    this.headSection.style.display = 'none';
-    this.capturePanel.appendChild(this.headSection);
-
     wrapper.appendChild(this.capturePanel);
-    this.setupDropZone();
   }
 
   private removeOverlay(): void {
@@ -524,6 +541,8 @@ export class SpriteEditorUI {
     this.stopCapture();
     this.captureBtn?.remove();
     this.captureBtn = null;
+    this.editSpritesBtn?.remove();
+    this.editSpritesBtn = null;
     this.capturePanel?.remove();
     this.capturePanel = null;
   }
@@ -532,12 +551,25 @@ export class SpriteEditorUI {
   private positionCaptureButton(): void {
     if (!this.captureBtn) return;
 
-    // During capture, pin button at top-left of game canvas
+    // Hide both buttons in sprite sheet mode
+    if (this.spriteSheetMode) {
+      this.captureBtn.style.display = 'none';
+      if (this.editSpritesBtn) this.editSpritesBtn.style.display = 'none';
+      return;
+    }
+
+    // During capture, pin button next to the tracked character
     if (this.capturing) {
-      this.captureBtn.style.display = '';
-      this.captureBtn.style.left = '8px';
-      this.captureBtn.style.top = '8px';
-      this.captureBtn.style.transform = '';
+      if (this.editSpritesBtn) this.editSpritesBtn.style.display = 'none';
+      const video = this.emulator.getVideo();
+      if (video) {
+        const rightEdgePct = (this.captureCenterX + 20) / SCREEN_WIDTH * 100;
+        const centerYPct = this.captureCenterY / SCREEN_HEIGHT * 100;
+        this.captureBtn.style.display = '';
+        this.captureBtn.style.left = `${rightEdgePct}%`;
+        this.captureBtn.style.top = `${centerYPct}%`;
+        this.captureBtn.style.transform = 'translateY(-50%)';
+      }
       return;
     }
 
@@ -563,6 +595,17 @@ export class SpriteEditorUI {
     this.captureBtn.style.left = `${rightEdgePct}%`;
     this.captureBtn.style.top = `${centerYPct}%`;
     this.captureBtn.style.transform = 'translateY(-50%)';
+
+    // Show "Edit sprites" button below capture button when poses exist
+    if (this.editSpritesBtn) {
+      const hasPoses = this.activePoses.length > 0;
+      this.editSpritesBtn.style.display = hasPoses ? '' : 'none';
+      if (hasPoses) {
+        this.editSpritesBtn.style.left = `${rightEdgePct}%`;
+        this.editSpritesBtn.style.top = `calc(${centerYPct}% + 28px)`;
+        this.editSpritesBtn.style.transform = '';
+      }
+    }
   }
 
   private clearOverlay(): void {
@@ -1170,6 +1213,12 @@ export class SpriteEditorUI {
     if (!this.editor.active) return;
     if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
 
+    // Sprite sheet mode keyboard handling
+    if (this.spriteSheetMode) {
+      this.handleSheetKey(e);
+      return;
+    }
+
     // Layer controls: Shift+arrows = move, +/- = resize
     const layer = this.activeLayer;
     if (layer) {
@@ -1263,6 +1312,490 @@ export class SpriteEditorUI {
       }
     }
   }
+  // -- Sprite Sheet Viewer --
+
+  /** Handle keyboard events while in sprite sheet mode. */
+  private handleSheetKey(e: KeyboardEvent): void {
+    const poses = this.activePoses;
+
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      this.exitSpriteSheetMode();
+      return;
+    }
+
+    // Arrow keys navigate tiles within the zoomed pose
+    const pose = poses[this.sheetSelectedPose];
+    if (!pose) return;
+    const tileCount = pose.tiles.length;
+
+    switch (e.key) {
+      case 'ArrowRight':
+        e.preventDefault();
+        if (tileCount > 0) {
+          this.sheetSelectedTile = Math.min(this.sheetSelectedTile + 1, tileCount - 1);
+          this.selectSheetTile(this.sheetSelectedTile);
+        }
+        break;
+      case 'ArrowLeft':
+        e.preventDefault();
+        if (tileCount > 0) {
+          this.sheetSelectedTile = Math.max(this.sheetSelectedTile - 1, 0);
+          this.selectSheetTile(this.sheetSelectedTile);
+        }
+        break;
+      case 'ArrowDown':
+        e.preventDefault();
+        // Navigate to next pose in sidebar
+        if (this.sheetSelectedPose < poses.length - 1) {
+          this.selectPoseInSheet(this.sheetSelectedPose + 1);
+        }
+        break;
+      case 'ArrowUp':
+        e.preventDefault();
+        // Navigate to previous pose in sidebar
+        if (this.sheetSelectedPose > 0) {
+          this.selectPoseInSheet(this.sheetSelectedPose - 1);
+        }
+        break;
+      default:
+        this.handleToolShortcut(e);
+        break;
+    }
+  }
+
+  /** Forward tool shortcuts while in sheet zoomed view. */
+  private handleToolShortcut(e: KeyboardEvent): void {
+    switch (e.key) {
+      case 'b': case 'B':
+        this.editor.setTool('pencil'); e.preventDefault(); break;
+      case 'g': case 'G':
+        this.editor.setTool('fill'); e.preventDefault(); break;
+      case 'i': case 'I':
+        this.editor.setTool('eyedropper'); e.preventDefault(); break;
+      case 'x': case 'X':
+        this.editor.setTool('eraser'); e.preventDefault(); break;
+      case 'z': case 'Z':
+        if (e.ctrlKey || e.metaKey) {
+          if (e.shiftKey) this.editor.redo(); else this.editor.undo();
+          this.refreshUndoButtons(); e.preventDefault();
+        }
+        break;
+      case '[':
+        this.editor.setActiveColor((this.editor.activeColorIndex - 1 + 16) % 16);
+        this.refreshPalette(); e.preventDefault(); break;
+      case ']':
+        this.editor.setActiveColor((this.editor.activeColorIndex + 1) % 16);
+        this.refreshPalette(); e.preventDefault(); break;
+    }
+  }
+
+  /** Highlight the currently selected cell in the grid view. */
+  private highlightSheetCell(): void {
+    if (!this.sheetContainer) return;
+    const cells = this.sheetContainer.querySelectorAll('.sprite-sheet-cell');
+    cells.forEach((c, i) => c.classList.toggle('selected', i === this.sheetSelectedPose));
+
+    // Scroll into view
+    const selected = cells[this.sheetSelectedPose];
+    if (selected) selected.scrollIntoView({ block: 'nearest' });
+  }
+
+  /**
+   * Enter the fullscreen sprite sheet viewer mode.
+   * Called after pose capture completes.
+   */
+  private enterSpriteSheetMode(): void {
+    const poses = this.activePoses;
+    if (poses.length === 0) return;
+
+    this.spriteSheetMode = true;
+    this.sheetZoomed = true;
+    this.sheetSelectedPose = 0;
+    this.sheetSelectedTile = -1;
+
+    // Pause the game (frames + audio)
+    if (!this.emulator.isPaused()) {
+      this.emulator.pause();
+      this.emulator.suspendAudio();
+    }
+
+    // Hide game canvas and overlay
+    this.gameCanvas.style.display = 'none';
+    if (this.overlay) this.overlay.style.display = 'none';
+
+    // Create sheet container (fixed fullscreen, respects layer/debug panels via CSS)
+    const container = document.createElement('div');
+    container.className = 'sprite-sheet-viewer';
+    this.sheetContainer = container;
+    document.body.appendChild(container);
+
+    // Refresh all previews from current GFX ROM state, then show edit view
+    this.refreshAllPosePreviews();
+    this.renderSheetZoomedView();
+  }
+
+  /** Render the pose grid view inside the sheet container. */
+  private renderSheetGrid(): void {
+    const container = this.sheetContainer;
+    if (!container) return;
+    container.innerHTML = '';
+
+    const poses = this.activePoses;
+
+    // Main content area (no sidebar in grid mode)
+    const main = el('div', 'sprite-sheet-main');
+
+    // Header
+    const header = el('div', 'sprite-sheet-header');
+    const title = document.createElement('h3');
+    title.textContent = `${poses.length} captured pose${poses.length !== 1 ? 's' : ''}`;
+    header.appendChild(title);
+
+    const backBtn = el('button', 'sprite-sheet-back') as HTMLButtonElement;
+    backBtn.textContent = 'Back to game';
+    backBtn.onclick = () => this.exitSpriteSheetMode();
+    header.appendChild(backBtn);
+    main.appendChild(header);
+
+    // Grid
+    const grid = el('div', 'sprite-sheet-grid');
+
+    for (let i = 0; i < poses.length; i++) {
+      const pose = poses[i]!;
+      const cell = el('div', 'sprite-sheet-cell') as HTMLDivElement;
+      if (i === this.sheetSelectedPose) cell.classList.add('selected');
+
+      cell.onclick = () => {
+        this.sheetSelectedPose = i;
+        this.selectPoseInSheet(i);
+      };
+
+      const cvs = document.createElement('canvas');
+      cvs.width = pose.w;
+      cvs.height = pose.h;
+      const ctx = cvs.getContext('2d')!;
+      ctx.putImageData(pose.preview, 0, 0);
+      cell.appendChild(cvs);
+
+      // Index badge
+      const idxBadge = el('div', 'pose-index');
+      idxBadge.textContent = `${i}`;
+      cell.appendChild(idxBadge);
+
+      // Tile count badge
+      const tileBadge = el('div', 'pose-tiles');
+      tileBadge.textContent = `${pose.tiles.length}t`;
+      cell.appendChild(tileBadge);
+
+      grid.appendChild(cell);
+    }
+
+    main.appendChild(grid);
+    container.appendChild(main);
+  }
+
+  /**
+   * Zoom into a single pose for editing.
+   */
+  private selectPoseInSheet(index: number): void {
+    const poses = this.activePoses;
+    const pose = poses[index];
+    if (!pose) return;
+
+    this.sheetSelectedPose = index;
+    this.sheetZoomed = true;
+    this.sheetSelectedTile = -1;
+
+    // Update spriteCapture's selectedPoseIndex
+    const group = this.activeGroup;
+    if (group?.spriteCapture) {
+      group.spriteCapture.selectedPoseIndex = index;
+    }
+    this.selectedPoseIndex = index;
+
+    this.renderSheetZoomedView();
+  }
+
+  /** Render the zoomed pose view with tile grid below + pose sidebar on the left. */
+  private renderSheetZoomedView(): void {
+    const container = this.sheetContainer;
+    if (!container) return;
+    container.innerHTML = '';
+
+    const poses = this.activePoses;
+    const pose = poses[this.sheetSelectedPose];
+    if (!pose) return;
+
+    // Left sidebar: all poses stacked vertically
+    const sidebar = el('div', 'sprite-sheet-sidebar');
+    for (let i = 0; i < poses.length; i++) {
+      const p = poses[i]!;
+      const cell = el('div', 'sprite-sheet-sidebar-cell') as HTMLDivElement;
+      if (i === this.sheetSelectedPose) cell.classList.add('selected');
+
+      const cvs = document.createElement('canvas');
+      cvs.width = p.w;
+      cvs.height = p.h;
+      cvs.getContext('2d')!.putImageData(p.preview, 0, 0);
+      cell.appendChild(cvs);
+
+      const badge = el('div', 'pose-index');
+      badge.textContent = `${i}`;
+      cell.appendChild(badge);
+
+      cell.onclick = () => this.selectPoseInSheet(i);
+      sidebar.appendChild(cell);
+    }
+    container.appendChild(sidebar);
+
+    // Main content area
+    const main = el('div', 'sprite-sheet-main');
+
+    // Header
+    const header = el('div', 'sprite-sheet-header');
+    const title = document.createElement('h3');
+    title.textContent = `Pose ${this.sheetSelectedPose} / ${poses.length - 1} (${pose.w}\u00D7${pose.h}, ${pose.tiles.length} tiles)`;
+    header.appendChild(title);
+
+    const backBtn = el('button', 'sprite-sheet-back') as HTMLButtonElement;
+    backBtn.textContent = 'Back to game';
+    backBtn.onclick = () => this.exitSpriteSheetMode();
+    header.appendChild(backBtn);
+    main.appendChild(header);
+
+    // Zoomed canvas — native resolution, CSS x2 (each CPS1 pixel = 2 CSS pixels)
+    const zoomSection = el('div', 'sprite-sheet-zoom');
+    const scale = 1; // canvas at native CPS1 resolution
+    const cssScale = 4; // CSS display scale — each CPS1 pixel = 4 CSS pixels
+    const zoomCvs = document.createElement('canvas');
+    zoomCvs.width = pose.w;
+    zoomCvs.height = pose.h;
+    zoomCvs.style.width = `${pose.w * cssScale}px`;
+    zoomCvs.style.height = `${pose.h * cssScale}px`;
+    this.sheetZoomCanvas = zoomCvs;
+    this.sheetZoomCtx = zoomCvs.getContext('2d')!;
+    this.sheetZoomCtx.imageSmoothingEnabled = false;
+
+    // Click handler: find tile at position (convert CSS coords to CPS1 coords)
+    zoomCvs.addEventListener('click', (e) => {
+      const rect = zoomCvs.getBoundingClientRect();
+      const px = Math.floor((e.clientX - rect.left) / cssScale);
+      const py = Math.floor((e.clientY - rect.top) / cssScale);
+
+      const tileIdx = pose.tiles.findIndex(t =>
+        px >= t.relX && px < t.relX + 16 && py >= t.relY && py < t.relY + 16,
+      );
+      if (tileIdx !== -1) {
+        this.sheetSelectedTile = tileIdx;
+        this.selectSheetTile(tileIdx);
+      }
+    });
+
+    this.renderSheetZoomedPose();
+    zoomSection.appendChild(zoomCvs);
+
+    // Tile strip (horizontal row)
+    const tilesLabel = el('div', 'edit-section-label');
+    tilesLabel.textContent = 'Tiles (click to edit)';
+    zoomSection.appendChild(tilesLabel);
+
+    const tilesGrid = el('div', 'sprite-sheet-tiles');
+    this.renderSheetTileGrid(tilesGrid, pose);
+    zoomSection.appendChild(tilesGrid);
+
+    main.appendChild(zoomSection);
+    container.appendChild(main);
+  }
+
+  /** Refresh all sheet visuals after a tile edit. */
+  private refreshSheetAfterEdit(): void {
+    this.refreshAllPosePreviews();
+    this.renderSheetZoomedPose();
+    this.refreshSheetSidebar();
+  }
+
+  /** Re-read ALL pose previews from the current GFX ROM. */
+  private refreshAllPosePreviews(): void {
+    const ag = this.activeGroup;
+    if (!ag?.spriteCapture) return;
+    const video = this.emulator.getVideo();
+    if (!video) return;
+    const gfxRom = this.editor.getGfxRom();
+    if (!gfxRom) return;
+    const bufs = this.emulator.getBusBuffers();
+    const pal = ag.spriteCapture.palette;
+    const palette = readPalette(bufs.vram, video.getPaletteBase(), pal);
+
+    for (const pose of ag.spriteCapture.poses) {
+      const sprGroup: SpriteGroupData = {
+        sprites: [], palette: pal,
+        bounds: { x: 0, y: 0, w: pose.w, h: pose.h },
+        tiles: pose.tiles,
+      };
+      pose.preview = assembleCharacter(gfxRom, sprGroup, palette);
+    }
+  }
+
+  /** Re-render the zoomed pose preview canvas (called on tile changes). */
+  private renderSheetZoomedPose(): void {
+    const ctx = this.sheetZoomCtx;
+    const cvs = this.sheetZoomCanvas;
+    if (!ctx || !cvs) return;
+
+    const poses = this.activePoses;
+    const pose = poses[this.sheetSelectedPose];
+    if (!pose) return;
+
+    // Rebuild preview directly from GFX ROM (not from cached pose.preview)
+    const gfxRom = this.editor.getGfxRom();
+    if (!gfxRom) return;
+    const video = this.emulator.getVideo();
+    if (!video) return;
+    const bufs = this.emulator.getBusBuffers();
+    const ag = this.activeGroup;
+    const pal = ag?.spriteCapture?.palette ?? 0;
+    const palette = readPalette(bufs.vram, video.getPaletteBase(), pal);
+
+    const sprGroup: SpriteGroupData = {
+      sprites: [], palette: pal,
+      bounds: { x: 0, y: 0, w: pose.w, h: pose.h },
+      tiles: pose.tiles,
+    };
+    const freshPreview = assembleCharacter(gfxRom, sprGroup, palette);
+
+    const tmp = document.createElement('canvas');
+    tmp.width = pose.w;
+    tmp.height = pose.h;
+    tmp.getContext('2d')!.putImageData(freshPreview, 0, 0);
+
+    ctx.clearRect(0, 0, cvs.width, cvs.height);
+    ctx.drawImage(tmp, 0, 0);
+
+    // Draw selected tile highlight
+    if (this.sheetSelectedTile >= 0 && this.sheetSelectedTile < pose.tiles.length) {
+      const t = pose.tiles[this.sheetSelectedTile]!;
+      ctx.strokeStyle = '#ff1a50';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(t.relX + 0.5, t.relY + 0.5, 15, 15);
+    }
+  }
+
+  /** Refresh sidebar pose thumbnails after edits. */
+  private refreshSheetSidebar(): void {
+    if (!this.sheetContainer) return;
+    const cells = this.sheetContainer.querySelectorAll('.sprite-sheet-sidebar-cell canvas');
+    const poses = this.activePoses;
+    cells.forEach((cvs, i) => {
+      const pose = poses[i];
+      if (!pose) return;
+      const ctx = (cvs as HTMLCanvasElement).getContext('2d');
+      if (ctx) ctx.putImageData(pose.preview, 0, 0);
+    });
+  }
+
+  /** Render the mini tile grid for the zoomed pose. */
+  private renderSheetTileGrid(container: HTMLElement, pose: CapturedPose): void {
+    container.innerHTML = '';
+
+    const gfxRom = this.editor.getGfxRom();
+    if (!gfxRom) return;
+
+    const video = this.emulator.getVideo();
+    if (!video) return;
+    const bufs = this.emulator.getBusBuffers();
+    const paletteIdx = this.activeGroup?.spriteCapture?.palette ?? 0;
+    const palette = readPalette(bufs.vram, video.getPaletteBase(), paletteIdx);
+
+    for (let i = 0; i < pose.tiles.length; i++) {
+      const t = pose.tiles[i]!;
+      const tileCvs = document.createElement('canvas');
+      tileCvs.width = 16;
+      tileCvs.height = 16;
+      tileCvs.className = 'sprite-sheet-tile';
+      if (i === this.sheetSelectedTile) tileCvs.classList.add('active');
+
+      const tileCtx = tileCvs.getContext('2d')!;
+      const pixels = readTileFn(gfxRom, t.mappedCode, 16, 16, 128);
+      const img = new ImageData(16, 16);
+      for (let py = 0; py < 16; py++) {
+        for (let px = 0; px < 16; px++) {
+          const srcX = t.flipX ? 15 - px : px;
+          const srcY = t.flipY ? 15 - py : py;
+          const colorIdx = pixels[srcY * 16 + srcX]!;
+          if (colorIdx === 15) continue; // transparent pen
+          const [r, g, b] = palette[colorIdx] ?? [0, 0, 0];
+          const di = (py * 16 + px) * 4;
+          img.data[di] = r;
+          img.data[di + 1] = g;
+          img.data[di + 2] = b;
+          img.data[di + 3] = 255;
+        }
+      }
+      tileCtx.putImageData(img, 0, 0);
+
+      tileCvs.onclick = () => {
+        this.sheetSelectedTile = i;
+        this.selectSheetTile(i);
+      };
+
+      container.appendChild(tileCvs);
+    }
+  }
+
+  /** Select a tile in the zoomed pose view and set up the editor for it. */
+  private selectSheetTile(tileIdx: number): void {
+    const poses = this.activePoses;
+    const pose = poses[this.sheetSelectedPose];
+    if (!pose) return;
+    const t = pose.tiles[tileIdx];
+    if (!t) return;
+
+    const paletteIdx = this.activeGroup?.spriteCapture?.palette ?? 0;
+    this.editor.selectTileFromPose(t.mappedCode, paletteIdx);
+    this.refreshTileGrid();
+    this.refreshPalette();
+    this.refreshNeighbors();
+    this.refreshInfoBar();
+    this.refreshUndoButtons();
+
+    // Refresh the zoomed pose canvas with highlight
+    this.renderSheetZoomedPose();
+
+    // Update tile grid highlights
+    const tilesGrid = this.sheetContainer?.querySelector('.sprite-sheet-tiles');
+    if (tilesGrid) {
+      tilesGrid.querySelectorAll('.sprite-sheet-tile').forEach((c, i) => {
+        c.classList.toggle('active', i === tileIdx);
+      });
+    }
+  }
+
+  /** Exit sprite sheet mode and return to the game. */
+  private exitSpriteSheetMode(): void {
+    if (!this.spriteSheetMode) return;
+
+    this.spriteSheetMode = false;
+    this.sheetZoomed = false;
+    this.sheetSelectedTile = -1;
+    this.sheetZoomCanvas = null;
+    this.sheetZoomCtx = null;
+
+    // Remove sheet container
+    this.sheetContainer?.remove();
+    this.sheetContainer = null;
+
+    // Show game canvas and overlay
+    this.gameCanvas.style.display = '';
+    if (this.overlay) this.overlay.style.display = '';
+
+    // Resume game (frames + audio)
+    if (this.emulator.isPaused()) {
+      this.emulator.resume();
+      this.emulator.resumeAudio();
+    }
+  }
+
   // -- Sprite Analyzer --
 
   // -- Pose Capture --
@@ -1314,7 +1847,7 @@ export class SpriteEditorUI {
       this.captureBtn.textContent = 'Start Capture';
       this.captureBtn.classList.remove('edit-capture-active');
     }
-    if (this.captureStatus && this.capturedPoses.length > 0) {
+    if (this.capturedPoses.length > 0) {
       // Find or update the sprite group with the captured poses
       let spriteGroupIdx = this.layerGroups.findIndex(g => g.type === 'sprite');
       if (spriteGroupIdx === -1) {
@@ -1332,10 +1865,12 @@ export class SpriteEditorUI {
       this.activeGroupIndex = spriteGroupIdx;
       this.activeLayerIndex = -1;
 
-      this.captureStatus.textContent = `Captured ${this.capturedPoses.length} pose${this.capturedPoses.length !== 1 ? 's' : ''}. Drop a photo to add a layer.`;
-      this.showHeadSelector();
-      this.layerPanel?.show();
+      // Hide the capture floating panel — sprite sheet viewer takes over
+      if (this.capturePanel) this.capturePanel.style.display = 'none';
+      if (this.captureBtn) this.captureBtn.style.display = 'none';
+
       this.refreshLayerPanel();
+      this.enterSpriteSheetMode();
     }
   }
 

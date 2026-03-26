@@ -457,6 +457,33 @@ export class SpriteEditor {
     this.onTileChanged?.();
   }
 
+  // -- Direct tile selection from pose data --
+
+  /**
+   * Set the current tile context directly from captured pose tile data.
+   * Used by the sprite sheet viewer to select a tile without clicking on the game screen.
+   */
+  selectTileFromPose(mappedCode: number, paletteIndex: number): void {
+    const video = this.emulator.getVideo();
+    if (!video) return;
+    const paletteBase = video.getPaletteBase();
+
+    this._currentTile = {
+      layerId: LAYER_OBJ,
+      tileCode: mappedCode,
+      rawCode: 0, // not meaningful for direct selection
+      paletteIndex,
+      gfxRomOffset: mappedCode * CHAR_SIZE_16,
+      tileW: 16,
+      tileH: 16,
+      charSize: CHAR_SIZE_16,
+      flipX: false,
+      flipY: false,
+      paletteBase,
+    };
+    this.onTileChanged?.();
+  }
+
   // -- Callbacks --
 
   setOnTileChanged(cb: (() => void) | null): void { this.onTileChanged = cb; }
