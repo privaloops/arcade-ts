@@ -6,7 +6,7 @@
  * Supports OBJ (sprites) and Scroll 1/2/3 layers.
  */
 
-import { writePixel, readPixel, readTile } from './tile-encoder';
+import { writePixel, writeScrollPixel, readPixel, readScrollPixel, readTile } from './tile-encoder';
 import { readPalette, writeColor, encodeColor } from './palette-editor';
 import { gfxromBankMapper, GFXTYPE_SPRITES, LAYER_OBJ, LAYER_SCROLL1, LAYER_SCROLL2, LAYER_SCROLL3 } from '../video/cps1-video';
 import type { SpriteInspectResult, ScrollInspectResult } from '../video/cps1-video';
@@ -43,6 +43,8 @@ export interface TileContext {
   ny?: number;
   nxs?: number;
   nys?: number;
+  // Scroll-specific (needed for scroll1 interleave)
+  tileIndex?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -162,6 +164,7 @@ export class SpriteEditor {
           flipX: scrInfo.flipX,
           flipY: scrInfo.flipY,
           paletteBase,
+          tileIndex: scrInfo.tileIndex,
         };
         this.onTileChanged?.();
         return this._currentTile;
@@ -226,8 +229,27 @@ export class SpriteEditor {
     const colorIndex = this._tool === 'eraser' ? 15 : this._activeColorIndex;
 
     this.pushUndo(tileCode, charSize, gfxRom);
-    writePixel(gfxRom, tileCode, localX, localY, colorIndex, charSize);
+    this.writeCurrentPixel(gfxRom, localX, localY, colorIndex);
     this.onTileChanged?.();
+  }
+
+  /** Read a pixel from the current tile, handling scroll1 interleave. */
+  private readCurrentPixel(gfxRom: Uint8Array, lx: number, ly: number): number {
+    const t = this._currentTile!;
+    if (t.layerId !== LAYER_OBJ && t.tileIndex !== undefined) {
+      return readScrollPixel(gfxRom, t.tileCode, lx, ly, t.charSize, t.tileIndex, t.layerId === LAYER_SCROLL1);
+    }
+    return readPixel(gfxRom, t.tileCode, lx, ly, t.charSize);
+  }
+
+  /** Write a pixel to the current tile, handling scroll1 interleave. */
+  private writeCurrentPixel(gfxRom: Uint8Array, lx: number, ly: number, color: number): void {
+    const t = this._currentTile!;
+    if (t.layerId !== LAYER_OBJ && t.tileIndex !== undefined) {
+      writeScrollPixel(gfxRom, t.tileCode, lx, ly, color, t.charSize, t.tileIndex, t.layerId === LAYER_SCROLL1);
+    } else {
+      writePixel(gfxRom, t.tileCode, lx, ly, color, t.charSize);
+    }
   }
 
   eyedrop(localX: number, localY: number): void {
@@ -235,7 +257,7 @@ export class SpriteEditor {
     const gfxRom = this.getGfxRom();
     if (!gfxRom) return;
 
-    const color = readPixel(gfxRom, this._currentTile.tileCode, localX, localY, this._currentTile.charSize);
+    const color = this.readCurrentPixel(gfxRom, localX, localY);
     this.setActiveColor(color);
   }
 
@@ -245,7 +267,7 @@ export class SpriteEditor {
     if (!gfxRom) return;
 
     const { tileCode, tileW, tileH, charSize } = this._currentTile;
-    const targetColor = readPixel(gfxRom, tileCode, localX, localY, charSize);
+    const targetColor = this.readCurrentPixel(gfxRom, localX, localY);
     const fillColor = this._tool === 'eraser' ? 15 : this._activeColorIndex;
 
     if (targetColor === fillColor) return;
@@ -258,7 +280,7 @@ export class SpriteEditor {
 
     while (queue.length > 0) {
       const [cx, cy] = queue.pop()!;
-      writePixel(gfxRom, tileCode, cx, cy, fillColor, charSize);
+      this.writeCurrentPixel(gfxRom, cx, cy, fillColor);
 
       for (const [dx, dy] of [[0, 1], [0, -1], [1, 0], [-1, 0]] as const) {
         const nx = cx + dx;
@@ -267,7 +289,7 @@ export class SpriteEditor {
         if (visited[ny * tileW + nx]) continue;
         visited[ny * tileW + nx] = 1;
 
-        if (readPixel(gfxRom, tileCode, nx, ny, charSize) === targetColor) {
+        if (this.readCurrentPixel(gfxRom, nx, ny) === targetColor) {
           queue.push([nx, ny]);
         }
       }
@@ -366,8 +388,64 @@ export class SpriteEditor {
     if (!this._currentTile) return null;
     const gfxRom = this.getGfxRom();
     if (!gfxRom) return null;
-    const { tileCode, tileW, tileH, charSize } = this._currentTile;
+    const { tileCode, tileW, tileH, charSize, layerId, tileIndex } = this._currentTile;
+
+    // For scroll1, read pixel by pixel to handle interleave
+    if (layerId === LAYER_SCROLL1 && tileIndex !== undefined) {
+      const result = new Uint8Array(tileW * tileH);
+      for (let y = 0; y < tileH; y++) {
+        for (let x = 0; x < tileW; x++) {
+          result[y * tileW + x] = readScrollPixel(gfxRom, tileCode, x, y, charSize, tileIndex, true);
+        }
+      }
+      return result;
+    }
+
     return readTile(gfxRom, tileCode, tileW, tileH, charSize);
+  }
+
+  // -- Full sprite (all sub-tiles) --
+
+  /**
+   * Return tile codes and pixels for every sub-tile of the current multi-tile sprite.
+   * Uses the same layout formula as selectNeighborTile().
+   */
+  getFullSpriteTileCodes(): number[] | null {
+    if (!this._currentTile || this._currentTile.layerId !== LAYER_OBJ) return null;
+    const tile = this._currentTile;
+    const nx = tile.nx ?? 1;
+    const ny = tile.ny ?? 1;
+
+    const video = this.emulator.getVideo();
+    if (!video) return null;
+
+    const mappedBaseCode = gfxromBankMapper(
+      GFXTYPE_SPRITES, tile.rawCode,
+      video.getMapperTable(), video.getBankSizes(), video.getBankBases(),
+    );
+    if (mappedBaseCode === -1) return null;
+
+    const tileCodes: number[] = [];
+    for (let nys = 0; nys < ny; nys++) {
+      for (let nxs = 0; nxs < nx; nxs++) {
+        let tileCode: number;
+        if (tile.flipY) {
+          if (tile.flipX) {
+            tileCode = (mappedBaseCode & ~0x0F) + ((mappedBaseCode + (nx - 1) - nxs) & 0x0F) + 0x10 * (ny - 1 - nys);
+          } else {
+            tileCode = (mappedBaseCode & ~0x0F) + ((mappedBaseCode + nxs) & 0x0F) + 0x10 * (ny - 1 - nys);
+          }
+        } else {
+          if (tile.flipX) {
+            tileCode = (mappedBaseCode & ~0x0F) + ((mappedBaseCode + (nx - 1) - nxs) & 0x0F) + 0x10 * nys;
+          } else {
+            tileCode = (mappedBaseCode & ~0x0F) + ((mappedBaseCode + nxs) & 0x0F) + 0x10 * nys;
+          }
+        }
+        tileCodes.push(tileCode);
+      }
+    }
+    return tileCodes;
   }
 
   // -- Frame stepping --
@@ -376,6 +454,33 @@ export class SpriteEditor {
     for (let i = 0; i < count; i++) {
       this.emulator.stepFrame();
     }
+    this.onTileChanged?.();
+  }
+
+  // -- Direct tile selection from pose data --
+
+  /**
+   * Set the current tile context directly from captured pose tile data.
+   * Used by the sprite sheet viewer to select a tile without clicking on the game screen.
+   */
+  selectTileFromPose(mappedCode: number, paletteIndex: number): void {
+    const video = this.emulator.getVideo();
+    if (!video) return;
+    const paletteBase = video.getPaletteBase();
+
+    this._currentTile = {
+      layerId: LAYER_OBJ,
+      tileCode: mappedCode,
+      rawCode: 0, // not meaningful for direct selection
+      paletteIndex,
+      gfxRomOffset: mappedCode * CHAR_SIZE_16,
+      tileW: 16,
+      tileH: 16,
+      charSize: CHAR_SIZE_16,
+      flipX: false,
+      flipY: false,
+      paletteBase,
+    };
     this.onTileChanged?.();
   }
 

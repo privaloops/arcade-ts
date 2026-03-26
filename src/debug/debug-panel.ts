@@ -197,45 +197,44 @@ export class DebugPanel {
       this.emulator.stepFrame();
     });
 
-    // ── Layers (open by default) ──
+    // ── Sprite Editor (open by default, first section) ──
     {
-      const [sec, content] = collapsibleSection("Layers",
-        "CPS1 hardware draws the screen in 4 independent layers stacked on top of each other:\n" +
-        "• Scroll 3 (32×32 tiles) — far background, large decorative elements\n" +
-        "• Scroll 2 (16×16 tiles) — main background, the stage you fight on\n" +
-        "• Sprites (16×16 tiles) — characters, projectiles, moving objects\n" +
-        "• Scroll 1 (8×8 tiles) — HUD, score, health bars\n\n" +
-        "Toggle each layer on/off to see what it contributes to the final image.", true);
+      const [sec, content] = collapsibleSection("Sprite Editor",
+        "Click on a sprite in the game to select its tile.\n" +
+        "Paint pixels with pencil, fill, eraser tools.\n" +
+        "Changes are written directly to the GFX ROM and visible immediately.\n\n" +
+        "Shortcuts: B=pencil, G=fill, I=eyedropper, X=eraser, [/]=colors", true);
 
-      for (const layerId of LAYER_IDS) {
-        const row = this.createLayerRow(layerId);
-        this.layerRows.set(layerId, row);
-        content.appendChild(row);
-      }
-
-      const orderDiv = el("div", "dbg-order");
-      orderDiv.textContent = "Draw order: ";
-      this.orderDisplay = el("span", "dbg-order-value");
-      this.orderDisplay.textContent = "...";
-      orderDiv.appendChild(this.orderDisplay);
-      content.appendChild(orderDiv);
+      this.spriteEditorUI = new SpriteEditorUI(this.emulator, this.canvas);
+      this.spriteEditorUI.getEditor().setLayerVisibilityFilter((id) => this.renderer.isLayerEnabled(id));
+      this.spriteEditorUI.setInteractionBlocker(() => this.renderer.isExplodedActive());
+      this.spriteEditorUI.setGridLayers(this.gridEnabled);
+      this.spriteEditorUI.setHwLayerToggle((layerId, visible) => {
+        this.renderer.setLayerEnabled(layerId, visible);
+        const cb = this.layerCheckboxes.get(layerId);
+        if (cb) cb.checked = visible;
+        if (this.emulator.isPaused()) this.emulator.rerender();
+      });
+      this.spriteEditorUI.setSpreadChange((value) => {
+        this.renderer.setSpread(value);
+        if (this.spreadSlider) this.spreadSlider.value = String(value);
+        if (this.spreadValue) this.spreadValue.textContent = String(value);
+        if (this.emulator.isPaused()) this.emulator.rerender();
+      });
+      this.spriteEditorUI.buildInto(content);
 
       c.appendChild(sec);
     }
 
-    // ── 3D Exploded View (open by default) ──
+    // Layers + 3D Exploded View moved to left panel (layer-panel.ts)
+    // Keep layer rows for checkbox sync from left panel callbacks
+    for (const layerId of LAYER_IDS) {
+      this.createLayerRow(layerId);
+    }
+    this.orderDisplay = el("span", "dbg-order-value");
+
     {
-      const [sec, content] = collapsibleSection("3D Exploded View",
-        "Separates the 4 hardware layers in 3D space, like an exploded diagram of a PCB.\n\n" +
-        "Drag the slider to spread the layers apart. Click and drag on the view to rotate.\n\n" +
-        "This reveals how the CPS1 composes the final image by stacking independent tile planes.", true);
-
-      const hint = el("div");
-      hint.style.cssText = "font-size:0.65rem;color:#444;padding:0 0 6px;";
-      hint.textContent = "Drag to rotate \u00B7 Slider to spread layers";
-      content.appendChild(hint);
-
-      const sliderRow = el("div", "dbg-slider-row");
+      // Hidden spread slider (synced from left panel)
       this.spreadSlider = document.createElement("input");
       this.spreadSlider.type = "range";
       this.spreadSlider.min = "0";
@@ -243,17 +242,7 @@ export class DebugPanel {
       this.spreadSlider.value = "0";
       this.spreadValue = el("span", "dbg-slider-value");
       this.spreadValue.textContent = "0";
-      sliderRow.append(this.spreadSlider, this.spreadValue);
-      content.appendChild(sliderRow);
 
-      this.spreadSlider.addEventListener("input", () => {
-        const val = parseInt(this.spreadSlider!.value, 10);
-        this.renderer.setSpread(val);
-        this.spreadValue!.textContent = String(val);
-        if (this.emulator.isPaused()) this.emulator.rerender();
-      });
-
-      c.appendChild(sec);
     }
 
     // ── Palette (closed by default) ──
@@ -356,23 +345,6 @@ export class DebugPanel {
       this.inspectorInfo = el("div", "dbg-inspector-info") as HTMLDivElement;
       this.inspectorInfo.textContent = "No pixel selected";
       content.appendChild(this.inspectorInfo);
-
-      c.appendChild(sec);
-    }
-
-    // ── Sprite Editor (open by default) ──
-    {
-      const [sec, content] = collapsibleSection("Sprite Editor",
-        "Click on a sprite in the game to select its tile.\n" +
-        "Paint pixels with pencil, fill, eraser tools.\n" +
-        "Changes are written directly to the GFX ROM and visible immediately.\n\n" +
-        "Shortcuts: B=pencil, G=fill, I=eyedropper, X=eraser, [/]=colors", true);
-
-      this.spriteEditorUI = new SpriteEditorUI(this.emulator, this.canvas);
-      this.spriteEditorUI.getEditor().setLayerVisibilityFilter((id) => this.renderer.isLayerEnabled(id));
-      this.spriteEditorUI.setInteractionBlocker(() => this.renderer.isExplodedActive());
-      this.spriteEditorUI.setGridLayers(this.gridEnabled);
-      this.spriteEditorUI.buildInto(content);
 
       c.appendChild(sec);
     }

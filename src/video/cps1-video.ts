@@ -162,6 +162,7 @@ export interface ScrollInspectResult {
   flipX: boolean;
   flipY: boolean;
   tilemapOffset: number;   // VRAM offset of the tilemap entry
+  tileIndex: number;       // index in the tilemap (needed for scroll1 interleave)
 }
 
 /** Config needed by the DOM renderer to create a FrameStateExtractor */
@@ -265,7 +266,7 @@ export function decodeRow(
 
 export class CPS1Video {
   private readonly vram: Uint8Array;
-  private readonly graphicsRom: Uint8Array;
+  private graphicsRom: Uint8Array;
   private readonly cpsaRegs: Uint8Array;
   private readonly cpsbRegs: Uint8Array;
 
@@ -1269,11 +1270,93 @@ export class CPS1Video {
       flipX,
       flipY,
       tilemapOffset: entryOffset,
+      tileIndex,
     };
   }
 
   getGraphicsRom(): Uint8Array {
     return this.graphicsRom;
+  }
+
+  /**
+   * Expand the GFX ROM with additional free tile space.
+   * Adds a new bank mapper range so the new tiles are addressable.
+   * Returns the new GFX ROM reference.
+   *
+   * Strategy: round extraBytes up to a power of 2 (required for bank mask),
+   * find an unused shiftedCode range for the mapper, and add a new bank.
+   */
+  expandGfxRom(extraBytes: number, gfxType: number): Uint8Array {
+    // Determine shift for this GFX type
+    const shift = gfxType === GFXTYPE_SCROLL3 ? 3 : (gfxType === GFXTYPE_SCROLL1 ? 0 : 1);
+
+    // bankSizes are in shifted-code space, not bytes.
+    // For scroll2 (shift=1): 1 shifted-code unit = 2^shift tile codes = shift-dependent
+    // Actual ROM bytes for bankSize B = B * (charSize >> shift) where charSize is per-tile bytes
+    // Simpler: bankSize in shifted space, round to power of 2
+    // charSize per gfx type: scroll1=64, scroll2=128, scroll3=512, sprites=128
+    const charSize = gfxType === GFXTYPE_SCROLL1 ? 64 : gfxType === GFXTYPE_SCROLL3 ? 512 : 128;
+    const tilesNeeded = Math.ceil(extraBytes / charSize);
+    let bankSizeShifted = 1;
+    while (bankSizeShifted < (tilesNeeded << shift)) bankSizeShifted <<= 1;
+
+    // Actual bytes to add to ROM = bankSizeShifted * (128 >> shift) for scroll2
+    // More precisely: the mapper returns (bankBase + (shiftedCode & (bankSize-1))) >> shift
+    // So max mapped code offset within bank = (bankSize-1) >> shift
+    // ROM bytes = ((bankSize-1) >> shift + 1) * charSize
+    // But charSize depends on the layer... simplify: just add bankSizeShifted * 64 bytes
+    // which is enough for any tile size
+    const romBytes = bankSizeShifted * 64;
+
+    const oldSize = this.graphicsRom.length;
+    const newRom = new Uint8Array(oldSize + romBytes);
+    newRom.set(this.graphicsRom);
+    this.graphicsRom = newRom;
+
+    // Find an unused bank slot (0-3)
+    let newBankIdx = -1;
+    for (let i = 0; i < 4; i++) {
+      if (this.bankSizes[i] === 0) { newBankIdx = i; break; }
+    }
+    if (newBankIdx === -1) {
+      // Extend to 5+ banks if needed
+      newBankIdx = this.bankSizes.length;
+      this.bankSizes.push(0);
+    }
+
+    this.bankSizes[newBankIdx] = bankSizeShifted;
+
+    // Recompute bankBases
+    this.bankBases = [];
+    let base = 0;
+    for (const size of this.bankSizes) {
+      this.bankBases.push(base);
+      base += size;
+    }
+
+    // Find an unused shiftedCode range for the mapper table.
+    // Collect all used ranges for this gfxType.
+    let maxUsedEnd = 0;
+    for (const range of this.mapperTable) {
+      if (range.type & gfxType) {
+        if (range.end > maxUsedEnd) maxUsedEnd = range.end;
+      }
+    }
+
+    // New range starts just after the highest used range
+    const rangeStart = maxUsedEnd + 1;
+    const rangeEnd = rangeStart + bankSizeShifted - 1;
+
+    this.mapperTable.push({
+      type: gfxType,
+      start: rangeStart,
+      end: rangeEnd,
+      bank: newBankIdx,
+    });
+
+    console.log(`[EXPAND] extraBytes=${extraBytes}, tilesNeeded=${tilesNeeded}, shift=${shift}, bankSizeShifted=${bankSizeShifted}, romBytes=${romBytes}. GFX ROM: ${oldSize} → ${newRom.length}. Bank ${newBankIdx}: range=${rangeStart}-${rangeEnd}`);
+
+    return newRom;
   }
 
   getVram(): Uint8Array {

@@ -15,7 +15,7 @@ export class RomStore {
 
   /** Mutable ROM regions — editors write here, consumers read here */
   readonly programRom: Uint8Array;
-  readonly graphicsRom: Uint8Array;
+  graphicsRom: Uint8Array;
   readonly audioRom: Uint8Array;
   readonly okiRom: Uint8Array;
 
@@ -113,9 +113,18 @@ export class RomStore {
     return found;
   }
 
+  /**
+   * Update the GFX ROM reference after expansion.
+   * The original copy stays at the old size — isModified() will detect the difference.
+   */
+  updateGraphicsRom(newRom: Uint8Array): void {
+    this.graphicsRom = newRom;
+  }
+
   /** Check if a region has been modified */
   isModified(region: Region): boolean {
     const [mutable, original] = this.getBufferPair(region);
+    if (mutable.length !== original.length) return true; // expanded ROM
     for (let i = 0; i < mutable.length; i++) {
       if (mutable[i] !== original[i]) return true;
     }
@@ -212,6 +221,12 @@ export class RomStore {
    */
   private reconstructGraphicsFiles(zip: JSZip): void {
     const gfx = this.graphicsRom;
+    const originalSize = this.originalGraphicsRom.length;
+
+    // If ROM was expanded, export the extra data as a raw file
+    if (gfx.length > originalSize) {
+      zip.file('gfx_expanded.bin', gfx.subarray(originalSize));
+    }
 
     for (const bank of this.gameDef.graphics.banks) {
       const numRoms = bank.files.length;
