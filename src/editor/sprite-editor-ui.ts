@@ -312,7 +312,10 @@ export class SpriteEditorUI {
       createScrollGroup('Scroll 2', LAYER_SCROLL2),
       createScrollGroup('Scroll 3', LAYER_SCROLL3),
     );
-    // Sprite groups are created dynamically via capture — no placeholder needed
+    // OBJ layer placeholder (for HW visibility/grid toggle in layer panel)
+    if (!this.layerGroups.some(g => g.type === 'sprite')) {
+      this.layerGroups.push({ type: 'sprite', name: 'Sprites (OBJ)', layers: [] });
+    }
     this.activeGroupIndex = 0;
   }
 

@@ -143,7 +143,7 @@ export class RomStore {
    */
   async exportZip(): Promise<Blob> {
     const zip = this.buildExportZip();
-    return zip.generateAsync({ type: 'blob' });
+    return zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
   }
 
   /** Export as ArrayBuffer (for Node.js/test environments) */
