@@ -155,6 +155,7 @@ function handleRomStudioFile(file: File): void {
     document.querySelector('.autosave-prompt')?.remove();
     clearAutoSave(romStore.name).catch(() => {});
 
+    emulator.rerender();
     showToast(`Session restaurée (${result.data.gameName})`, true);
     setStatus(`Loaded: ${file.name}`);
   }).catch(err => {
@@ -210,6 +211,7 @@ function onRomLoaded(gameName: string): void {
         const editorUI = debugPanel?.getSpriteEditorUI();
         if (editorUI) editorUI.restorePoses(applyResult.poses);
         saveCreatedAt = result.data.createdAt;
+        emulator.rerender();
         showToast('Session restaurée depuis auto-save', true);
       }).catch(() => showToast('Erreur de restauration', false));
     });
