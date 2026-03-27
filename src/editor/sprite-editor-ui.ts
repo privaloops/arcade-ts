@@ -117,6 +117,10 @@ export class SpriteEditorUI {
   private painting = false;
   private lastPaintPos: { x: number; y: number } | null = null;
   private overlayRafId = 0;
+  private lastMouseX = 0;
+  private lastMouseY = 0;
+  private selectedTileScreenX = 0;
+  private selectedTileScreenY = 0;
   private gridLayers: Map<number, boolean> = new Map();
   private hwLayerVisible: Map<number, boolean> = new Map();
   private _isInteractionBlocked: (() => boolean) | null = null;
@@ -160,6 +164,41 @@ export class SpriteEditorUI {
     this.infoBar = el('div', 'edit-info') as HTMLDivElement;
     container.appendChild(this.infoBar);
 
+    // Action buttons (above tile grid)
+    const actions = el('div', 'edit-actions');
+
+    this.undoBtn = el('button', 'ctrl-btn') as HTMLButtonElement;
+    this.undoBtn.textContent = 'Undo';
+    this.undoBtn.title = 'Ctrl+Z';
+    this.undoBtn.onclick = () => { this.editor.undo(); this.refreshUndoButtons(); };
+    actions.appendChild(this.undoBtn);
+
+    this.redoBtn = el('button', 'ctrl-btn') as HTMLButtonElement;
+    this.redoBtn.textContent = 'Redo';
+    this.redoBtn.title = 'Ctrl+Shift+Z';
+    this.redoBtn.onclick = () => { this.editor.redo(); this.refreshUndoButtons(); };
+    actions.appendChild(this.redoBtn);
+
+    this.resetBtn = el('button', 'ctrl-btn') as HTMLButtonElement;
+    this.resetBtn.textContent = 'Reset Tile';
+    this.resetBtn.onclick = () => { this.editor.resetTile(); this.refreshUndoButtons(); };
+    actions.appendChild(this.resetBtn);
+
+    const eraseBtn = el('button', 'ctrl-btn') as HTMLButtonElement;
+    eraseBtn.textContent = 'Erase Tile';
+    eraseBtn.title = 'Clear all pixels to transparent (pen 15)';
+    eraseBtn.onclick = () => { this.editor.eraseTile(); this.refreshUndoButtons(); };
+    actions.appendChild(eraseBtn);
+
+    const importImgBtn = el('button', 'ctrl-btn') as HTMLButtonElement;
+    importImgBtn.innerHTML = '\u{1F4E5} Import';
+    importImgBtn.title = 'Import image onto this tile';
+    importImgBtn.onclick = () => this.importImageOnCurrentTile();
+    actions.appendChild(importImgBtn);
+
+    container.appendChild(actions);
+    this.refreshUndoButtons();
+
     // Tile grid canvas
     const tileSection = el('div', 'edit-tile-section');
     const cvs = document.createElement('canvas');
@@ -198,35 +237,6 @@ export class SpriteEditorUI {
     this.neighborGrid = el('div', 'edit-neighbors') as HTMLDivElement;
     neighborsSection.appendChild(this.neighborGrid);
     container.appendChild(neighborsSection);
-
-    // Action buttons
-    const actions = el('div', 'edit-actions');
-
-    this.undoBtn = el('button', 'ctrl-btn') as HTMLButtonElement;
-    this.undoBtn.textContent = 'Undo';
-    this.undoBtn.title = 'Ctrl+Z';
-    this.undoBtn.onclick = () => { this.editor.undo(); this.refreshUndoButtons(); };
-    actions.appendChild(this.undoBtn);
-
-    this.redoBtn = el('button', 'ctrl-btn') as HTMLButtonElement;
-    this.redoBtn.textContent = 'Redo';
-    this.redoBtn.title = 'Ctrl+Shift+Z';
-    this.redoBtn.onclick = () => { this.editor.redo(); this.refreshUndoButtons(); };
-    actions.appendChild(this.redoBtn);
-
-    this.resetBtn = el('button', 'ctrl-btn') as HTMLButtonElement;
-    this.resetBtn.textContent = 'Reset Tile';
-    this.resetBtn.onclick = () => { this.editor.resetTile(); this.refreshUndoButtons(); };
-    actions.appendChild(this.resetBtn);
-
-    const importImgBtn = el('button', 'ctrl-btn') as HTMLButtonElement;
-    importImgBtn.innerHTML = '\u{1F4E5} Import';
-    importImgBtn.title = 'Import image onto this tile';
-    importImgBtn.onclick = () => this.importImageOnCurrentTile();
-    actions.appendChild(importImgBtn);
-
-    container.appendChild(actions);
-    this.refreshUndoButtons();
 
     // Captured sprites section
     this.capturesSection = el('div', 'edit-captures-section') as HTMLDivElement;
@@ -331,11 +341,36 @@ export class SpriteEditorUI {
       createScrollGroup('Scroll 2', LAYER_SCROLL2),
       createScrollGroup('Scroll 3', LAYER_SCROLL3),
     );
-    // OBJ layer placeholder (for HW visibility/grid toggle in layer panel)
     if (!this.layerGroups.some(g => g.type === 'sprite')) {
       this.layerGroups.push({ type: 'sprite', name: 'Sprites (OBJ)', layers: [] });
     }
     this.activeGroupIndex = 0;
+    this.reorderGroupsByLayerOrder();
+  }
+
+  /** Reorder layer groups to match the CPS-B dynamic layer order (front first). */
+  reorderGroupsByLayerOrder(): void {
+    const video = this.emulator.getVideo();
+    if (!video) return;
+
+    const order = video.getLayerOrder(); // [back, ..., front]
+    const layerIdToRank = new Map<number, number>();
+    for (let i = 0; i < order.length; i++) {
+      // Front = highest rank (order.length - 1 - i → 0 = front)
+      layerIdToRank.set(order[i]!, order.length - 1 - i);
+    }
+
+    const getGroupLayerId = (g: LayerGroup): number => {
+      if (g.type === 'sprite') return LAYER_OBJ;
+      return g.layerId ?? 999;
+    };
+
+    // Stable sort: HW groups by rank (front first), user-created groups at the end
+    const hwGroups = this.layerGroups.filter(g => layerIdToRank.has(getGroupLayerId(g)));
+    const otherGroups = this.layerGroups.filter(g => !layerIdToRank.has(getGroupLayerId(g)));
+    hwGroups.sort((a, b) => (layerIdToRank.get(getGroupLayerId(a)) ?? 99) - (layerIdToRank.get(getGroupLayerId(b)) ?? 99));
+    this.layerGroups.length = 0;
+    this.layerGroups.push(...hwGroups, ...otherGroups);
   }
 
   private ensureLayerPanel(): void {
@@ -411,6 +446,7 @@ export class SpriteEditorUI {
   }
 
   private refreshLayerPanel(): void {
+    this.reorderGroupsByLayerOrder();
     const gfxRom = this.editor.getGfxRom() ?? undefined;
     const video = this.emulator.getVideo();
     const layerOrder = video?.getLayerOrder();
@@ -697,6 +733,8 @@ export class SpriteEditorUI {
 
   private handleOverlayMove(e: MouseEvent): void {
     if (this._isInteractionBlocked?.()) return;
+    const mousePos = this.screenCoordsFromEvent(e);
+    if (mousePos) { this.lastMouseX = mousePos.x; this.lastMouseY = mousePos.y; }
 
     // Handle layer corner resize (resizeStartX/Y are in world coords, deltas are the same)
     if (this.resizingLayer && this.activeLayer) {
@@ -779,6 +817,8 @@ export class SpriteEditorUI {
 
     const pos = this.screenCoordsFromEvent(e);
     if (!pos) return;
+    this.lastMouseX = pos.x;
+    this.lastMouseY = pos.y;
 
     // If there's an active photo layer under the cursor, don't switch groups (world coords)
     const layer = this.activeLayer;
@@ -827,8 +867,8 @@ export class SpriteEditorUI {
 
     const ctx = this.overlayCtx;
 
-    if (tile.layerId === 0 && tile.spriteIndex !== undefined) {
-      // Selected tile highlight (pink)
+    if (tile.layerId === LAYER_OBJ && tile.spriteIndex !== undefined) {
+      // Sprite tile highlight (pink)
       const objBuf = video.getObjBuffer();
       const entryOff = tile.spriteIndex * 8;
       const sprX = (objBuf[entryOff]! << 8) | objBuf[entryOff + 1]!;
@@ -841,6 +881,13 @@ export class SpriteEditorUI {
       ctx.strokeStyle = '#ff1a50';
       ctx.lineWidth = 2;
       ctx.strokeRect(tileScreenX, tileScreenY, 16, 16);
+    } else if (tile.layerId >= LAYER_SCROLL1 && tile.layerId <= LAYER_SCROLL3 && tile.screenX !== undefined && tile.screenY !== undefined) {
+      // Scroll tile highlight (pink)
+      ctx.fillStyle = 'rgba(255, 26, 80, 0.25)';
+      ctx.fillRect(tile.screenX, tile.screenY, tile.tileW, tile.tileH);
+      ctx.strokeStyle = '#ff1a50';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(tile.screenX, tile.screenY, tile.tileW, tile.tileH);
     }
   }
 
@@ -1131,18 +1178,28 @@ export class SpriteEditorUI {
     return { x, y };
   }
 
+  /** Convert display coordinates (post-flip) to ROM coordinates (pre-flip). */
+  private displayToRomCoords(lx: number, ly: number): { x: number; y: number } {
+    const tile = this.editor.currentTile;
+    if (!tile) return { x: lx, y: ly };
+    const rx = tile.flipX ? (tile.tileW - 1 - lx) : lx;
+    const ry = tile.flipY ? (tile.tileH - 1 - ly) : ly;
+    return { x: rx, y: ry };
+  }
+
   private handleTilePixelAction(lx: number, ly: number): void {
+    const { x, y } = this.displayToRomCoords(lx, ly);
     const tool = this.editor.tool;
     switch (tool) {
       case 'pencil':
       case 'eraser':
-        this.editor.paintPixel(lx, ly);
+        this.editor.paintPixel(x, y);
         break;
       case 'fill':
-        this.editor.floodFill(lx, ly);
+        this.editor.floodFill(x, y);
         break;
       case 'eyedropper':
-        this.editor.eyedrop(lx, ly);
+        this.editor.eyedrop(x, y);
         this.refreshPalette();
         break;
     }
@@ -1171,7 +1228,10 @@ export class SpriteEditorUI {
 
     for (let y = 0; y < th; y++) {
       for (let x = 0; x < tw; x++) {
-        const colorIdx = tileData[y * tw + x]!;
+        // Read pixel in display orientation (apply flip)
+        const srcX = tile.flipX ? (tw - 1 - x) : x;
+        const srcY = tile.flipY ? (th - 1 - y) : y;
+        const colorIdx = tileData[srcY * tw + srcX]!;
 
         if (colorIdx === 15) {
           // Transparent: checkerboard
@@ -1251,14 +1311,28 @@ export class SpriteEditorUI {
   private openColorPicker(colorIndex: number): void {
     const palette = this.editor.getCurrentPalette();
     const [r, g, b] = palette[colorIndex] ?? [0, 0, 0];
+    const isTransparent = colorIndex === 15;
 
+    // Remove any existing color dialog
+    this.paletteContainer?.querySelector('.edit-color-dialog')?.remove();
+
+    const dialog = el('div', 'edit-color-dialog') as HTMLDivElement;
+
+    // Color input (visible, always shown)
     const input = document.createElement('input');
     input.type = 'color';
     input.value = `#${hex2(r)}${hex2(g)}${hex2(b)}`;
-    input.style.position = 'absolute';
-    input.style.opacity = '0';
-    input.style.pointerEvents = 'none';
-    document.body.appendChild(input);
+    input.className = 'edit-color-input';
+
+    // Transparent checkbox
+    const transLabel = el('label', 'edit-color-trans-label') as HTMLLabelElement;
+    const transCb = document.createElement('input');
+    transCb.type = 'checkbox';
+    transCb.checked = isTransparent;
+    transLabel.append(transCb, ' Transparent');
+
+    dialog.append(input, transLabel);
+    this.paletteContainer?.appendChild(dialog);
 
     input.addEventListener('input', () => {
       const hex = input.value;
@@ -1266,10 +1340,23 @@ export class SpriteEditorUI {
       const ng = parseInt(hex.slice(3, 5), 16);
       const nb = parseInt(hex.slice(5, 7), 16);
       this.editor.editPaletteColor(colorIndex, nr, ng, nb);
-      this.refreshPalette();
+      // Don't refreshPalette — it would destroy the dialog
     });
 
-    input.addEventListener('change', () => { input.remove(); });
+    transCb.addEventListener('change', () => {
+      if (transCb.checked) {
+        this.editor.replaceColorWithTransparent(colorIndex);
+      } else {
+        // Undo transparency: replace pen 15 pixels back to this color index
+        this.editor.replaceTransparentWithColor(colorIndex);
+      }
+      this.refreshPalette();
+      // Re-open dialog to keep editing
+      this.paletteContainer?.appendChild(dialog);
+      transCb.checked = transCb.checked; // preserve state
+    });
+
+    // Open native picker immediately
     input.click();
   }
 
@@ -1411,8 +1498,7 @@ export class SpriteEditorUI {
 
     switch (e.key) {
       case 'Escape':
-        this.deactivate();
-        e.preventDefault();
+        // Don't close editor panels — Escape only exits fullscreen (handled in shortcuts.ts)
         break;
       case 'b': case 'B':
         this.editor.setTool('pencil');
@@ -2600,21 +2686,51 @@ export class SpriteEditorUI {
       }
 
       // Write photo pixels only on tiles with refCount = 1
+      // Re-quantize per tile: each tile has its own palette in the tilemap,
+      // so palette indices from the global quantize step are wrong.
+      // Instead, read the RGBA color and find the nearest match in the tile's actual palette.
+      const paletteBase = video.getPaletteBase();
+      const bufs = this.emulator.getBusBuffers();
+      const paletteCache = new Map<number, Array<[number, number, number]>>();
+
       let written = 0;
       let skipped = 0;
       for (const layer of group.layers) {
         if (!layer.quantized) continue;
         for (let ly = 0; ly < layer.height; ly++) {
           for (let lx = 0; lx < layer.width; lx++) {
-            const idx = layer.pixels[ly * layer.width + lx]!;
-            if (idx === 0) continue;
+            // Skip transparent pixels (check RGBA alpha, not the global quantize index)
+            const pi = (ly * layer.width + lx) * 4;
+            if (layer.rgbaData.data[pi + 3]! < 128) continue;
             const sx = lx + layer.offsetX - mergeScroll.sx;
             const sy = ly + layer.offsetY - mergeScroll.sy;
             if (sx < 0 || sx >= SCREEN_WIDTH || sy < 0 || sy >= SCREEN_HEIGHT) { skipped++; continue; }
             const info = video.inspectScrollAt(sx, sy, group.layerId, true);
             if (!info) { skipped++; continue; }
             if ((codeCount.get(info.tileCode) ?? 0) > 1) { skipped++; continue; }
-            writeScrollPixel(gfxRom, info.tileCode, info.localX, info.localY, idx, charSize, info.tileIndex, isScroll1);
+
+            // Read the original RGBA color from the layer
+            const r = layer.rgbaData.data[pi]!;
+            const g = layer.rgbaData.data[pi + 1]!;
+            const b = layer.rgbaData.data[pi + 2]!;
+
+            // Get the tile's actual palette (cached per paletteIndex)
+            let tilePalette = paletteCache.get(info.paletteIndex);
+            if (!tilePalette) {
+              tilePalette = readPalette(bufs.vram, paletteBase, info.paletteIndex);
+              paletteCache.set(info.paletteIndex, tilePalette);
+            }
+
+            // Nearest-neighbor in tile's palette (skip index 0 = transparent)
+            let bestIdx = 1;
+            let bestDist = Infinity;
+            for (let c = 1; c < tilePalette.length; c++) {
+              const [pr, pg, pb] = tilePalette[c]!;
+              const dist = (r - pr) ** 2 + (g - pg) ** 2 + (b - pb) ** 2;
+              if (dist < bestDist) { bestDist = dist; bestIdx = c; }
+            }
+
+            writeScrollPixel(gfxRom, info.tileCode, info.localX, info.localY, bestIdx, charSize, info.tileIndex, isScroll1);
             written++;
           }
         }

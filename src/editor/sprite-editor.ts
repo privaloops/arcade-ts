@@ -45,6 +45,9 @@ export interface TileContext {
   nys?: number;
   // Scroll-specific (needed for scroll1 interleave)
   tileIndex?: number;
+  // Screen position of the tile's top-left corner (for overlay highlight)
+  screenX?: number;
+  screenY?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -138,47 +141,75 @@ export class SpriteEditor {
       nxs: sprInfo.nxs, nys: sprInfo.nys,
     });
 
-    // Step 1: Try sprites — opaque pixels only
-    const sprOpaque = isVisible(LAYER_OBJ) ? video.inspectSpriteAt(screenX, screenY, false) : null;
-    if (sprOpaque) {
-      this._currentTile = makeSpriteCtx(sprOpaque);
-      this.onTileChanged?.();
-      return this._currentTile;
-    }
+    // Dynamic priority from CPS-B layer control register (front-to-back).
+    // Click traverses transparent pixels to reach the layer beneath.
 
-    // Step 2: Try scroll layers (front-to-back based on layer order)
-    const layerOrder = video.getLayerOrder();
+    const makeScrollCtx = (scrInfo: NonNullable<ReturnType<typeof video.inspectScrollAt>>): TileContext => {
+      // localX/localY from inspectScrollAt are post-flip (for pixel decoding).
+      // For screen position we need pre-flip values.
+      const preFlipX = scrInfo.flipX ? (scrInfo.tileW - 1 - scrInfo.localX) : scrInfo.localX;
+      const preFlipY = scrInfo.flipY ? (scrInfo.tileH - 1 - scrInfo.localY) : scrInfo.localY;
+      return {
+        layerId: scrInfo.layerId,
+        tileCode: scrInfo.tileCode,
+        rawCode: scrInfo.rawCode,
+        paletteIndex: scrInfo.paletteIndex,
+        gfxRomOffset: scrInfo.gfxRomOffset,
+        tileW: scrInfo.tileW, tileH: scrInfo.tileH,
+        charSize: scrInfo.charSize,
+        flipX: scrInfo.flipX,
+        flipY: scrInfo.flipY,
+        paletteBase,
+        tileIndex: scrInfo.tileIndex,
+        screenX: screenX - preFlipX,
+        screenY: screenY - preFlipY,
+      };
+    };
+
+    const layerOrder = video.getLayerOrder(); // [back, ..., front]
+
+    // Pass 1: opaque pixels only (front-to-back)
     for (let slot = layerOrder.length - 1; slot >= 0; slot--) {
       const lid = layerOrder[slot]!;
-      if (lid === LAYER_OBJ) continue;
       if (!isVisible(lid)) continue;
 
-      const scrInfo = video.inspectScrollAt(screenX, screenY, lid, true);
-      if (scrInfo) {
-        this._currentTile = {
-          layerId: lid,
-          tileCode: scrInfo.tileCode,
-          rawCode: scrInfo.rawCode,
-          paletteIndex: scrInfo.paletteIndex,
-          gfxRomOffset: scrInfo.gfxRomOffset,
-          tileW: scrInfo.tileW, tileH: scrInfo.tileH,
-          charSize: scrInfo.charSize,
-          flipX: scrInfo.flipX,
-          flipY: scrInfo.flipY,
-          paletteBase,
-          tileIndex: scrInfo.tileIndex,
-        };
-        this.onTileChanged?.();
-        return this._currentTile;
+      if (lid === LAYER_OBJ) {
+        const sprOpaque = video.inspectSpriteAt(screenX, screenY, false);
+        if (sprOpaque) {
+          this._currentTile = makeSpriteCtx(sprOpaque);
+          this.onTileChanged?.();
+          return this._currentTile;
+        }
+      } else {
+        const scrInfo = video.inspectScrollAt(screenX, screenY, lid, false);
+        if (scrInfo) {
+          this._currentTile = makeScrollCtx(scrInfo);
+          this.onTileChanged?.();
+          return this._currentTile;
+        }
       }
     }
 
-    // Step 3: Fallback — sprite bounds only (transparent pixel)
-    const sprBounds = isVisible(LAYER_OBJ) ? video.inspectSpriteAt(screenX, screenY, true) : null;
-    if (sprBounds) {
-      this._currentTile = makeSpriteCtx(sprBounds);
-      this.onTileChanged?.();
-      return this._currentTile;
+    // Pass 2: fallback — include transparent pixels (boundsOnly, front-to-back)
+    for (let slot = layerOrder.length - 1; slot >= 0; slot--) {
+      const lid = layerOrder[slot]!;
+      if (!isVisible(lid)) continue;
+
+      if (lid === LAYER_OBJ) {
+        const sprBounds = video.inspectSpriteAt(screenX, screenY, true);
+        if (sprBounds) {
+          this._currentTile = makeSpriteCtx(sprBounds);
+          this.onTileChanged?.();
+          return this._currentTile;
+        }
+      } else {
+        const scrInfo = video.inspectScrollAt(screenX, screenY, lid, true);
+        if (scrInfo) {
+          this._currentTile = makeScrollCtx(scrInfo);
+          this.onTileChanged?.();
+          return this._currentTile;
+        }
+      }
     }
 
     return null;
@@ -368,6 +399,24 @@ export class SpriteEditor {
     this.onTileChanged?.();
   }
 
+  /** Erase entire tile — set all pixels to pen 15 (transparent). */
+  eraseTile(): void {
+    if (!this._currentTile) return;
+    const gfxRom = this.getGfxRom();
+    if (!gfxRom) return;
+
+    const { tileCode, charSize, tileW, tileH } = this._currentTile;
+    this.pushUndo(tileCode, charSize, gfxRom);
+
+    for (let y = 0; y < tileH; y++) {
+      for (let x = 0; x < tileW; x++) {
+        this.writeCurrentPixel(gfxRom, x, y, 15);
+      }
+    }
+
+    this.onTileChanged?.();
+  }
+
   // -- Palette --
 
   getCurrentPalette(): Array<[number, number, number]> {
@@ -498,6 +547,46 @@ export class SpriteEditor {
 
   setOnTileChanged(cb: (() => void) | null): void { this.onTileChanged = cb; }
   setLayerVisibilityFilter(fn: ((layerId: number) => boolean) | null): void { this._isLayerVisible = fn; }
+
+  /** Replace all pixels of a given color index with pen 15 (transparent) in the current tile. */
+  replaceColorWithTransparent(colorIndex: number): void {
+    if (!this._currentTile) return;
+    const gfxRom = this.getGfxRom();
+    if (!gfxRom) return;
+
+    const { tileCode, charSize, tileW, tileH } = this._currentTile;
+    this.pushUndo(tileCode, charSize, gfxRom);
+
+    for (let y = 0; y < tileH; y++) {
+      for (let x = 0; x < tileW; x++) {
+        if (this.readCurrentPixel(gfxRom, x, y) === colorIndex) {
+          this.writeCurrentPixel(gfxRom, x, y, 15);
+        }
+      }
+    }
+
+    this.onTileChanged?.();
+  }
+
+  /** Replace all transparent pixels (pen 15) with a given color index in the current tile. */
+  replaceTransparentWithColor(colorIndex: number): void {
+    if (!this._currentTile) return;
+    const gfxRom = this.getGfxRom();
+    if (!gfxRom) return;
+
+    const { tileCode, charSize, tileW, tileH } = this._currentTile;
+    this.pushUndo(tileCode, charSize, gfxRom);
+
+    for (let y = 0; y < tileH; y++) {
+      for (let x = 0; x < tileW; x++) {
+        if (this.readCurrentPixel(gfxRom, x, y) === 15) {
+          this.writeCurrentPixel(gfxRom, x, y, colorIndex);
+        }
+      }
+    }
+
+    this.onTileChanged?.();
+  }
   setOnToolChanged(cb: (() => void) | null): void { this.onToolChanged = cb; }
   setOnColorChanged(cb: (() => void) | null): void { this.onColorChanged = cb; }
 

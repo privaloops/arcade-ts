@@ -5,7 +5,7 @@ import { SCREEN_WIDTH, SCREEN_HEIGHT } from "../constants";
 import type { Emulator } from "../emulator";
 
 // Layer display order (visual, back→front by default)
-const LAYER_IDS = [LAYER_SCROLL3, LAYER_SCROLL2, LAYER_OBJ, LAYER_SCROLL1];
+const LAYER_IDS = [LAYER_SCROLL1, LAYER_OBJ, LAYER_SCROLL2, LAYER_SCROLL3];
 const LAYER_SHORT: Record<number, string> = {
   [LAYER_OBJ]: "OBJ",
   [LAYER_SCROLL1]: "S1",
