@@ -113,7 +113,7 @@ export function groupCharacter(allSprites: ObjSprite[], clickedIndex: number): S
   const samePalette = allSprites.filter(s => s.palette === palette);
 
   // Flood-fill: find all sprites connected to the clicked one
-  const TOLERANCE = 2; // pixels gap tolerance for adjacency
+  const TOLERANCE = 4; // pixels gap tolerance for adjacency
   const inGroup = new Set<number>();
   const queue = [clicked];
   inGroup.add(clicked.index);
