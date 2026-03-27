@@ -45,6 +45,9 @@ export interface TileContext {
   nys?: number;
   // Scroll-specific (needed for scroll1 interleave)
   tileIndex?: number;
+  // Screen position of the tile's top-left corner (for overlay highlight)
+  screenX?: number;
+  screenY?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -141,19 +144,27 @@ export class SpriteEditor {
     // Dynamic priority from CPS-B layer control register (front-to-back).
     // Click traverses transparent pixels to reach the layer beneath.
 
-    const makeScrollCtx = (scrInfo: NonNullable<ReturnType<typeof video.inspectScrollAt>>): TileContext => ({
-      layerId: scrInfo.layerId,
-      tileCode: scrInfo.tileCode,
-      rawCode: scrInfo.rawCode,
-      paletteIndex: scrInfo.paletteIndex,
-      gfxRomOffset: scrInfo.gfxRomOffset,
-      tileW: scrInfo.tileW, tileH: scrInfo.tileH,
-      charSize: scrInfo.charSize,
-      flipX: scrInfo.flipX,
-      flipY: scrInfo.flipY,
-      paletteBase,
-      tileIndex: scrInfo.tileIndex,
-    });
+    const makeScrollCtx = (scrInfo: NonNullable<ReturnType<typeof video.inspectScrollAt>>): TileContext => {
+      // localX/localY from inspectScrollAt are post-flip (for pixel decoding).
+      // For screen position we need pre-flip values.
+      const preFlipX = scrInfo.flipX ? (scrInfo.tileW - 1 - scrInfo.localX) : scrInfo.localX;
+      const preFlipY = scrInfo.flipY ? (scrInfo.tileH - 1 - scrInfo.localY) : scrInfo.localY;
+      return {
+        layerId: scrInfo.layerId,
+        tileCode: scrInfo.tileCode,
+        rawCode: scrInfo.rawCode,
+        paletteIndex: scrInfo.paletteIndex,
+        gfxRomOffset: scrInfo.gfxRomOffset,
+        tileW: scrInfo.tileW, tileH: scrInfo.tileH,
+        charSize: scrInfo.charSize,
+        flipX: scrInfo.flipX,
+        flipY: scrInfo.flipY,
+        paletteBase,
+        tileIndex: scrInfo.tileIndex,
+        screenX: screenX - preFlipX,
+        screenY: screenY - preFlipY,
+      };
+    };
 
     const layerOrder = video.getLayerOrder(); // [back, ..., front]
 
@@ -384,6 +395,24 @@ export class SpriteEditor {
     const offset = tileCode * charSize;
     const original = romStore.getOriginal('graphics');
     gfxRom.set(original.subarray(offset, offset + charSize), offset);
+
+    this.onTileChanged?.();
+  }
+
+  /** Erase entire tile — set all pixels to pen 15 (transparent). */
+  eraseTile(): void {
+    if (!this._currentTile) return;
+    const gfxRom = this.getGfxRom();
+    if (!gfxRom) return;
+
+    const { tileCode, charSize, tileW, tileH } = this._currentTile;
+    this.pushUndo(tileCode, charSize, gfxRom);
+
+    for (let y = 0; y < tileH; y++) {
+      for (let x = 0; x < tileW; x++) {
+        this.writeCurrentPixel(gfxRom, x, y, 15);
+      }
+    }
 
     this.onTileChanged?.();
   }

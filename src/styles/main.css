@@ -376,7 +376,7 @@
         position: fixed; top: 50px; right: 0; width: 360px; height: calc(100vh - 50px);
         background: var(--color-bg-app); border-left: 1px solid var(--color-border); z-index: 9000;
         transform: translateX(100%); transition: transform 0.3s ease;
-        overflow-y: auto; padding: 16px 14px; box-sizing: border-box;
+        overflow-y: auto; padding: 20px 16px; box-sizing: border-box;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
         color: var(--color-text-secondary);
       }
@@ -975,24 +975,25 @@
         margin-bottom: 12px; min-height: 1.4em;
       }
 
-      .edit-tile-section { display: flex; justify-content: center; margin-bottom: 12px; }
+      .edit-tile-section { display: flex; justify-content: center; margin-bottom: 18px; }
       .edit-tile-canvas {
         width: 256px; height: 256px; image-rendering: pixelated;
         border: 1px solid var(--color-border); border-radius: var(--radius-sm);
         cursor: crosshair;
       }
 
-      .edit-tools { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+      .edit-tools { display: flex; gap: 6px; margin-bottom: 18px; flex-wrap: wrap; }
       .edit-tool-btn { font-size: 0.7rem; padding: 4px 8px; display: inline-flex; align-items: center; gap: 4px; }
       .edit-tool-btn.active { background: var(--color-accent); color: #fff; }
       .edit-tool-icon { font-size: 0.85rem; line-height: 1; }
 
       .edit-section-label {
         font: 600 0.7rem var(--font-system); color: var(--color-text-muted);
-        text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px;
+        text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 8px;
+        margin-top: 4px;
       }
 
-      .edit-palette { margin-bottom: 12px; }
+      .edit-palette { margin-bottom: 18px; }
       .edit-palette-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px; }
       .edit-swatch {
         aspect-ratio: 1; border-radius: var(--radius-sm); cursor: pointer;
@@ -1015,7 +1016,7 @@
       }
       .edit-color-trans-label input { cursor: pointer; }
 
-      .edit-neighbors-section { margin-bottom: 12px; }
+      .edit-neighbors-section { margin-bottom: 18px; }
       .edit-neighbors {
         display: grid; grid-template-columns: repeat(3, 32px); gap: 3px;
         justify-content: center;
@@ -1030,7 +1031,7 @@
       .edit-neighbor-current { background: var(--color-accent-bg); border-color: var(--color-accent); color: var(--color-accent); }
       .edit-neighbor-empty { opacity: 0.2; }
 
-      .edit-actions { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+      .edit-actions { display: flex; gap: 6px; margin-bottom: 18px; flex-wrap: wrap; }
       .edit-actions .ctrl-btn { font-size: 0.75rem; padding: 4px 10px; }
       .edit-actions .ctrl-btn:disabled { opacity: 0.3; cursor: not-allowed; }
 
@@ -1279,7 +1280,7 @@
       .sprite-sheet-back:hover { background: var(--color-surface-hover, #333); }
 
       /* Captured Sprites section (inside right debug panel) */
-      .edit-captures-section { margin-top: 12px; }
+      .edit-captures-section { margin-top: 18px; }
       .edit-captures-list { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; max-height: 300px; overflow-y: auto; }
 
       .edit-capture-card {

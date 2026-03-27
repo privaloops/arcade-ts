@@ -117,6 +117,10 @@ export class SpriteEditorUI {
   private painting = false;
   private lastPaintPos: { x: number; y: number } | null = null;
   private overlayRafId = 0;
+  private lastMouseX = 0;
+  private lastMouseY = 0;
+  private selectedTileScreenX = 0;
+  private selectedTileScreenY = 0;
   private gridLayers: Map<number, boolean> = new Map();
   private hwLayerVisible: Map<number, boolean> = new Map();
   private _isInteractionBlocked: (() => boolean) | null = null;
@@ -160,6 +164,41 @@ export class SpriteEditorUI {
     this.infoBar = el('div', 'edit-info') as HTMLDivElement;
     container.appendChild(this.infoBar);
 
+    // Action buttons (above tile grid)
+    const actions = el('div', 'edit-actions');
+
+    this.undoBtn = el('button', 'ctrl-btn') as HTMLButtonElement;
+    this.undoBtn.textContent = 'Undo';
+    this.undoBtn.title = 'Ctrl+Z';
+    this.undoBtn.onclick = () => { this.editor.undo(); this.refreshUndoButtons(); };
+    actions.appendChild(this.undoBtn);
+
+    this.redoBtn = el('button', 'ctrl-btn') as HTMLButtonElement;
+    this.redoBtn.textContent = 'Redo';
+    this.redoBtn.title = 'Ctrl+Shift+Z';
+    this.redoBtn.onclick = () => { this.editor.redo(); this.refreshUndoButtons(); };
+    actions.appendChild(this.redoBtn);
+
+    this.resetBtn = el('button', 'ctrl-btn') as HTMLButtonElement;
+    this.resetBtn.textContent = 'Reset Tile';
+    this.resetBtn.onclick = () => { this.editor.resetTile(); this.refreshUndoButtons(); };
+    actions.appendChild(this.resetBtn);
+
+    const eraseBtn = el('button', 'ctrl-btn') as HTMLButtonElement;
+    eraseBtn.textContent = 'Erase Tile';
+    eraseBtn.title = 'Clear all pixels to transparent (pen 15)';
+    eraseBtn.onclick = () => { this.editor.eraseTile(); this.refreshUndoButtons(); };
+    actions.appendChild(eraseBtn);
+
+    const importImgBtn = el('button', 'ctrl-btn') as HTMLButtonElement;
+    importImgBtn.innerHTML = '\u{1F4E5} Import';
+    importImgBtn.title = 'Import image onto this tile';
+    importImgBtn.onclick = () => this.importImageOnCurrentTile();
+    actions.appendChild(importImgBtn);
+
+    container.appendChild(actions);
+    this.refreshUndoButtons();
+
     // Tile grid canvas
     const tileSection = el('div', 'edit-tile-section');
     const cvs = document.createElement('canvas');
@@ -198,35 +237,6 @@ export class SpriteEditorUI {
     this.neighborGrid = el('div', 'edit-neighbors') as HTMLDivElement;
     neighborsSection.appendChild(this.neighborGrid);
     container.appendChild(neighborsSection);
-
-    // Action buttons
-    const actions = el('div', 'edit-actions');
-
-    this.undoBtn = el('button', 'ctrl-btn') as HTMLButtonElement;
-    this.undoBtn.textContent = 'Undo';
-    this.undoBtn.title = 'Ctrl+Z';
-    this.undoBtn.onclick = () => { this.editor.undo(); this.refreshUndoButtons(); };
-    actions.appendChild(this.undoBtn);
-
-    this.redoBtn = el('button', 'ctrl-btn') as HTMLButtonElement;
-    this.redoBtn.textContent = 'Redo';
-    this.redoBtn.title = 'Ctrl+Shift+Z';
-    this.redoBtn.onclick = () => { this.editor.redo(); this.refreshUndoButtons(); };
-    actions.appendChild(this.redoBtn);
-
-    this.resetBtn = el('button', 'ctrl-btn') as HTMLButtonElement;
-    this.resetBtn.textContent = 'Reset Tile';
-    this.resetBtn.onclick = () => { this.editor.resetTile(); this.refreshUndoButtons(); };
-    actions.appendChild(this.resetBtn);
-
-    const importImgBtn = el('button', 'ctrl-btn') as HTMLButtonElement;
-    importImgBtn.innerHTML = '\u{1F4E5} Import';
-    importImgBtn.title = 'Import image onto this tile';
-    importImgBtn.onclick = () => this.importImageOnCurrentTile();
-    actions.appendChild(importImgBtn);
-
-    container.appendChild(actions);
-    this.refreshUndoButtons();
 
     // Captured sprites section
     this.capturesSection = el('div', 'edit-captures-section') as HTMLDivElement;
@@ -723,6 +733,8 @@ export class SpriteEditorUI {
 
   private handleOverlayMove(e: MouseEvent): void {
     if (this._isInteractionBlocked?.()) return;
+    const mousePos = this.screenCoordsFromEvent(e);
+    if (mousePos) { this.lastMouseX = mousePos.x; this.lastMouseY = mousePos.y; }
 
     // Handle layer corner resize (resizeStartX/Y are in world coords, deltas are the same)
     if (this.resizingLayer && this.activeLayer) {
@@ -805,6 +817,8 @@ export class SpriteEditorUI {
 
     const pos = this.screenCoordsFromEvent(e);
     if (!pos) return;
+    this.lastMouseX = pos.x;
+    this.lastMouseY = pos.y;
 
     // If there's an active photo layer under the cursor, don't switch groups (world coords)
     const layer = this.activeLayer;
@@ -853,8 +867,8 @@ export class SpriteEditorUI {
 
     const ctx = this.overlayCtx;
 
-    if (tile.layerId === 0 && tile.spriteIndex !== undefined) {
-      // Selected tile highlight (pink)
+    if (tile.layerId === LAYER_OBJ && tile.spriteIndex !== undefined) {
+      // Sprite tile highlight (pink)
       const objBuf = video.getObjBuffer();
       const entryOff = tile.spriteIndex * 8;
       const sprX = (objBuf[entryOff]! << 8) | objBuf[entryOff + 1]!;
@@ -867,6 +881,13 @@ export class SpriteEditorUI {
       ctx.strokeStyle = '#ff1a50';
       ctx.lineWidth = 2;
       ctx.strokeRect(tileScreenX, tileScreenY, 16, 16);
+    } else if (tile.layerId >= LAYER_SCROLL1 && tile.layerId <= LAYER_SCROLL3 && tile.screenX !== undefined && tile.screenY !== undefined) {
+      // Scroll tile highlight (pink)
+      ctx.fillStyle = 'rgba(255, 26, 80, 0.25)';
+      ctx.fillRect(tile.screenX, tile.screenY, tile.tileW, tile.tileH);
+      ctx.strokeStyle = '#ff1a50';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(tile.screenX, tile.screenY, tile.tileW, tile.tileH);
     }
   }
 
@@ -1157,18 +1178,28 @@ export class SpriteEditorUI {
     return { x, y };
   }
 
+  /** Convert display coordinates (post-flip) to ROM coordinates (pre-flip). */
+  private displayToRomCoords(lx: number, ly: number): { x: number; y: number } {
+    const tile = this.editor.currentTile;
+    if (!tile) return { x: lx, y: ly };
+    const rx = tile.flipX ? (tile.tileW - 1 - lx) : lx;
+    const ry = tile.flipY ? (tile.tileH - 1 - ly) : ly;
+    return { x: rx, y: ry };
+  }
+
   private handleTilePixelAction(lx: number, ly: number): void {
+    const { x, y } = this.displayToRomCoords(lx, ly);
     const tool = this.editor.tool;
     switch (tool) {
       case 'pencil':
       case 'eraser':
-        this.editor.paintPixel(lx, ly);
+        this.editor.paintPixel(x, y);
         break;
       case 'fill':
-        this.editor.floodFill(lx, ly);
+        this.editor.floodFill(x, y);
         break;
       case 'eyedropper':
-        this.editor.eyedrop(lx, ly);
+        this.editor.eyedrop(x, y);
         this.refreshPalette();
         break;
     }
@@ -1197,7 +1228,10 @@ export class SpriteEditorUI {
 
     for (let y = 0; y < th; y++) {
       for (let x = 0; x < tw; x++) {
-        const colorIdx = tileData[y * tw + x]!;
+        // Read pixel in display orientation (apply flip)
+        const srcX = tile.flipX ? (tw - 1 - x) : x;
+        const srcY = tile.flipY ? (th - 1 - y) : y;
+        const colorIdx = tileData[srcY * tw + srcX]!;
 
         if (colorIdx === 15) {
           // Transparent: checkerboard
