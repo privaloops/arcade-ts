@@ -545,6 +545,11 @@ export class SpriteEditor {
 
   // -- Callbacks --
 
+  /** Restore a previously saved tile selection. */
+  restoreSelection(tile: TileContext): void {
+    this._currentTile = tile;
+  }
+
   setOnTileChanged(cb: (() => void) | null): void { this.onTileChanged = cb; }
   setLayerVisibilityFilter(fn: ((layerId: number) => boolean) | null): void { this._isLayerVisible = fn; }
 

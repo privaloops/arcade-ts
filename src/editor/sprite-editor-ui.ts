@@ -121,6 +121,7 @@ export class SpriteEditorUI {
   private lastMouseY = 0;
   private selectedTileScreenX = 0;
   private selectedTileScreenY = 0;
+  private _savedTile: import('./sprite-editor').TileContext | null = null;
   private gridLayers: Map<number, boolean> = new Map();
   private hwLayerVisible: Map<number, boolean> = new Map();
   private _isInteractionBlocked: (() => boolean) | null = null;
@@ -195,6 +196,12 @@ export class SpriteEditorUI {
     importImgBtn.title = 'Import image onto this tile';
     importImgBtn.onclick = () => this.importImageOnCurrentTile();
     actions.appendChild(importImgBtn);
+
+    const exportImgBtn = el('button', 'ctrl-btn') as HTMLButtonElement;
+    exportImgBtn.innerHTML = '\u{1F4E4} Export';
+    exportImgBtn.title = 'Export this tile as PNG';
+    exportImgBtn.onclick = () => this.exportCurrentTile();
+    actions.appendChild(exportImgBtn);
 
     container.appendChild(actions);
     this.refreshUndoButtons();
@@ -312,6 +319,11 @@ export class SpriteEditorUI {
 
   activate(): void {
     this.editor.activate();
+    // Restore tile selection from before deactivate
+    if (this._savedTile) {
+      this.editor.restoreSelection(this._savedTile);
+      this._savedTile = null;
+    }
     this.createOverlay();
     document.body.classList.add('edit-active');
     document.addEventListener('keydown', this.boundKeyHandler);
@@ -321,11 +333,16 @@ export class SpriteEditorUI {
     this.layerPanel?.show();
     this.refreshLayerPanel();
     this.refreshCapturesPanel();
+    this.refreshTileGrid();
+    this.refreshPalette();
   }
 
   deactivate(): void {
     if (this.spriteSheetMode) this.exitSpriteSheetMode();
+    // Preserve tile selection across deactivate/activate
+    const savedTile = this.editor.currentTile;
     this.editor.deactivate();
+    this._savedTile = savedTile;
     cancelAnimationFrame(this.overlayRafId);
     document.body.classList.remove('edit-active');
     this.removeOverlay();
@@ -577,6 +594,7 @@ export class SpriteEditorUI {
     cvs.addEventListener('mousemove', this.boundOverlayMove);
     cvs.addEventListener('click', this.boundOverlayClick);
     cvs.addEventListener('mouseleave', this.boundOverlayLeave);
+
 
     // Layer interaction: Shift+click = select layer, corner handles = resize, click = drag
     cvs.addEventListener('mousedown', (e) => {
@@ -2219,6 +2237,51 @@ export class SpriteEditorUI {
   }
 
   /** Import image onto the currently selected tile in the main editor. */
+  private exportCurrentTile(): void {
+    const tile = this.editor.currentTile;
+    const tileData = this.editor.getCurrentTileData();
+    if (!tile || !tileData) return;
+
+    const palette = this.editor.getCurrentPalette();
+    const tw = tile.tileW;
+    const th = tile.tileH;
+    const canvas = document.createElement('canvas');
+    canvas.width = tw;
+    canvas.height = th;
+    const ctx = canvas.getContext('2d')!;
+    const img = ctx.createImageData(tw, th);
+
+    for (let y = 0; y < th; y++) {
+      for (let x = 0; x < tw; x++) {
+        // Apply flip for export in display orientation
+        const srcX = tile.flipX ? (tw - 1 - x) : x;
+        const srcY = tile.flipY ? (th - 1 - y) : y;
+        const colorIdx = tileData[srcY * tw + srcX]!;
+        const pi = (y * tw + x) * 4;
+        if (colorIdx === 15) {
+          img.data[pi + 3] = 0; // transparent
+        } else {
+          const [r, g, b] = palette[colorIdx] ?? [0, 0, 0];
+          img.data[pi] = r;
+          img.data[pi + 1] = g;
+          img.data[pi + 2] = b;
+          img.data[pi + 3] = 255;
+        }
+      }
+    }
+
+    ctx.putImageData(img, 0, 0);
+    canvas.toBlob(blob => {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `tile-${tile.tileCode}.png`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }, 'image/png');
+  }
+
   private importImageOnCurrentTile(): void {
     const tile = this.editor.currentTile;
     if (!tile) { showToast('No tile selected', false); return; }
@@ -2299,7 +2362,10 @@ export class SpriteEditorUI {
 
       showToast('Tile imported', true);
       this.refreshTileGrid();
+      this.refreshPalette();
+      this.refreshNeighbors();
       this.emulator.rerender();
+      this.emulator.getRomStore()?.onModified?.();
       if (this.spriteSheetMode) this.refreshSheetAfterEdit();
     };
     input.click();
