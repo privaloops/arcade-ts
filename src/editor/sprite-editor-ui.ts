@@ -2600,21 +2600,51 @@ export class SpriteEditorUI {
       }
 
       // Write photo pixels only on tiles with refCount = 1
+      // Re-quantize per tile: each tile has its own palette in the tilemap,
+      // so palette indices from the global quantize step are wrong.
+      // Instead, read the RGBA color and find the nearest match in the tile's actual palette.
+      const paletteBase = video.getPaletteBase();
+      const bufs = this.emulator.getBusBuffers();
+      const paletteCache = new Map<number, Array<[number, number, number]>>();
+
       let written = 0;
       let skipped = 0;
       for (const layer of group.layers) {
         if (!layer.quantized) continue;
         for (let ly = 0; ly < layer.height; ly++) {
           for (let lx = 0; lx < layer.width; lx++) {
-            const idx = layer.pixels[ly * layer.width + lx]!;
-            if (idx === 0) continue;
+            // Skip transparent pixels (check RGBA alpha, not the global quantize index)
+            const pi = (ly * layer.width + lx) * 4;
+            if (layer.rgbaData.data[pi + 3]! < 128) continue;
             const sx = lx + layer.offsetX - mergeScroll.sx;
             const sy = ly + layer.offsetY - mergeScroll.sy;
             if (sx < 0 || sx >= SCREEN_WIDTH || sy < 0 || sy >= SCREEN_HEIGHT) { skipped++; continue; }
             const info = video.inspectScrollAt(sx, sy, group.layerId, true);
             if (!info) { skipped++; continue; }
             if ((codeCount.get(info.tileCode) ?? 0) > 1) { skipped++; continue; }
-            writeScrollPixel(gfxRom, info.tileCode, info.localX, info.localY, idx, charSize, info.tileIndex, isScroll1);
+
+            // Read the original RGBA color from the layer
+            const r = layer.rgbaData.data[pi]!;
+            const g = layer.rgbaData.data[pi + 1]!;
+            const b = layer.rgbaData.data[pi + 2]!;
+
+            // Get the tile's actual palette (cached per paletteIndex)
+            let tilePalette = paletteCache.get(info.paletteIndex);
+            if (!tilePalette) {
+              tilePalette = readPalette(bufs.vram, paletteBase, info.paletteIndex);
+              paletteCache.set(info.paletteIndex, tilePalette);
+            }
+
+            // Nearest-neighbor in tile's palette (skip index 0 = transparent)
+            let bestIdx = 1;
+            let bestDist = Infinity;
+            for (let c = 1; c < tilePalette.length; c++) {
+              const [pr, pg, pb] = tilePalette[c]!;
+              const dist = (r - pr) ** 2 + (g - pg) ** 2 + (b - pb) ** 2;
+              if (dist < bestDist) { bestDist = dist; bestIdx = c; }
+            }
+
+            writeScrollPixel(gfxRom, info.tileCode, info.localX, info.localY, bestIdx, charSize, info.tileIndex, isScroll1);
             written++;
           }
         }
