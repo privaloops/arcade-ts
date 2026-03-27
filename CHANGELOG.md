@@ -7,6 +7,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **`.romstudio` save/load** — JSON save format with sparse ROM diffs (GFX, Program, OKI) + captured poses. Ctrl+S / Ctrl+O, drag & drop support. Auto-save to IndexedDB with 2s debounce, restore prompt on reload
+- **ROM round-trip E2E test** — Loads ROM, modifies tiles/palettes/samples, exports ZIP, re-imports, verifies conformity. MAME headless validation (local only)
+- **Palette hue shift (Nuances)** — Shift+click palette swatches to select a nuance group, then hue-rotate them together. Preserves saturation/luminosity. Fallback auto-detect by hue (±30°) if no manual selection. Reset button to restore original palette
+- **Palette transparency toggle** — Checkbox in color picker to replace all pixels of a color with pen 15 (transparent), reversible
+- **Tile export PNG** — Export button next to Import, exports tile at native resolution with transparency
+- **Erase Tile** — Button to clear all pixels to transparent (pen 15), with undo
+- **Scroll tile highlight** — Pink rectangle on game canvas when selecting scroll tiles (not just sprites)
+- **HUD toggle** — Button bottom-right of canvas to hide/show emu controls bar
+- **Dynamic layer order** — Layer panel and click priority follow CPS-B register (game-specific, updates at runtime)
+- **Tile selection persistence** — Selection preserved across Video panel toggle (F2 off/on)
 - **Sprite Analyzer** — Character grouping by palette + spatial proximity, red contour overlay, center-tracking across frames
 - **Pose Capture** — Gameplay recording of unique sprite poses with deduplication by tile code hash (mirrors = same pose)
 - **Sprite Sheet Viewer** — Fullscreen pose editor replacing game canvas. Left sidebar with all poses, central zoomed sprite at 4x CSS scale, horizontal tile strip, click-to-edit tiles
@@ -26,8 +36,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Shift+click all groups** — Layer selection now searches ALL groups, not just the active one
 - **WAV import saturation** — 1.8x gain boost + tanh soft-clip now only applied for mic recording, not WAV file import
 - **F2/F3 shortcuts** — Now work without a ROM loaded (panels toggle independently of game state)
+- **Scroll merge palette mismatch** — Re-quantizes per tile using destination palette instead of global quantization palette. Fixes color explosion on multi-palette scroll areas
+- **Scroll click priority** — Click traverses transparent pixels (pen 15) to reach layers beneath. No more scroll1 intercepting clicks meant for scroll2
+- **Flipped tile display** — Tile grid shows tiles in screen orientation (flip applied). Paint tools write to correct ROM position
+- **Escape** — No longer closes tile editor panels, only exits fullscreen/modals
+- **Import tile refresh** — Now refreshes tile grid, palette, neighbors, emu and auto-save after import
 
 ### Changed
+- **Tile editor layout** — Action buttons (undo/redo/reset/erase/import/export) moved above tile grid. Better section spacing in right panel
+- **`loadRomFromZip`** — Accepts `File | ArrayBuffer` for Node/test usage
 - **Panel titles** — "Video" → "Tile Editor" (right panel), harmonized styles (0.85rem, neutral color instead of red)
 - **Pause/Step/Frame moved to header** — Removed from right panel, added as header control buttons
 - **Layer panel open by default** — Visible at app launch with close button

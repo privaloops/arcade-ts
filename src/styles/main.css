@@ -1001,6 +1001,7 @@
       }
       .edit-swatch:hover { border-color: var(--color-text-muted); }
       .edit-swatch-active { border-color: var(--color-accent) !important; }
+      .edit-swatch-nuance { border-style: dashed !important; border-color: #fff !important; }
       .edit-swatch-transparent {
         background: repeating-conic-gradient(#333 0% 25%, #222 0% 50%) 50% / 8px 8px;
       }

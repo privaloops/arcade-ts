@@ -121,6 +121,7 @@ export class SpriteEditorUI {
   private lastMouseY = 0;
   private selectedTileScreenX = 0;
   private selectedTileScreenY = 0;
+  private nuanceGroup = new Set<number>();
   private _savedTile: import('./sprite-editor').TileContext | null = null;
   private gridLayers: Map<number, boolean> = new Map();
   private hwLayerVisible: Map<number, boolean> = new Map();
@@ -858,6 +859,7 @@ export class SpriteEditorUI {
         return;
       }
 
+      this.nuanceGroup.clear();
       this.refreshTileGrid();
       this.refreshPalette();
       this.refreshNeighbors();
@@ -1316,9 +1318,20 @@ export class SpriteEditorUI {
       if (i === this.editor.activeColorIndex) {
         swatch.classList.add('edit-swatch-active');
       }
+      if (this.nuanceGroup.has(i)) {
+        swatch.classList.add('edit-swatch-nuance');
+      }
 
-      swatch.title = `Color ${i}`;
-      swatch.onclick = () => this.editor.setActiveColor(i);
+      swatch.title = `Color ${i} (Shift+click to toggle nuance group)`;
+      swatch.onclick = (e) => {
+        if (e.shiftKey && i < 15) {
+          if (this.nuanceGroup.has(i)) this.nuanceGroup.delete(i);
+          else this.nuanceGroup.add(i);
+          this.refreshPalette();
+        } else {
+          this.editor.setActiveColor(i);
+        }
+      };
       swatch.ondblclick = () => this.openColorPicker(i);
       grid.appendChild(swatch);
     }
@@ -1380,20 +1393,24 @@ export class SpriteEditorUI {
       const nb = parseInt(hex.slice(5, 7), 16);
 
       if (nuancesCb.checked) {
-        // Hue shift: apply same hue rotation to all colors with similar hue
         const [newH] = rgbToHsl(nr, ng, nb);
         const hueShift = newH - origH;
 
-        for (let i = 0; i < 15; i++) {
+        // Use manually selected nuance group if any, otherwise auto-detect by hue
+        const targets = this.nuanceGroup.size > 0
+          ? this.nuanceGroup
+          : new Set(Array.from({ length: 15 }, (_, i) => i).filter(i => {
+              const [h, s] = origHsl[i] ?? [0, 0, 0];
+              if (s < 0.05) return false;
+              const dist = Math.min(Math.abs(h - origH), 1 - Math.abs(h - origH));
+              return dist <= HUE_TOLERANCE;
+            }));
+
+        for (const i of targets) {
           const [h, s, l] = origHsl[i] ?? [0, 0, 0];
-          if (s < 0.05) continue; // skip near-gray colors
-          const hueDist = Math.abs(h - origH);
-          const wrappedDist = Math.min(hueDist, 1 - hueDist);
-          if (wrappedDist <= HUE_TOLERANCE) {
-            const shiftedH = ((h + hueShift) % 1 + 1) % 1;
-            const [sr, sg, sb] = hslToRgb(shiftedH, s, l);
-            this.editor.editPaletteColor(i, sr, sg, sb);
-          }
+          const shiftedH = ((h + hueShift) % 1 + 1) % 1;
+          const [sr, sg, sb] = hslToRgb(shiftedH, s, l);
+          this.editor.editPaletteColor(i, sr, sg, sb);
         }
       } else {
         this.editor.editPaletteColor(colorIndex, nr, ng, nb);

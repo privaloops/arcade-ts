@@ -102,10 +102,10 @@
 - [x] **Photo Import (calque)** — Drop photo → calque RGBA, resize bilinéaire, Atkinson dithering (image-q), déplacement/resize, merge
 - [x] **Multi-calques + panneau gauche** — LayerGroup par layer CPS1, panneau gauche avec visibility/quantize/delete/merge
 - [x] **Tile allocator + GFX ROM expansion** — Allocation de tiles privés pour scroll merge, expansion dynamique ROM, reverse bank mapper
-- [ ] **Shared tile indicator** — Dans le sprite sheet viewer, marquer visuellement les tiles partagées (refCount > 1) pour avertir l'artiste avant édition. Voir docs/spec-tile-import-export.md.
-- [ ] **Custom palette par tile (Plan B)** — Pour les tiles partiellement couverts par une photo sur scroll: calculer une palette optimale de 15 couleurs via median cut qui représente au mieux le mix photo+original. Élimine les artefacts de re-quantization aux bords.
-- [ ] **Recoloration costume** — Palette swap pour changer la couleur des vêtements. Détection de famille de couleurs (même teinte, luminosités différentes), recalcul préservant les rapports de luminosité.
-- [ ] **Sauvegarde des éditions (persistance)** — Diff par région ROM (`graphics`, `program`, `oki`, `audio`) entre `mutableRom` et `originalRom` du RomStore. Stockage IndexedDB (localStorage trop limité). 100 tiles modifiés = ~12.8 KB de diff. Auto-save + restore au chargement du jeu. Slots nommés par jeu.
+- [x] **Shared tile indicator** — Badge ×N sur les tiles partagées dans le sprite sheet viewer + warning toast à l'édition.
+- [ ] **Safe scroll edit mode** — Mode d'édition scroll qui n'écrit que sur les tiles refCount = 1 (pas de duplication, pas d'expansion ROM). Masque visuel : tiles éditables (refCount = 1) vs protégées (refCount > 1). La photo s'adapte aux zones éditables. ROM garde sa taille originale → 100% compatible MAME.
+- [x] **Recoloration costume (Nuances)** — Hue shift sur groupe de couleurs sélectionnées manuellement (Shift+click). Préserve saturation/luminosité. Fallback auto par hue ±30°. Reset palette.
+- [x] **Sauvegarde des éditions (.romstudio)** — JSON avec diffs sparse par région ROM (GFX, Program, OKI) + poses. Ctrl+S/O, drag & drop. Auto-save IndexedDB 2s debounce. Spec: `docs/spec-romstudio-save.md`
 - [ ] **Undo complet** — Actuellement seuls les pixel edits ont un undo (128 bytes/tile via pushUndo). Manque : `editPaletteColor` (écrit VRAM + program ROM sans undo), merge photo→tiles (écrit N tiles sans pushUndo). Aussi : groupement par stroke (1 drag = 1 undo), persistance de l'undo stack entre sessions.
 - [ ] **Déformation faciale (Face Mesh)** — MediaPipe Face Mesh pour générer des variantes de la photo importée (bouche ouverte, yeux plissés) adaptées à chaque pose du sprite
 - [ ] **Mobile Photo Booth** — QR code + caméra mobile + Vercel KV relay pour capturer une photo et l'envoyer au desktop
