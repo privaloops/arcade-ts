@@ -135,6 +135,23 @@ export class SpriteEditorUI {
   private selectedTileScreenY = 0;
   private nuanceGroup = new Set<number>();
   private wandTolerance = 30;
+
+  // Zoom/pan — tile canvas
+  private tileZoom = 1;
+  private tilePanX = 0;
+  private tilePanY = 0;
+  private tilePanning = false;
+  private tilePanStartX = 0;
+  private tilePanStartY = 0;
+
+  // Zoom/pan — game overlay
+  private gameZoom = 1;
+  private gamePanX = 0;
+  private gamePanY = 0;
+  private gamePanning = false;
+  private gamePanStartX = 0;
+  private gamePanStartY = 0;
+  private spaceHeld = false;
   private _savedTile: import('./sprite-editor').TileContext | null = null;
   private gridLayers: Map<number, boolean> = new Map();
   private hwLayerVisible: Map<number, boolean> = new Map();
@@ -144,6 +161,7 @@ export class SpriteEditorUI {
 
   // Bound handlers
   private readonly boundKeyHandler: (e: KeyboardEvent) => void;
+  private readonly boundKeyUpHandler: (e: KeyboardEvent) => void;
   private readonly boundOverlayMove: (e: MouseEvent) => void;
   private readonly boundOverlayClick: (e: MouseEvent) => void;
   private readonly boundOverlayLeave: () => void;
@@ -154,6 +172,7 @@ export class SpriteEditorUI {
     this.editor = new SpriteEditor(emulator);
 
     this.boundKeyHandler = (e) => this.handleKey(e);
+    this.boundKeyUpHandler = (e) => this.handleKeyUp(e);
     this.boundOverlayMove = (e) => this.handleOverlayMove(e);
     this.boundOverlayClick = (e) => this.handleOverlayClick(e);
     this.boundOverlayLeave = () => this.clearOverlay();
@@ -346,6 +365,7 @@ export class SpriteEditorUI {
     this.createOverlay();
     document.body.classList.add('edit-active');
     document.addEventListener('keydown', this.boundKeyHandler);
+    document.addEventListener('keyup', this.boundKeyUpHandler);
     this.startOverlayLoop();
     this.ensureDefaultGroups();
     this.ensureLayerPanel();
@@ -366,6 +386,10 @@ export class SpriteEditorUI {
     document.body.classList.remove('edit-active');
     this.removeOverlay();
     document.removeEventListener('keydown', this.boundKeyHandler);
+    document.removeEventListener('keyup', this.boundKeyUpHandler);
+    this.spaceHeld = false;
+    this.resetTileZoom();
+    this.resetGameZoom();
     this.layerPanel?.hide();
   }
 
@@ -698,11 +722,115 @@ export class SpriteEditorUI {
       }
     });
 
+    // Game canvas zoom/pan — middle-click or Space+click to pan
+    cvs.addEventListener('mousedown', (e) => {
+      if (e.button === 1 || (this.spaceHeld && e.button === 0 && !this.activeLayer)) {
+        if (this.gameZoom > 1) {
+          this.gamePanning = true;
+          this.gamePanStartX = e.clientX - this.gamePanX;
+          this.gamePanStartY = e.clientY - this.gamePanY;
+          cvs.style.cursor = 'grabbing';
+          e.preventDefault();
+          e.stopPropagation();
+        }
+        return;
+      }
+    }, true); // capture phase so it fires before layer drag
+
+    cvs.addEventListener('mousemove', (e) => {
+      if (this.gamePanning) {
+        this.gamePanX = e.clientX - this.gamePanStartX;
+        this.gamePanY = e.clientY - this.gamePanStartY;
+        this.clampGamePan();
+        this.applyGameTransform();
+        e.stopPropagation();
+      }
+    }, true);
+
+    cvs.addEventListener('mouseup', () => {
+      if (this.gamePanning) {
+        this.gamePanning = false;
+        this.updateGameCursor();
+      }
+    }, true);
+
+    // Wheel zoom on game canvas
+    cvs.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const wrapper = this.gameCanvas.parentElement;
+      if (!wrapper) return;
+      // Use wrapper rect (stable, not affected by canvas transform)
+      const wrapperRect = wrapper.getBoundingClientRect();
+      const mx = e.clientX - wrapperRect.left;
+      const my = e.clientY - wrapperRect.top;
+      // Convert to unscaled canvas coords
+      const ux = (mx - this.gamePanX) / this.gameZoom;
+      const uy = (my - this.gamePanY) / this.gameZoom;
+      const oldZoom = this.gameZoom;
+      const factor = e.deltaY < 0 ? 1.08 : 1 / 1.08;
+      this.gameZoom = Math.max(1, Math.min(6, this.gameZoom * factor));
+      if (this.gameZoom <= 1.01) { this.gameZoom = 1; this.gamePanX = 0; this.gamePanY = 0; }
+      else {
+        // Keep the point under cursor fixed
+        this.gamePanX = mx - ux * this.gameZoom;
+        this.gamePanY = my - uy * this.gameZoom;
+      }
+      this.clampGamePan();
+      this.applyGameTransform();
+      this.updateGameCursor();
+      this.updateStatus();
+    }, { passive: false });
+
     const wrapper = this.gameCanvas.parentElement;
     if (wrapper) {
       wrapper.appendChild(cvs);
       this.createCapturePanel(wrapper);
     }
+  }
+
+  private clampGamePan(): void {
+    // Clamp based on original (unscaled) canvas dimensions
+    const w = this.gameCanvas.offsetWidth;
+    const h = this.gameCanvas.offsetHeight;
+    const maxX = w * (this.gameZoom - 1);
+    const maxY = h * (this.gameZoom - 1);
+    this.gamePanX = Math.max(-maxX, Math.min(0, this.gamePanX));
+    this.gamePanY = Math.max(-maxY, Math.min(0, this.gamePanY));
+  }
+
+  private applyGameTransform(): void {
+    const t = this.gameZoom === 1
+      ? '' : `translate(${this.gamePanX}px, ${this.gamePanY}px) scale(${this.gameZoom})`;
+    const o = this.gameZoom === 1 ? '' : '0 0';
+    this.gameCanvas.style.transform = t;
+    this.gameCanvas.style.transformOrigin = o;
+    if (this.overlay) {
+      this.overlay.style.transform = t;
+      this.overlay.style.transformOrigin = o;
+    }
+    const wrapper = this.gameCanvas.parentElement;
+    if (wrapper) wrapper.style.overflow = this.gameZoom === 1 ? '' : 'hidden';
+  }
+
+  private updateGameCursor(): void {
+    if (!this.overlay) return;
+    if (this.gameZoom > 1 && this.spaceHeld) {
+      this.overlay.style.cursor = 'grab';
+    } else {
+      this.overlay.style.cursor = '';
+    }
+  }
+
+  private resetGameZoom(): void {
+    this.gameZoom = 1;
+    this.gamePanX = 0;
+    this.gamePanY = 0;
+    this.applyGameTransform();
+    this.updateGameCursor();
+    this.updateStatus();
+    // Clean up wrapper overflow
+    const wrapper = this.gameCanvas.parentElement;
+    if (wrapper) wrapper.style.overflow = '';
   }
 
   private createCapturePanel(wrapper: HTMLElement): void {
@@ -745,6 +873,7 @@ export class SpriteEditorUI {
 
   private screenCoordsFromEvent(e: MouseEvent): { x: number; y: number } | null {
     if (!this.overlay) return null;
+    // getBoundingClientRect accounts for CSS transform, so coords map correctly
     const rect = this.overlay.getBoundingClientRect();
     const x = Math.floor((e.clientX - rect.left) / rect.width * SCREEN_WIDTH);
     const y = Math.floor((e.clientY - rect.top) / rect.height * SCREEN_HEIGHT);
@@ -1185,6 +1314,18 @@ export class SpriteEditorUI {
 
   private bindTileCanvasEvents(cvs: HTMLCanvasElement): void {
     cvs.addEventListener('mousedown', (e) => {
+      // Middle-click or Space+click = pan
+      if (e.button === 1 || (this.spaceHeld && e.button === 0)) {
+        if (this.tileZoom > 1) {
+          this.tilePanning = true;
+          this.tilePanStartX = e.clientX - this.tilePanX;
+          this.tilePanStartY = e.clientY - this.tilePanY;
+          cvs.style.cursor = 'grabbing';
+          e.preventDefault();
+        }
+        return;
+      }
+      if (this.tilePanning) return;
       const pos = this.tilePixelFromEvent(e);
       if (!pos) return;
       this.painting = true;
@@ -1193,6 +1334,13 @@ export class SpriteEditorUI {
     });
 
     cvs.addEventListener('mousemove', (e) => {
+      if (this.tilePanning) {
+        this.tilePanX = e.clientX - this.tilePanStartX;
+        this.tilePanY = e.clientY - this.tilePanStartY;
+        this.clampTilePan();
+        this.applyTileTransform();
+        return;
+      }
       if (!this.painting) return;
       const pos = this.tilePixelFromEvent(e);
       if (!pos) return;
@@ -1201,9 +1349,82 @@ export class SpriteEditorUI {
       this.handleTilePixelAction(pos.x, pos.y);
     });
 
-    const stopPaint = () => { this.painting = false; this.lastPaintPos = null; };
+    const stopPaint = () => {
+      this.painting = false;
+      this.lastPaintPos = null;
+      if (this.tilePanning) {
+        this.tilePanning = false;
+        this.updateTileCursor();
+      }
+    };
     cvs.addEventListener('mouseup', stopPaint);
     cvs.addEventListener('mouseleave', stopPaint);
+
+    // Wheel zoom
+    cvs.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      // Use parent section rect (stable, not affected by canvas transform)
+      const section = cvs.parentElement;
+      if (!section) return;
+      const sectionRect = section.getBoundingClientRect();
+      const mx = e.clientX - sectionRect.left;
+      const my = e.clientY - sectionRect.top;
+      // Convert to unscaled canvas coords
+      const ux = (mx - this.tilePanX) / this.tileZoom;
+      const uy = (my - this.tilePanY) / this.tileZoom;
+      const factor = e.deltaY < 0 ? 1.08 : 1 / 1.08;
+      this.tileZoom = Math.max(1, Math.min(6, this.tileZoom * factor));
+      if (this.tileZoom <= 1.01) { this.tileZoom = 1; this.tilePanX = 0; this.tilePanY = 0; }
+      else {
+        this.tilePanX = mx - ux * this.tileZoom;
+        this.tilePanY = my - uy * this.tileZoom;
+      }
+      this.clampTilePan();
+      this.applyTileTransform();
+      this.updateTileCursor();
+      this.updateStatus();
+    }, { passive: false });
+  }
+
+  private clampTilePan(): void {
+    if (!this.tileCanvas) return;
+    // Original (unscaled) canvas size
+    const w = this.tileCanvas.offsetWidth;
+    const h = this.tileCanvas.offsetHeight;
+    const maxX = w * (this.tileZoom - 1);
+    const maxY = h * (this.tileZoom - 1);
+    this.tilePanX = Math.max(-maxX, Math.min(0, this.tilePanX));
+    this.tilePanY = Math.max(-maxY, Math.min(0, this.tilePanY));
+  }
+
+  private applyTileTransform(): void {
+    if (!this.tileCanvas) return;
+    if (this.tileZoom === 1) {
+      this.tileCanvas.style.transform = '';
+      this.tileCanvas.style.transformOrigin = '';
+    } else {
+      this.tileCanvas.style.transformOrigin = '0 0';
+      this.tileCanvas.style.transform = `translate(${this.tilePanX}px, ${this.tilePanY}px) scale(${this.tileZoom})`;
+    }
+  }
+
+  private updateTileCursor(): void {
+    if (!this.tileCanvas) return;
+    if (this.tileZoom > 1 && this.spaceHeld) {
+      this.tileCanvas.style.cursor = 'grab';
+    } else {
+      const cursor = TOOL_CURSORS[this.editor.tool] ?? 'crosshair';
+      this.tileCanvas.style.cursor = cursor;
+    }
+  }
+
+  private resetTileZoom(): void {
+    this.tileZoom = 1;
+    this.tilePanX = 0;
+    this.tilePanY = 0;
+    this.applyTileTransform();
+    this.updateTileCursor();
+    this.updateStatus();
   }
 
   private tilePixelFromEvent(e: MouseEvent): { x: number; y: number } | null {
@@ -1212,8 +1433,12 @@ export class SpriteEditorUI {
     const tw = tile?.tileW ?? 16;
     const th = tile?.tileH ?? 16;
     const rect = this.tileCanvas.getBoundingClientRect();
-    const x = Math.floor((e.clientX - rect.left) / rect.width * tw);
-    const y = Math.floor((e.clientY - rect.top) / rect.height * th);
+    // Account for CSS transform (zoom + pan)
+    const cssX = e.clientX - rect.left;
+    const cssY = e.clientY - rect.top;
+    // rect already includes the CSS transform scale, so divide by actual displayed size
+    const x = Math.floor(cssX / rect.width * tw);
+    const y = Math.floor(cssY / rect.height * th);
     if (x < 0 || y < 0 || x >= tw || y >= th) return null;
     return { x, y };
   }
@@ -1601,7 +1826,10 @@ export class SpriteEditorUI {
     const toolStatus = this.editor.tool === 'wand'
       ? `Click to erase similar colors — Shift+[ / ]: tolerance (${this.wandTolerance})`
       : TOOL_STATUS[this.editor.tool] ?? '';
-    setStatus(toolStatus);
+    const zoomInfo = this.tileZoom > 1 || this.gameZoom > 1
+      ? ` — Zoom ×${Math.round(Math.max(this.tileZoom, this.gameZoom) * 10) / 10} (0: reset, Space+drag: pan)`
+      : '';
+    setStatus(toolStatus + zoomInfo);
   }
 
   private refreshUndoButtons(): void {
@@ -1730,8 +1958,27 @@ export class SpriteEditorUI {
         }
         break;
       }
+      case '0':
+        this.resetTileZoom();
+        this.resetGameZoom();
+        e.preventDefault();
+        break;
+      case ' ':
+        this.spaceHeld = true;
+        this.updateTileCursor();
+        this.updateGameCursor();
+        e.preventDefault();
+        break;
     }
   }
+  private handleKeyUp(e: KeyboardEvent): void {
+    if (e.key === ' ') {
+      this.spaceHeld = false;
+      this.updateTileCursor();
+      this.updateGameCursor();
+    }
+  }
+
   // -- Sprite Sheet Viewer --
 
   /** Handle keyboard events while in sprite sheet mode. */

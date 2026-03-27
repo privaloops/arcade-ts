@@ -118,7 +118,6 @@
       }
       .toggle-emu-bar:hover { color: var(--color-accent); border-color: var(--color-accent); }
       .toggle-emu-bar.active { color: var(--color-accent); }
-      body.edit-active .toggle-emu-bar { display: none; }
       #canvas-wrapper:hover .emu-bar.visible,
       .emu-bar.paused { opacity: 1; }
 
@@ -979,7 +978,7 @@
         margin-bottom: 12px; min-height: 1.4em;
       }
 
-      .edit-tile-section { display: flex; justify-content: center; margin-bottom: 18px; }
+      .edit-tile-section { display: flex; justify-content: center; margin-bottom: 18px; overflow: hidden; }
       .edit-tile-canvas {
         width: 256px; height: 256px; image-rendering: pixelated;
         border: 1px solid var(--color-border); border-radius: var(--radius-sm);
