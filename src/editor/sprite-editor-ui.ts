@@ -8,14 +8,13 @@
 
 import { SpriteEditor, type EditorTool } from './sprite-editor';
 import { SCREEN_WIDTH, SCREEN_HEIGHT } from '../constants';
-import { LAYER_OBJ, LAYER_SCROLL1, LAYER_SCROLL2, LAYER_SCROLL3, GFXTYPE_SCROLL1, GFXTYPE_SCROLL2, GFXTYPE_SCROLL3, readWord, type CPS1Video } from '../video/cps1-video';
+import { LAYER_OBJ, LAYER_SCROLL1, LAYER_SCROLL2, LAYER_SCROLL3, readWord, type CPS1Video } from '../video/cps1-video';
 import { readAllSprites, groupCharacter, poseHash, capturePose, assembleCharacter, type SpriteGroup as SpriteGroupData, type CapturedPose } from './sprite-analyzer';
 import { loadPhotoRgba, resizeRgba, quantizeWithDithering, placePhotoOnTiles } from './photo-import';
 import { readPixel as readPixelFn, writePixel as writePixelFn, writeScrollPixel, readTile as readTileFn } from './tile-encoder';
 import { readPalette } from './palette-editor';
 import { createLayer, createSpriteGroup, createScrollGroup, type PhotoLayer, type LayerGroup } from './layer-model';
 import { LayerPanel } from './layer-panel';
-import { TileAllocator, buildReverseMap, patchTilemapCode, patchTilemapPalette, getTileStats } from './tile-allocator';
 import { findTileReferences } from './tile-refs';
 import type { Emulator } from '../emulator';
 import { pencilCursor, fillCursor, eyedropperCursor, eraserCursor } from './tool-cursors';
@@ -1045,6 +1044,32 @@ export class SpriteEditorUI {
         ctx.moveTo(0, y + 0.5);
         ctx.lineTo(SCREEN_WIDTH, y + 0.5);
         ctx.stroke();
+      }
+
+      // Green overlay on editable tiles (refCount = 1)
+      {
+        // Count tile code occurrences on screen
+        const codeCount = new Map<number, number>();
+        for (let sy = offsetY; sy < SCREEN_HEIGHT; sy += ts) {
+          for (let sx = offsetX; sx < SCREEN_WIDTH; sx += ts) {
+            const px = Math.max(0, Math.min(sx + ts / 2, SCREEN_WIDTH - 1));
+            const py = Math.max(0, Math.min(sy + ts / 2, SCREEN_HEIGHT - 1));
+            const info = video.inspectScrollAt(px, py, cfg.layerId, true);
+            if (info) codeCount.set(info.tileCode, (codeCount.get(info.tileCode) ?? 0) + 1);
+          }
+        }
+        // Fill green on tiles with refCount = 1
+        ctx.fillStyle = 'rgba(0, 200, 100, 0.35)';
+        for (let sy = offsetY; sy < SCREEN_HEIGHT; sy += ts) {
+          for (let sx = offsetX; sx < SCREEN_WIDTH; sx += ts) {
+            const px = Math.max(0, Math.min(sx + ts / 2, SCREEN_WIDTH - 1));
+            const py = Math.max(0, Math.min(sy + ts / 2, SCREEN_HEIGHT - 1));
+            const info = video.inspectScrollAt(px, py, cfg.layerId, true);
+            if (info && (codeCount.get(info.tileCode) ?? 0) === 1) {
+              ctx.fillRect(sx, sy, ts, ts);
+            }
+          }
+        }
       }
     }
   }
@@ -2525,112 +2550,33 @@ export class SpriteEditorUI {
       if (!video || group.layerId === undefined) return;
 
       // Build reverse map for this scroll's GFX type
-      const gfxTypeMap: Record<number, number> = {
-        [LAYER_SCROLL1]: GFXTYPE_SCROLL1,
-        [LAYER_SCROLL2]: GFXTYPE_SCROLL2,
-        [LAYER_SCROLL3]: GFXTYPE_SCROLL3,
-      };
       const charSizeMap: Record<number, number> = { [LAYER_SCROLL1]: 64, [LAYER_SCROLL2]: 128, [LAYER_SCROLL3]: 512 };
-      const gfxType = gfxTypeMap[group.layerId] ?? GFXTYPE_SCROLL2;
       const charSize = charSizeMap[group.layerId] ?? 128;
-
       const tileSizeMap: Record<number, number> = { [LAYER_SCROLL1]: 8, [LAYER_SCROLL2]: 16, [LAYER_SCROLL3]: 32 };
       const tileSize = tileSizeMap[group.layerId] ?? 16;
-
-      // Calculate needed tiles from layer dimensions
-      let neededTiles = 0;
-      for (const layer of group.layers) {
-        if (!layer.quantized) continue;
-        const tilesW = Math.ceil(layer.width / tileSize);
-        const tilesH = Math.ceil(layer.height / tileSize);
-        neededTiles += tilesW * tilesH;
-      }
-
-      // Expand GFX ROM if not enough free tiles
-      let reverseMap = buildReverseMap(gfxType, 0x10000, video);
-      let allocator = new TileAllocator(gfxRom, charSize, reverseMap);
-      if (allocator.freeCount < neededTiles) {
-        const extraTiles = neededTiles + 32; // exact need + small headroom
-        console.log(`[MERGE] Need ${neededTiles} tiles, have ${allocator.freeCount} free. Expanding by ${extraTiles}...`);
-        gfxRom = video.expandGfxRom(extraTiles * charSize, gfxType);
-        this.emulator.getRomStore()?.updateGraphicsRom(gfxRom);
-        reverseMap = buildReverseMap(gfxType, 0x20000, video);
-        allocator = new TileAllocator(gfxRom, charSize, reverseMap);
-        console.log(`[MERGE] After expand: ${allocator.freeCount} free tiles`);
-      }
-
-      const vram = video.getVram();
-      const bufs = this.emulator.getBusBuffers();
-      const paletteBase = video.getPaletteBase();
       const isScroll1 = group.layerId === LAYER_SCROLL1;
 
-      // Read palette 0 for the scroll page (the quantize target)
-      const pageMap: Record<number, number> = { [LAYER_SCROLL1]: 32, [LAYER_SCROLL2]: 64, [LAYER_SCROLL3]: 96 };
-      const targetPalIdx = pageMap[group.layerId] ?? 0;
-      const targetPalette = readPalette(bufs.vram, paletteBase, targetPalIdx);
-
-      // Phase 1: Find which tilemap entries need private copies
-      // (entries that have at least one non-transparent photo pixel)
-      // Layer offsets are in world coords — convert to screen for inspectScrollAt
+      // Safe merge: write only on tiles with refCount = 1 (no allocation, no expansion)
       const mergeScroll = this.getGroupScroll(group);
-      const entriesToCopy = new Set<number>();
-      for (const layer of group.layers) {
-        if (!layer.quantized) continue;
-        for (let ly = 0; ly < layer.height; ly++) {
-          for (let lx = 0; lx < layer.width; lx++) {
-            if (layer.pixels[ly * layer.width + lx] === 0) continue;
-            const sx = lx + layer.offsetX - mergeScroll.sx;
-            const sy = ly + layer.offsetY - mergeScroll.sy;
-            if (sx < 0 || sx >= SCREEN_WIDTH || sy < 0 || sy >= SCREEN_HEIGHT) continue;
-            const info = video.inspectScrollAt(sx, sy, group.layerId, true);
-            if (info) entriesToCopy.add(info.tilemapOffset);
-          }
+
+      // Build tile code frequency map for visible tiles
+      const scrollX = mergeScroll.sx;
+      const scrollY = mergeScroll.sy;
+      const offsetX = -(scrollX % tileSize);
+      const offsetY = -(scrollY % tileSize);
+      const codeCount = new Map<number, number>();
+      for (let sy = offsetY; sy < SCREEN_HEIGHT; sy += tileSize) {
+        for (let sx = offsetX; sx < SCREEN_WIDTH; sx += tileSize) {
+          const px = Math.max(0, Math.min(sx + tileSize / 2, SCREEN_WIDTH - 1));
+          const py = Math.max(0, Math.min(sy + tileSize / 2, SCREEN_HEIGHT - 1));
+          const info = video.inspectScrollAt(px, py, group.layerId, true);
+          if (info) codeCount.set(info.tileCode, (codeCount.get(info.tileCode) ?? 0) + 1);
         }
       }
 
-      // Phase 2: Allocate private copies + re-quantize ALL pixels in those tiles
-      const copiedEntries = new Map<number, number>();
-      const palCache = new Map<number, Array<[number, number, number]>>();
-      const getPal = (pi: number) => {
-        let p = palCache.get(pi);
-        if (!p) { p = readPalette(bufs.vram, paletteBase, pi); palCache.set(pi, p); }
-        return p;
-      };
-
-      // Scan every pixel on screen that belongs to an affected tile
-      // and re-quantize original pixels to the target palette
-      for (let sy = 0; sy < SCREEN_HEIGHT; sy++) {
-        for (let sx = 0; sx < SCREEN_WIDTH; sx++) {
-          const info = video.inspectScrollAt(sx, sy, group.layerId, true);
-          if (!info || !entriesToCopy.has(info.tilemapOffset)) continue;
-
-          let tileCode = copiedEntries.get(info.tilemapOffset);
-          if (tileCode === undefined) {
-            const alloc = allocator.allocateAndCopy(info.tileCode);
-            if (!alloc) continue;
-            tileCode = alloc.mapped;
-            copiedEntries.set(info.tilemapOffset, tileCode);
-            patchTilemapCode(vram, info.tilemapOffset, alloc.raw);
-            patchTilemapPalette(vram, info.tilemapOffset, 0);
-          }
-
-          // Re-quantize the original pixel to the target palette
-          const origPalette = getPal(info.paletteIndex);
-          const origIdx = info.colorIndex;
-          const [or, og, ob] = origPalette[origIdx] ?? [0, 0, 0];
-          let bestIdx = 0;
-          let bestDist = Infinity;
-          for (let c = 0; c < targetPalette.length; c++) {
-            const [pr, pg, pb] = targetPalette[c]!;
-            const dist = (or - pr) ** 2 + (og - pg) ** 2 + (ob - pb) ** 2;
-            if (dist < bestDist) { bestDist = dist; bestIdx = c; }
-          }
-
-          writeScrollPixel(gfxRom, tileCode, info.localX, info.localY, bestIdx, charSize, info.tileIndex, isScroll1);
-        }
-      }
-
-      // Phase 3: Overwrite with photo pixels (on top of re-quantized originals)
+      // Write photo pixels only on tiles with refCount = 1
+      let written = 0;
+      let skipped = 0;
       for (const layer of group.layers) {
         if (!layer.quantized) continue;
         for (let ly = 0; ly < layer.height; ly++) {
@@ -2639,18 +2585,23 @@ export class SpriteEditorUI {
             if (idx === 0) continue;
             const sx = lx + layer.offsetX - mergeScroll.sx;
             const sy = ly + layer.offsetY - mergeScroll.sy;
-            if (sx < 0 || sx >= SCREEN_WIDTH || sy < 0 || sy >= SCREEN_HEIGHT) continue;
+            if (sx < 0 || sx >= SCREEN_WIDTH || sy < 0 || sy >= SCREEN_HEIGHT) { skipped++; continue; }
             const info = video.inspectScrollAt(sx, sy, group.layerId, true);
-            if (!info) continue;
-            const tileCode = copiedEntries.get(info.tilemapOffset);
-            if (tileCode === undefined) continue;
-            writeScrollPixel(gfxRom, tileCode, info.localX, info.localY, idx, charSize, info.tileIndex, isScroll1);
+            if (!info) { skipped++; continue; }
+            if ((codeCount.get(info.tileCode) ?? 0) > 1) { skipped++; continue; }
+            writeScrollPixel(gfxRom, info.tileCode, info.localX, info.localY, idx, charSize, info.tileIndex, isScroll1);
+            written++;
           }
         }
         merged++;
       }
 
-      console.log(`[MERGE] Allocated ${copiedEntries.size} tiles. Free: ${allocator.freeCount}/${allocator.totalCount}`);
+      showToast(
+        skipped > 0
+          ? `Merged ${written} pixels (${skipped} skipped — shared tiles)`
+          : `Merged ${written} pixels`,
+        true,
+      );
     }
 
     // Remove merged layers
