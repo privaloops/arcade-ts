@@ -50,7 +50,6 @@ const quitBtn = getElement<HTMLButtonElement>("quit-btn");
 const exportBtn = getElement<HTMLButtonElement>("export-btn");
 const saveStudioBtn = getElement<HTMLButtonElement>("save-studio-btn");
 const loadStudioBtn = getElement<HTMLButtonElement>("load-studio-btn");
-const editBtn = getElement<HTMLButtonElement>("edit-btn");
 const appVersion = document.getElementById("app-version");
 if (appVersion) appVersion.textContent = `v${__APP_VERSION__}`;
 const crtToggle = getElement<HTMLInputElement>("crt-toggle");
@@ -309,7 +308,7 @@ ctrlResetBtn.addEventListener("click", () => {
 const rendererDeps = { emulator, canvas, domScreen, getGameScreen, setGameScreen, setStatus };
 const controlsBarDeps = {
   emulator, canvas, domScreen, dropZone, emuBar, canvasWrapper,
-  pauseBtn, muteBtn, saveBtnCtrl, loadBtnCtrl, debugBtn, audBtn, quitBtn, exportBtn, editBtn,
+  pauseBtn, muteBtn, saveBtnCtrl, loadBtnCtrl, debugBtn, audBtn, quitBtn, exportBtn,
   crtToggle, tateToggle, gameSelect, loadBtn,
   getMuted, setMuted, getDebugPanel, setDebugPanel, getAudioPanel, setAudioPanel,
   getGameScreen, setGameScreen, setStatus,
@@ -321,7 +320,7 @@ initControlsBar(controlsBarDeps);
 initSaveStateUI({ emulator, ssOverlay, ssTitle, ssSlots, ssCloseBtn, canvasWrapper, appEl, getMuted, setStatus });
 initDropZone({
   emulator, canvas, domScreen, dropZone, fileInput, emuBar, canvasWrapper,
-  tateToggle, gameSelect, loadBtn, romControls, exportBtn, editBtn, statusEl,
+  tateToggle, gameSelect, loadBtn, romControls, exportBtn, statusEl,
   getRendererMode, setupDomRenderer: () => setupDomRenderer(rendererDeps),
   getDebugPanel, setDebugPanel, getAudioPanel: () => audioPanel, setLastRomFile, getLastRomFile, setStatus,
   onRomStudioFile: handleRomStudioFile,

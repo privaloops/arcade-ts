@@ -23,7 +23,6 @@ export interface ControlsBarDeps {
   audBtn: HTMLButtonElement;
   quitBtn: HTMLButtonElement;
   exportBtn: HTMLButtonElement;
-  editBtn: HTMLButtonElement;
   crtToggle: HTMLInputElement;
   tateToggle: HTMLInputElement;
   gameSelect: HTMLSelectElement;
@@ -84,7 +83,7 @@ export function updatePauseBtn(pauseBtn: HTMLButtonElement, emuBar: HTMLDivEleme
 export function initControlsBar(deps: ControlsBarDeps): void {
   const {
     emulator, canvas, domScreen, dropZone, emuBar, canvasWrapper,
-    pauseBtn, muteBtn, saveBtnCtrl, loadBtnCtrl, debugBtn, audBtn, quitBtn, exportBtn, editBtn,
+    pauseBtn, muteBtn, saveBtnCtrl, loadBtnCtrl, debugBtn, audBtn, quitBtn, exportBtn,
     crtToggle, tateToggle, gameSelect, loadBtn,
     getMuted, setMuted, getDebugPanel, setDebugPanel, getAudioPanel, setAudioPanel,
     getGameScreen, setGameScreen, setStatus,
@@ -128,7 +127,6 @@ export function initControlsBar(deps: ControlsBarDeps): void {
   // Studio tools
   debugBtn.addEventListener("click", () => toggleDebug(deps));
   audBtn.addEventListener("click", () => toggleAudio(deps));
-  editBtn.addEventListener("click", () => toggleSpriteEditor(deps));
 
   // Export ROM
   exportBtn.addEventListener("click", async () => {
