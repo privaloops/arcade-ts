@@ -481,6 +481,7 @@ export class AudioPanel {
       const result = replaceSampleInRom(rom, phraseId, adpcm);
       if (result.success) {
         this.emulator.updateOkiRom(rom);
+        this.emulator.getRomStore()?.onModified?.();
         dropZone.textContent = "\u2713 OK";
         dropZone.classList.add("replaced");
         if (result.truncated) {
@@ -548,7 +549,7 @@ export class AudioPanel {
         if (replaceSampleInRom(rom, phraseId, adpcm)) replaced++;
       } catch { /* skip bad files */ }
     }
-    if (replaced > 0) { this.emulator.updateOkiRom(rom); this.refreshSampleTable(); }
+    if (replaced > 0) { this.emulator.updateOkiRom(rom); this.emulator.getRomStore()?.onModified?.(); this.refreshSampleTable(); }
     this.showToast(replaced > 0 ? `Imported ${replaced} sample${replaced > 1 ? "s" : ""}` : "No samples imported", replaced > 0);
   }
 
@@ -567,7 +568,7 @@ export class AudioPanel {
         if (replaceSampleInRom(rom, phraseId, adpcm)) replaced++;
       } catch { /* skip */ }
     }
-    if (replaced > 0) { this.emulator.updateOkiRom(rom); this.refreshSampleTable(); }
+    if (replaced > 0) { this.emulator.updateOkiRom(rom); this.emulator.getRomStore()?.onModified?.(); this.refreshSampleTable(); }
     this.showToast(replaced > 0 ? `Imported ${replaced} sample${replaced > 1 ? "s" : ""}` : "No samples imported", replaced > 0);
   }
 
@@ -628,6 +629,7 @@ export class AudioPanel {
         const result = replaceSampleInRom(rom, this.micPhraseId, adpcm);
         if (result.success) {
           this.emulator.updateOkiRom(rom);
+          this.emulator.getRomStore()?.onModified?.();
           if (result.truncated) {
             this.showToast(`Sample #${this.micPhraseId} recorded (truncated: ${result.keptMs}ms / ${result.originalMs}ms)`, true);
           } else {

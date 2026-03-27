@@ -142,6 +142,7 @@ export class SpriteEditorUI {
     this.editor.setOnTileChanged(() => {
       this.refreshTileGrid();
       this.emulator.rerender();
+      this.emulator.getRomStore()?.onModified?.();
       if (this.spriteSheetMode) this.refreshSheetAfterEdit();
     });
     this.editor.setOnToolChanged(() => this.refreshToolButtons());
@@ -254,6 +255,25 @@ export class SpriteEditorUI {
 
   getEditor(): SpriteEditor {
     return this.editor;
+  }
+
+  /** Collect all captured poses across all sprite layer groups */
+  getAllPoses(): CapturedPose[] {
+    return this.layerGroups.flatMap(g => g.spriteCapture?.poses ?? []);
+  }
+
+  /** Restore poses from a save file (creates sprite groups) */
+  restorePoses(poses: CapturedPose[]): void {
+    // Group poses by palette
+    const byPalette = new Map<number, CapturedPose[]>();
+    for (const pose of poses) {
+      const list = byPalette.get(pose.palette) ?? [];
+      list.push(pose);
+      byPalette.set(pose.palette, list);
+    }
+    for (const [palette, groupPoses] of byPalette) {
+      this.layerGroups.push(createSpriteGroup(`Restored (pal ${palette})`, groupPoses, palette));
+    }
   }
 
   setGridLayers(m: Map<number, boolean>): void {

@@ -31,6 +31,8 @@ export interface DropZoneDeps {
   setLastRomFile(f: File | null): void;
   getLastRomFile(): File | null;
   setStatus(msg: string): void;
+  onRomStudioFile(file: File): void;
+  onRomLoaded(gameName: string): void;
 }
 
 let _deps: DropZoneDeps | null = null;
@@ -43,8 +45,13 @@ async function handleRomFile(file: File): Promise<void> {
     getDebugPanel, setDebugPanel, getAudioPanel, setLastRomFile, setStatus,
   } = _deps;
 
+  if (file.name.endsWith(".romstudio")) {
+    _deps.onRomStudioFile(file);
+    return;
+  }
+
   if (!file.name.endsWith(".zip")) {
-    setStatus("Error: expected a .zip file.");
+    setStatus("Error: expected a .zip or .romstudio file.");
     return;
   }
 
@@ -94,6 +101,7 @@ async function handleRomFile(file: File): Promise<void> {
     getAudioPanel()?.onGameChange();
 
     emulator.start();
+    _deps.onRomLoaded(emulator.getGameName());
     setStatus(`Running: ${file.name} (${mode}${isTate ? ', TATE' : ''})`);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

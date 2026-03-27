@@ -415,6 +415,8 @@ export class Emulator {
   /** Get the current game name (set at ROM load time). */
   getGameName(): string { return this.gameName; }
   getRomStore(): RomStore | null { return this.romStore; }
+  getVram(): Uint8Array { return this.bus.getVram(); }
+  getPaletteBase(): number { return this.video?.getPaletteBase() ?? 0x8000; }
 
   /** Expose I/O ports for DIP switch configuration. */
   getIoPorts(): Uint8Array { return this.bus.getIoPorts(); }

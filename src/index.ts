@@ -19,6 +19,9 @@ import { initDropZone, handleRomFile } from "./ui/drop-zone";
 import { getRendererMode, setupDomRenderer, initRendererToggle } from "./ui/renderer-toggle";
 import { initControlsBar, toggleFullscreen, toggleDebug, toggleAudio, toggleSpriteEditor } from "./ui/controls-bar";
 import { initShortcuts } from "./ui/shortcuts";
+import { exportSaveFile, parseSaveFile, applySaveFile } from "./editor/romstudio-save";
+import { hasAutoSave, loadAutoSave, clearAutoSave, scheduleAutoSave } from "./editor/romstudio-autosave";
+import { showToast } from "./ui/toast";
 
 // ── DOM lookups ──────────────────────────────────────────────────────────────
 
@@ -45,6 +48,8 @@ const debugBtn = getElement<HTMLButtonElement>("dbg-btn");
 const audBtn = getElement<HTMLButtonElement>("aud-btn");
 const quitBtn = getElement<HTMLButtonElement>("quit-btn");
 const exportBtn = getElement<HTMLButtonElement>("export-btn");
+const saveStudioBtn = getElement<HTMLButtonElement>("save-studio-btn");
+const loadStudioBtn = getElement<HTMLButtonElement>("load-studio-btn");
 const editBtn = getElement<HTMLButtonElement>("edit-btn");
 const appVersion = document.getElementById("app-version");
 if (appVersion) appVersion.textContent = `v${__APP_VERSION__}`;
@@ -97,6 +102,119 @@ const getGameScreen = (): GameScreen | null => gameScreen;
 const setGameScreen = (gs: GameScreen | null): void => { gameScreen = gs; };
 const getLastRomFile = (): File | null => lastRomFile;
 const setLastRomFile = (f: File | null): void => { lastRomFile = f; };
+let saveCreatedAt: string | undefined;
+let romStudioApplied = false;
+
+// ── .romstudio save/load ────────────────────────────────────────────────────
+
+function getAllPoses() {
+  return debugPanel?.getSpriteEditorUI()?.getAllPoses() ?? [];
+}
+
+function saveStudio(): void {
+  const romStore = emulator.getRomStore();
+  if (!romStore) { showToast('Chargez d\'abord un ROM', false); return; }
+  exportSaveFile(romStore, getAllPoses(), undefined, saveCreatedAt);
+  clearAutoSave(romStore.name).catch(() => {});
+  showToast('Session sauvegardée', true);
+}
+
+function loadStudio(): void {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.romstudio';
+  input.addEventListener('change', () => {
+    const file = input.files?.[0];
+    if (file) handleRomStudioFile(file);
+  });
+  input.click();
+}
+
+function handleRomStudioFile(file: File): void {
+  const romStore = emulator.getRomStore();
+  if (!romStore) {
+    showToast('Chargez d\'abord le ROM du jeu', false);
+    return;
+  }
+
+  file.text().then(json => {
+    const result = parseSaveFile(json);
+    if ('error' in result) { showToast(result.error, false); return; }
+
+    const applyResult = applySaveFile(result.data, romStore, emulator.getVram(), emulator.getPaletteBase());
+    if ('error' in applyResult) { showToast(applyResult.error, false); return; }
+
+    // Restore poses in sprite editor
+    const editorUI = debugPanel?.getSpriteEditorUI();
+    if (editorUI) editorUI.restorePoses(applyResult.poses);
+
+    saveCreatedAt = result.data.createdAt;
+    romStudioApplied = true;
+
+    // Dismiss auto-save prompt if visible, and clear auto-save
+    document.querySelector('.autosave-prompt')?.remove();
+    clearAutoSave(romStore.name).catch(() => {});
+
+    showToast(`Session restaurée (${result.data.gameName})`, true);
+    setStatus(`Loaded: ${file.name}`);
+  }).catch(err => {
+    showToast(`Erreur: ${err instanceof Error ? err.message : String(err)}`, false);
+  });
+}
+
+function triggerAutoSave(): void {
+  const romStore = emulator.getRomStore();
+  if (romStore) scheduleAutoSave(romStore, getAllPoses());
+}
+
+saveStudioBtn.addEventListener('click', saveStudio);
+loadStudioBtn.addEventListener('click', loadStudio);
+
+function onRomLoaded(gameName: string): void {
+  // Show save/load buttons
+  saveStudioBtn.style.display = '';
+  loadStudioBtn.style.display = '';
+  romStudioApplied = false;
+
+  // Wire auto-save to ROM modifications
+  const romStore = emulator.getRomStore();
+  if (romStore) romStore.onModified = triggerAutoSave;
+
+  hasAutoSave(gameName).then(has => {
+    if (!has || romStudioApplied) return;
+    // Show restore prompt as a persistent toast
+    const toast = document.createElement('div');
+    toast.className = 'smp-toast autosave-prompt';
+    toast.innerHTML = `
+      <span>Modifications non sauvegardées trouvées.</span>
+      <button class="restore-btn">Restaurer</button>
+      <button class="ignore-btn">Ignorer</button>
+    `;
+    document.body.appendChild(toast);
+
+    toast.querySelector('.restore-btn')!.addEventListener('click', () => {
+      toast.remove();
+      loadAutoSave(gameName).then(json => {
+        if (!json) return;
+        const romStore = emulator.getRomStore();
+        if (!romStore) return;
+        const result = parseSaveFile(json);
+        if ('error' in result) { showToast(result.error, false); return; }
+        const applyResult = applySaveFile(result.data, romStore, emulator.getVram(), emulator.getPaletteBase());
+        if ('error' in applyResult) { showToast(applyResult.error, false); return; }
+        const editorUI = debugPanel?.getSpriteEditorUI();
+        if (editorUI) editorUI.restorePoses(applyResult.poses);
+        saveCreatedAt = result.data.createdAt;
+        showToast('Session restaurée depuis auto-save', true);
+      }).catch(() => showToast('Erreur de restauration', false));
+    });
+
+    toast.querySelector('.ignore-btn')!.addEventListener('click', () => {
+      toast.remove();
+      clearAutoSave(gameName).catch(() => {});
+    });
+  }).catch(() => {});
+}
 
 // ── Audio init (requires user gesture) ───────────────────────────────────────
 
@@ -206,6 +324,8 @@ initDropZone({
   tateToggle, gameSelect, loadBtn, romControls, exportBtn, editBtn, statusEl,
   getRendererMode, setupDomRenderer: () => setupDomRenderer(rendererDeps),
   getDebugPanel, setDebugPanel, getAudioPanel: () => audioPanel, setLastRomFile, getLastRomFile, setStatus,
+  onRomStudioFile: handleRomStudioFile,
+  onRomLoaded,
 });
 initShortcuts({
   emulator, canvasWrapper, emuBar, pauseBtn, muteBtn, getMuted, setMuted,
@@ -220,4 +340,5 @@ initShortcuts({
   toggleFullscreen: () => toggleFullscreen(canvasWrapper),
   isCtrlModalOpen: () => ctrlOverlay.classList.contains("open"),
   isSsModalOpen, setStatus,
+  saveStudio, loadStudio,
 });

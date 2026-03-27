@@ -48,6 +48,8 @@ export class DebugPanel {
   // Sprite editor (integrated)
   private spriteEditorUI: SpriteEditorUI | null = null;
 
+  getSpriteEditorUI(): SpriteEditorUI | null { return this.spriteEditorUI; }
+
   // Update throttle
   private updateRafId = 0;
 
