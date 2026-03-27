@@ -196,6 +196,12 @@ export class SpriteEditorUI {
     importImgBtn.onclick = () => this.importImageOnCurrentTile();
     actions.appendChild(importImgBtn);
 
+    const exportImgBtn = el('button', 'ctrl-btn') as HTMLButtonElement;
+    exportImgBtn.innerHTML = '\u{1F4E4} Export';
+    exportImgBtn.title = 'Export this tile as PNG';
+    exportImgBtn.onclick = () => this.exportCurrentTile();
+    actions.appendChild(exportImgBtn);
+
     container.appendChild(actions);
     this.refreshUndoButtons();
 
@@ -2219,6 +2225,51 @@ export class SpriteEditorUI {
   }
 
   /** Import image onto the currently selected tile in the main editor. */
+  private exportCurrentTile(): void {
+    const tile = this.editor.currentTile;
+    const tileData = this.editor.getCurrentTileData();
+    if (!tile || !tileData) return;
+
+    const palette = this.editor.getCurrentPalette();
+    const tw = tile.tileW;
+    const th = tile.tileH;
+    const canvas = document.createElement('canvas');
+    canvas.width = tw;
+    canvas.height = th;
+    const ctx = canvas.getContext('2d')!;
+    const img = ctx.createImageData(tw, th);
+
+    for (let y = 0; y < th; y++) {
+      for (let x = 0; x < tw; x++) {
+        // Apply flip for export in display orientation
+        const srcX = tile.flipX ? (tw - 1 - x) : x;
+        const srcY = tile.flipY ? (th - 1 - y) : y;
+        const colorIdx = tileData[srcY * tw + srcX]!;
+        const pi = (y * tw + x) * 4;
+        if (colorIdx === 15) {
+          img.data[pi + 3] = 0; // transparent
+        } else {
+          const [r, g, b] = palette[colorIdx] ?? [0, 0, 0];
+          img.data[pi] = r;
+          img.data[pi + 1] = g;
+          img.data[pi + 2] = b;
+          img.data[pi + 3] = 255;
+        }
+      }
+    }
+
+    ctx.putImageData(img, 0, 0);
+    canvas.toBlob(blob => {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `tile-${tile.tileCode}.png`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }, 'image/png');
+  }
+
   private importImageOnCurrentTile(): void {
     const tile = this.editor.currentTile;
     if (!tile) { showToast('No tile selected', false); return; }
