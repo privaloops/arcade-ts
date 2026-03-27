@@ -48,6 +48,7 @@ const debugBtn = getElement<HTMLButtonElement>("dbg-btn");
 const audBtn = getElement<HTMLButtonElement>("aud-btn");
 const quitBtn = getElement<HTMLButtonElement>("quit-btn");
 const exportBtn = getElement<HTMLButtonElement>("export-btn");
+const toggleEmuBarBtn = getElement<HTMLButtonElement>("toggle-emu-bar-btn");
 const saveStudioBtn = getElement<HTMLButtonElement>("save-studio-btn");
 const loadStudioBtn = getElement<HTMLButtonElement>("load-studio-btn");
 const appVersion = document.getElementById("app-version");
@@ -168,11 +169,16 @@ function triggerAutoSave(): void {
 
 saveStudioBtn.addEventListener('click', saveStudio);
 loadStudioBtn.addEventListener('click', loadStudio);
+toggleEmuBarBtn.addEventListener('click', () => {
+  emuBar.classList.toggle('hidden-by-user');
+  toggleEmuBarBtn.classList.toggle('active', emuBar.classList.contains('hidden-by-user'));
+});
 
 function onRomLoaded(gameName: string): void {
-  // Show save/load buttons
+  // Show save/load/toggle buttons
   saveStudioBtn.style.display = '';
   loadStudioBtn.style.display = '';
+  toggleEmuBarBtn.style.display = '';
   romStudioApplied = false;
 
   // Wire auto-save to ROM modifications

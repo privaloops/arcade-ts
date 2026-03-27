@@ -518,6 +518,46 @@ export class SpriteEditor {
 
   setOnTileChanged(cb: (() => void) | null): void { this.onTileChanged = cb; }
   setLayerVisibilityFilter(fn: ((layerId: number) => boolean) | null): void { this._isLayerVisible = fn; }
+
+  /** Replace all pixels of a given color index with pen 15 (transparent) in the current tile. */
+  replaceColorWithTransparent(colorIndex: number): void {
+    if (!this._currentTile) return;
+    const gfxRom = this.getGfxRom();
+    if (!gfxRom) return;
+
+    const { tileCode, charSize, tileW, tileH } = this._currentTile;
+    this.pushUndo(tileCode, charSize, gfxRom);
+
+    for (let y = 0; y < tileH; y++) {
+      for (let x = 0; x < tileW; x++) {
+        if (this.readCurrentPixel(gfxRom, x, y) === colorIndex) {
+          this.writeCurrentPixel(gfxRom, x, y, 15);
+        }
+      }
+    }
+
+    this.onTileChanged?.();
+  }
+
+  /** Replace all transparent pixels (pen 15) with a given color index in the current tile. */
+  replaceTransparentWithColor(colorIndex: number): void {
+    if (!this._currentTile) return;
+    const gfxRom = this.getGfxRom();
+    if (!gfxRom) return;
+
+    const { tileCode, charSize, tileW, tileH } = this._currentTile;
+    this.pushUndo(tileCode, charSize, gfxRom);
+
+    for (let y = 0; y < tileH; y++) {
+      for (let x = 0; x < tileW; x++) {
+        if (this.readCurrentPixel(gfxRom, x, y) === 15) {
+          this.writeCurrentPixel(gfxRom, x, y, colorIndex);
+        }
+      }
+    }
+
+    this.onTileChanged?.();
+  }
   setOnToolChanged(cb: (() => void) | null): void { this.onToolChanged = cb; }
   setOnColorChanged(cb: (() => void) | null): void { this.onColorChanged = cb; }
 

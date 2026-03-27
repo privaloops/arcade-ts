@@ -104,6 +104,17 @@
         opacity: 0; transition: opacity 0.3s;
       }
       .emu-bar.visible { display: flex; }
+      .emu-bar.hidden-by-user { display: none !important; }
+
+      .toggle-emu-bar {
+        position: absolute; bottom: 10px; right: 10px; z-index: 9999;
+        padding: 2px 6px; font-size: 0.55rem; font-weight: 600;
+        background: rgba(0, 0, 0, 0.5); color: rgba(255,255,255,0.4);
+        border: 1px solid rgba(255,255,255,0.15); border-radius: 3px;
+        cursor: pointer;
+      }
+      .toggle-emu-bar:hover { color: var(--color-accent); border-color: var(--color-accent); }
+      .toggle-emu-bar.active { color: var(--color-accent); }
       #canvas-wrapper:hover .emu-bar.visible,
       .emu-bar.paused { opacity: 1; }
 
@@ -992,6 +1003,17 @@
       .edit-swatch-transparent {
         background: repeating-conic-gradient(#333 0% 25%, #222 0% 50%) 50% / 8px 8px;
       }
+
+      .edit-color-dialog {
+        display: flex; align-items: center; gap: 8px;
+        padding: 6px 0; margin-top: 4px;
+      }
+      .edit-color-input { width: 36px; height: 28px; padding: 0; border: 1px solid var(--color-border); border-radius: 3px; cursor: pointer; }
+      .edit-color-trans-label {
+        font-size: 0.65rem; color: var(--color-text-muted); cursor: pointer;
+        display: flex; align-items: center; gap: 4px;
+      }
+      .edit-color-trans-label input { cursor: pointer; }
 
       .edit-neighbors-section { margin-bottom: 12px; }
       .edit-neighbors {

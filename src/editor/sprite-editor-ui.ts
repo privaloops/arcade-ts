@@ -1277,14 +1277,28 @@ export class SpriteEditorUI {
   private openColorPicker(colorIndex: number): void {
     const palette = this.editor.getCurrentPalette();
     const [r, g, b] = palette[colorIndex] ?? [0, 0, 0];
+    const isTransparent = colorIndex === 15;
 
+    // Remove any existing color dialog
+    this.paletteContainer?.querySelector('.edit-color-dialog')?.remove();
+
+    const dialog = el('div', 'edit-color-dialog') as HTMLDivElement;
+
+    // Color input (visible, always shown)
     const input = document.createElement('input');
     input.type = 'color';
     input.value = `#${hex2(r)}${hex2(g)}${hex2(b)}`;
-    input.style.position = 'absolute';
-    input.style.opacity = '0';
-    input.style.pointerEvents = 'none';
-    document.body.appendChild(input);
+    input.className = 'edit-color-input';
+
+    // Transparent checkbox
+    const transLabel = el('label', 'edit-color-trans-label') as HTMLLabelElement;
+    const transCb = document.createElement('input');
+    transCb.type = 'checkbox';
+    transCb.checked = isTransparent;
+    transLabel.append(transCb, ' Transparent');
+
+    dialog.append(input, transLabel);
+    this.paletteContainer?.appendChild(dialog);
 
     input.addEventListener('input', () => {
       const hex = input.value;
@@ -1292,10 +1306,23 @@ export class SpriteEditorUI {
       const ng = parseInt(hex.slice(3, 5), 16);
       const nb = parseInt(hex.slice(5, 7), 16);
       this.editor.editPaletteColor(colorIndex, nr, ng, nb);
-      this.refreshPalette();
+      // Don't refreshPalette — it would destroy the dialog
     });
 
-    input.addEventListener('change', () => { input.remove(); });
+    transCb.addEventListener('change', () => {
+      if (transCb.checked) {
+        this.editor.replaceColorWithTransparent(colorIndex);
+      } else {
+        // Undo transparency: replace pen 15 pixels back to this color index
+        this.editor.replaceTransparentWithColor(colorIndex);
+      }
+      this.refreshPalette();
+      // Re-open dialog to keep editing
+      this.paletteContainer?.appendChild(dialog);
+      transCb.checked = transCb.checked; // preserve state
+    });
+
+    // Open native picker immediately
     input.click();
   }
 
@@ -1437,8 +1464,7 @@ export class SpriteEditorUI {
 
     switch (e.key) {
       case 'Escape':
-        this.deactivate();
-        e.preventDefault();
+        // Don't close editor panels — Escape only exits fullscreen (handled in shortcuts.ts)
         break;
       case 'b': case 'B':
         this.editor.setTool('pencil');
