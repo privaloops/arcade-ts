@@ -17,7 +17,7 @@ import { createLayer, createSpriteGroup, createScrollGroup, type PhotoLayer, typ
 import { LayerPanel } from './layer-panel';
 import { findTileReferences } from './tile-refs';
 import type { Emulator } from '../emulator';
-import { pencilCursor, fillCursor, eyedropperCursor, eraserCursor } from './tool-cursors';
+import { pencilCursor, fillCursor, eyedropperCursor, eraserCursor, wandCursor } from './tool-cursors';
 import { showToast } from '../ui/toast';
 import { setTooltip } from '../ui/tooltip';
 import { createStatusBar, setStatus } from '../ui/status-bar';
@@ -33,6 +33,7 @@ const TOOL_DEFS: { id: EditorTool; label: string; key: string; icon: string; tip
   { id: 'fill',       label: 'Fill',       key: 'G', icon: '\u{1F4A7}',    tip: 'Flood fill connected area' },
   { id: 'eyedropper', label: 'Eyedropper', key: 'I', icon: '\u{1F4CD}',    tip: 'Pick color from tile' },
   { id: 'eraser',     label: 'Eraser',     key: 'X', icon: '\u{1F6AB}',    tip: 'Set pixels to transparent' },
+  { id: 'wand',       label: 'Wand',       key: 'W', icon: '\u{1FA84}',    tip: 'Erase connected similar colors' },
 ];
 
 const TOOL_STATUS: Record<EditorTool, string> = {
@@ -40,6 +41,7 @@ const TOOL_STATUS: Record<EditorTool, string> = {
   fill: 'Click to flood fill area',
   eyedropper: 'Click to pick color from tile',
   eraser: 'Click to erase to transparent',
+  wand: 'Click to erase similar colors — Shift+[ / ]: tolerance',
 };
 
 const TOOL_CURSORS: Record<string, string> = {
@@ -47,6 +49,7 @@ const TOOL_CURSORS: Record<string, string> = {
   fill: fillCursor,
   eyedropper: eyedropperCursor,
   eraser: eraserCursor,
+  wand: wandCursor,
 };
 
 // ---------------------------------------------------------------------------
@@ -131,6 +134,7 @@ export class SpriteEditorUI {
   private selectedTileScreenX = 0;
   private selectedTileScreenY = 0;
   private nuanceGroup = new Set<number>();
+  private wandTolerance = 30;
   private _savedTile: import('./sprite-editor').TileContext | null = null;
   private gridLayers: Map<number, boolean> = new Map();
   private hwLayerVisible: Map<number, boolean> = new Map();
@@ -198,7 +202,7 @@ export class SpriteEditorUI {
 
     const eraseBtn = el('button', 'ctrl-btn') as HTMLButtonElement;
     eraseBtn.textContent = 'Erase Tile';
-    setTooltip(eraseBtn, 'Clear all pixels to transparent');
+    setTooltip(eraseBtn, 'Clear all pixels to transparent — Delete');
     eraseBtn.onclick = () => { this.editor.eraseTile(); this.refreshUndoButtons(); };
     actions.appendChild(eraseBtn);
 
@@ -904,7 +908,7 @@ export class SpriteEditorUI {
     const ctx = this.overlayCtx;
 
     if (tile.layerId === LAYER_OBJ && tile.spriteIndex !== undefined) {
-      // Sprite tile highlight (pink)
+      // Sprite tile highlight (dashed outline, no fill)
       const objBuf = video.getObjBuffer();
       const entryOff = tile.spriteIndex * 8;
       const sprX = (objBuf[entryOff]! << 8) | objBuf[entryOff + 1]!;
@@ -912,18 +916,18 @@ export class SpriteEditorUI {
       const tileScreenX = ((sprX + (tile.nxs ?? 0) * 16) & 0x1FF) - 64;
       const tileScreenY = ((sprY + (tile.nys ?? 0) * 16) & 0x1FF) - 16;
 
-      ctx.fillStyle = 'rgba(255, 26, 80, 0.25)';
-      ctx.fillRect(tileScreenX, tileScreenY, 16, 16);
       ctx.strokeStyle = '#ff1a50';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(tileScreenX, tileScreenY, 16, 16);
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 2]);
+      ctx.strokeRect(tileScreenX + 0.5, tileScreenY + 0.5, 15, 15);
+      ctx.setLineDash([]);
     } else if (tile.layerId >= LAYER_SCROLL1 && tile.layerId <= LAYER_SCROLL3 && tile.screenX !== undefined && tile.screenY !== undefined) {
-      // Scroll tile highlight (pink)
-      ctx.fillStyle = 'rgba(255, 26, 80, 0.25)';
-      ctx.fillRect(tile.screenX, tile.screenY, tile.tileW, tile.tileH);
+      // Scroll tile highlight (dashed outline, no fill)
       ctx.strokeStyle = '#ff1a50';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(tile.screenX, tile.screenY, tile.tileW, tile.tileH);
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 2]);
+      ctx.strokeRect(tile.screenX + 0.5, tile.screenY + 0.5, tile.tileW - 1, tile.tileH - 1);
+      ctx.setLineDash([]);
     }
   }
 
@@ -1237,6 +1241,9 @@ export class SpriteEditorUI {
       case 'eyedropper':
         this.editor.eyedrop(x, y);
         this.refreshPalette();
+        break;
+      case 'wand':
+        this.editor.magicWandTile(x, y, this.wandTolerance);
         break;
     }
     this.refreshUndoButtons();
@@ -1591,7 +1598,10 @@ export class SpriteEditorUI {
       }
       return;
     }
-    setStatus(TOOL_STATUS[this.editor.tool] ?? '');
+    const toolStatus = this.editor.tool === 'wand'
+      ? `Click to erase similar colors — Shift+[ / ]: tolerance (${this.wandTolerance})`
+      : TOOL_STATUS[this.editor.tool] ?? '';
+    setStatus(toolStatus);
   }
 
   private refreshUndoButtons(): void {
@@ -1655,6 +1665,15 @@ export class SpriteEditorUI {
         this.editor.setTool('eraser');
         e.preventDefault();
         break;
+      case 'w': case 'W':
+        this.editor.setTool('wand');
+        e.preventDefault();
+        break;
+      case 'Delete': case 'Backspace':
+        this.editor.eraseTile();
+        this.refreshUndoButtons();
+        e.preventDefault();
+        break;
       case 'z': case 'Z':
         if (e.ctrlKey || e.metaKey) {
           if (e.shiftKey) {
@@ -1667,13 +1686,23 @@ export class SpriteEditorUI {
         }
         break;
       case '[':
-        this.editor.setActiveColor((this.editor.activeColorIndex - 1 + 16) % 16);
-        this.refreshPalette();
+        if (e.shiftKey && this.editor.tool === 'wand') {
+          this.wandTolerance = Math.max(0, this.wandTolerance - 5);
+          this.updateStatus();
+        } else {
+          this.editor.setActiveColor((this.editor.activeColorIndex - 1 + 16) % 16);
+          this.refreshPalette();
+        }
         e.preventDefault();
         break;
       case ']':
-        this.editor.setActiveColor((this.editor.activeColorIndex + 1) % 16);
-        this.refreshPalette();
+        if (e.shiftKey && this.editor.tool === 'wand') {
+          this.wandTolerance = Math.min(255, this.wandTolerance + 5);
+          this.updateStatus();
+        } else {
+          this.editor.setActiveColor((this.editor.activeColorIndex + 1) % 16);
+          this.refreshPalette();
+        }
         e.preventDefault();
         break;
       case 'ArrowRight':
@@ -2085,12 +2114,14 @@ export class SpriteEditorUI {
     ctx.clearRect(0, 0, cvs.width, cvs.height);
     ctx.drawImage(tmp, 0, 0);
 
-    // Draw selected tile highlight
+    // Draw selected tile highlight (dashed outline, no fill)
     if (this.sheetSelectedTile >= 0 && this.sheetSelectedTile < pose.tiles.length) {
       const t = pose.tiles[this.sheetSelectedTile]!;
       ctx.strokeStyle = '#ff1a50';
       ctx.lineWidth = 1;
+      ctx.setLineDash([2, 2]);
       ctx.strokeRect(t.relX + 0.5, t.relY + 0.5, 15, 15);
+      ctx.setLineDash([]);
     }
   }
 

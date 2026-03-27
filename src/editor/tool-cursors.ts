@@ -125,3 +125,30 @@ export const eraserCursor = createCursor((ctx) => {
   ctx.fill();
   ctx.stroke();
 }, 5, 13);
+
+/** Magic wand: star-tipped wand, hotspot at tip */
+export const wandCursor = createCursor((ctx) => {
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 1;
+  // Wand stick (angled)
+  ctx.fillStyle = '#c8a060';
+  ctx.beginPath();
+  ctx.moveTo(3, 14);
+  ctx.lineTo(5, 12);
+  ctx.lineTo(11, 5);
+  ctx.lineTo(9, 3);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  // Star sparkle at tip
+  ctx.fillStyle = '#ffe040';
+  ctx.strokeStyle = '#c90';
+  ctx.beginPath();
+  ctx.moveTo(12, 0); ctx.lineTo(13, 3); ctx.lineTo(16, 2);
+  ctx.lineTo(14, 4); ctx.lineTo(15, 7); ctx.lineTo(12, 5);
+  ctx.lineTo(10, 7); ctx.lineTo(10, 4); ctx.lineTo(8, 2);
+  ctx.lineTo(11, 3);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+}, 1, 15);

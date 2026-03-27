@@ -16,7 +16,7 @@ import type { Emulator } from '../emulator';
 // Types
 // ---------------------------------------------------------------------------
 
-export type EditorTool = 'pencil' | 'fill' | 'eyedropper' | 'eraser';
+export type EditorTool = 'pencil' | 'fill' | 'eyedropper' | 'eraser' | 'wand';
 
 export interface UndoEntry {
   tileCode: number;
@@ -331,6 +331,50 @@ export class SpriteEditor {
         visited[ny * tileW + nx] = 1;
 
         if (this.readCurrentPixel(gfxRom, nx, ny) === targetColor) {
+          queue.push([nx, ny]);
+        }
+      }
+    }
+
+    this.onTileChanged?.();
+  }
+
+  /** Magic wand: erase connected pixels with similar palette color (RGB tolerance). */
+  magicWandTile(localX: number, localY: number, tolerance: number): void {
+    if (!this._currentTile) return;
+    const gfxRom = this.getGfxRom();
+    if (!gfxRom) return;
+
+    const { tileCode, tileW, tileH, charSize } = this._currentTile;
+    const targetIndex = this.readCurrentPixel(gfxRom, localX, localY);
+    if (targetIndex === 15) return; // already transparent
+
+    const palette = this.getCurrentPalette();
+    const [tr, tg, tb] = palette[targetIndex] ?? [0, 0, 0];
+    const tolSq = tolerance * tolerance;
+
+    this.pushUndo(tileCode, charSize, gfxRom);
+
+    const visited = new Uint8Array(tileW * tileH);
+    const queue: [number, number][] = [[localX, localY]];
+    visited[localY * tileW + localX] = 1;
+
+    while (queue.length > 0) {
+      const [cx, cy] = queue.pop()!;
+      this.writeCurrentPixel(gfxRom, cx, cy, 15); // erase to transparent
+
+      for (const [dx, dy] of [[0, 1], [0, -1], [1, 0], [-1, 0]] as const) {
+        const nx = cx + dx;
+        const ny = cy + dy;
+        if (nx < 0 || nx >= tileW || ny < 0 || ny >= tileH) continue;
+        if (visited[ny * tileW + nx]) continue;
+        visited[ny * tileW + nx] = 1;
+
+        const ci = this.readCurrentPixel(gfxRom, nx, ny);
+        if (ci === 15) continue; // skip transparent
+        const [cr, cg, cb] = palette[ci] ?? [0, 0, 0];
+        const distSq = (cr - tr) ** 2 + (cg - tg) ** 2 + (cb - tb) ** 2;
+        if (distSq <= tolSq) {
           queue.push([nx, ny]);
         }
       }
