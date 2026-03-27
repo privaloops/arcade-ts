@@ -808,6 +808,16 @@
       }
       .smp-toast.success { background: var(--color-success-bg); color: var(--color-success); border: 1px solid var(--color-success); }
       .smp-toast.error { background: var(--color-accent-bg); color: var(--color-accent); border: 1px solid var(--color-accent); }
+      .smp-toast.autosave-prompt {
+        pointer-events: auto; animation: toastIn 0.3s ease;
+        display: flex; align-items: center; gap: 10px;
+        background: var(--color-surface); color: var(--color-text); border: 1px solid var(--color-border);
+      }
+      .smp-toast.autosave-prompt button {
+        padding: 4px 10px; border-radius: 3px; border: 1px solid var(--color-border);
+        background: var(--color-surface-alt); color: var(--color-text); cursor: pointer; font-size: 0.75rem;
+      }
+      .smp-toast.autosave-prompt .restore-btn { background: var(--color-success-bg); color: var(--color-success); border-color: var(--color-success); }
       @keyframes toastIn { from { opacity: 0; transform: translateX(-50%) translateY(10px); } }
       @keyframes toastOut { to { opacity: 0; transform: translateX(-50%) translateY(-10px); } }
 

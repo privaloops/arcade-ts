@@ -10,8 +10,24 @@ import type { RomSet, GameDef } from './memory/rom-loader';
 
 type Region = 'program' | 'graphics' | 'audio' | 'oki';
 
+/** Sparse diff entry: a contiguous run of modified bytes */
+export interface DiffEntry {
+  offset: number;
+  bytes: Uint8Array;
+}
+
+/** All diffs for the three editable regions */
+export interface RomDiffs {
+  graphics: DiffEntry[];
+  program: DiffEntry[];
+  oki: DiffEntry[];
+}
+
 export class RomStore {
   readonly name: string;
+
+  /** Optional callback fired after any modification (for auto-save) */
+  onModified: (() => void) | null = null;
 
   /** Mutable ROM regions — editors write here, consumers read here */
   readonly programRom: Uint8Array;
@@ -110,6 +126,7 @@ export class RomStore {
       }
     }
 
+    if (found) this.onModified?.();
     return found;
   }
 
@@ -134,6 +151,71 @@ export class RomStore {
   /** Get the pristine copy of a region (for undo/comparison) */
   getOriginal(region: Region): Uint8Array {
     return this.getBufferPair(region)[1];
+  }
+
+  /** True if any editable region has been modified */
+  hasAnyModification(): boolean {
+    return this.isModified('graphics') || this.isModified('program') || this.isModified('oki');
+  }
+
+  /** Compute sparse diffs for all editable regions */
+  computeDiffs(): RomDiffs {
+    return {
+      graphics: this.computeRegionDiff('graphics'),
+      program: this.computeRegionDiff('program'),
+      oki: this.computeRegionDiff('oki'),
+    };
+  }
+
+  /** Apply sparse diffs to the mutable ROM regions */
+  applyDiffs(diffs: RomDiffs): void {
+    this.applyRegionDiff('graphics', diffs.graphics);
+    this.applyRegionDiff('program', diffs.program);
+    this.applyRegionDiff('oki', diffs.oki);
+  }
+
+  private computeRegionDiff(region: Region): DiffEntry[] {
+    const [mutable, original] = this.getBufferPair(region);
+    const entries: DiffEntry[] = [];
+    const len = Math.min(mutable.length, original.length);
+    const GAP_TOLERANCE = 8;
+
+    let runStart = -1;
+    let runEnd = -1;
+
+    for (let i = 0; i < len; i++) {
+      if (mutable[i] !== original[i]) {
+        if (runStart === -1) {
+          runStart = i;
+          runEnd = i;
+        } else if (i - runEnd <= GAP_TOLERANCE) {
+          // Extend run (gap within tolerance)
+          runEnd = i;
+        } else {
+          // Close previous run, start new one
+          entries.push({ offset: runStart, bytes: mutable.slice(runStart, runEnd + 1) });
+          runStart = i;
+          runEnd = i;
+        }
+      }
+    }
+    if (runStart !== -1) {
+      entries.push({ offset: runStart, bytes: mutable.slice(runStart, runEnd + 1) });
+    }
+
+    // Handle expanded GFX ROM (bytes beyond original size)
+    if (region === 'graphics' && mutable.length > original.length) {
+      entries.push({ offset: original.length, bytes: mutable.slice(original.length) });
+    }
+
+    return entries;
+  }
+
+  private applyRegionDiff(region: Region, entries: DiffEntry[]): void {
+    const [mutable] = this.getBufferPair(region);
+    for (const entry of entries) {
+      mutable.set(entry.bytes, entry.offset);
+    }
   }
 
   /**

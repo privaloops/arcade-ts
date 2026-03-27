@@ -28,6 +28,8 @@ export interface ShortcutsDeps {
   isCtrlModalOpen(): boolean;
   isSsModalOpen(): boolean;
   setStatus(msg: string): void;
+  saveStudio(): void;
+  loadStudio(): void;
 }
 
 export function initShortcuts(deps: ShortcutsDeps): void {
@@ -45,8 +47,14 @@ export function initShortcuts(deps: ShortcutsDeps): void {
   // T = toggle CPU trace
   let tracing = false;
 
+  const { saveStudio, loadStudio } = deps;
+
   window.addEventListener("keydown", (e) => {
     const key = e.key.toLowerCase();
+
+    // Ctrl+S = save .romstudio, Ctrl+O = load .romstudio
+    if (e.ctrlKey && key === 's') { e.preventDefault(); saveStudio(); return; }
+    if (e.ctrlKey && key === 'o') { e.preventDefault(); loadStudio(); return; }
 
     // T = toggle CPU trace (always active)
     if (e.code === 'KeyT' || key === 't') {
