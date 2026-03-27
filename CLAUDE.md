@@ -53,9 +53,23 @@ src/
     layer-model.ts    # Layer group model for photo overlays
     layer-panel.ts    # Left sidebar layer panel with visibility/reorder
     tile-allocator.ts # Private tile allocation, GFX ROM expansion
-    tool-cursors.ts   # Per-tool canvas cursors (pencil, bucket, eyedropper, eraser)
+    tool-cursors.ts   # Per-tool canvas cursors (pencil, bucket, eyedropper, eraser, wand)
   input/
     input.ts        # Keyboard + Gamepad API + device assignment + autofire
+  ui/
+    tooltip.ts      # Custom tooltip system (600ms delay, suppressed during painting)
+    status-bar.ts   # Contextual status bar (tool hints, zoom info)
+    toast.ts        # Toast notifications
+    controls-bar.ts # Emu bar buttons + fullscreen toggle
+    shortcuts.ts    # Global keyboard shortcuts
+    drop-zone.ts    # ROM drag-and-drop zone
+    modal.ts        # Modal overlay helpers
+    save-state-ui.ts    # Save/load state modal
+    gamepad-config.ts   # Gamepad mapping UI
+    keyboard-config.ts  # Keyboard mapping UI
+    dip-switch-ui.ts    # DIP switch config UI
+    renderer-toggle.ts  # WebGL/Canvas/DOM renderer toggle
+    focus-trap.ts       # Focus trap for modals
   game-catalog.ts   # 245 CPS1 games (source: MAME 0.286)
   rom-store.ts      # Central mutable ROM manager with ZIP export
   save-state.ts     # Save/load state (4 slots, localStorage)
@@ -138,8 +152,11 @@ ROMs loaded from public/roms/ (not included in the repo).
 | M | Mute |
 | F1 | Config |
 | E | Sprite Editor |
+| F3 | Audio panel |
 | F5 | Save state |
 | F8 | Load state |
+| Ctrl+S | Save project (.romstudio) |
+| Ctrl+O | Load project (.romstudio) |
 | Double-click | Fullscreen |
 | Escape | Close dialog |
 
@@ -151,9 +168,15 @@ ROMs loaded from public/roms/ (not included in the repo).
 | G | Fill tool |
 | I | Eyedropper |
 | X | Eraser |
+| W | Magic wand (erase similar colors) |
+| Delete / Backspace | Erase entire tile |
 | Ctrl+Z | Undo |
 | Ctrl+Shift+Z | Redo |
 | [ / ] | Previous / next palette color |
+| Shift+[ / Shift+] | Decrease / increase wand tolerance |
+| Scroll wheel | Zoom in/out (centered on cursor) |
+| Space+drag / Middle-click+drag | Pan when zoomed |
+| 0 | Reset zoom to ×1 |
 | Arrow keys | Navigate neighbor tiles |
 | Right Arrow | Step 1 frame |
 | Shift+Right | Step 10 frames |
