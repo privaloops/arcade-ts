@@ -7,6 +7,7 @@ import { DebugPanel } from "../debug/debug-panel";
 import { AudioPanel } from "../audio/audio-panel";
 import type { GameScreen } from "../video/GameScreen";
 import { openSsModal } from "./save-state-ui";
+import { setTooltip } from "./tooltip";
 
 export interface ControlsBarDeps {
   emulator: Emulator;
@@ -75,7 +76,7 @@ export function toggleAudio(deps: ControlsBarDeps): void {
 /** Update pause button icon and state. */
 export function updatePauseBtn(pauseBtn: HTMLButtonElement, emuBar: HTMLDivElement, paused: boolean): void {
   pauseBtn.textContent = paused ? "▶" : "⏸";
-  pauseBtn.title = paused ? "Resume (P)" : "Pause (P)";
+  setTooltip(pauseBtn, paused ? "Resume — P" : "Pause — P");
   pauseBtn.classList.toggle("active", paused);
   emuBar.classList.toggle("paused", paused);
 }
@@ -105,6 +106,7 @@ export function initControlsBar(deps: ControlsBarDeps): void {
   });
 
   // Mute
+  setTooltip(muteBtn, "Mute / Unmute — M");
   muteBtn.addEventListener("click", () => {
     setMuted(!getMuted());
     if (getMuted()) {
@@ -121,14 +123,19 @@ export function initControlsBar(deps: ControlsBarDeps): void {
   });
 
   // Save / Load state
+  setTooltip(saveBtnCtrl, "Save state — F5");
+  setTooltip(loadBtnCtrl, "Load state — F8");
   saveBtnCtrl.addEventListener("click", () => openSsModal("save"));
   loadBtnCtrl.addEventListener("click", () => openSsModal("load"));
 
   // Studio tools
+  setTooltip(debugBtn, "Sprite editor — E");
+  setTooltip(audBtn, "Audio panel — F3");
   debugBtn.addEventListener("click", () => toggleDebug(deps));
   audBtn.addEventListener("click", () => toggleAudio(deps));
 
   // Export ROM
+  setTooltip(exportBtn, "Export modified ROM as ZIP");
   exportBtn.addEventListener("click", async () => {
     const romStore = emulator.getRomStore();
     if (!romStore) return;
@@ -146,6 +153,7 @@ export function initControlsBar(deps: ControlsBarDeps): void {
   });
 
   // CRT toggle (in Config > Display tab)
+  setTooltip(crtToggle, "CRT scanline filter");
   crtToggle.addEventListener("change", () => {
     canvasWrapper.classList.toggle("crt", crtToggle.checked);
     try { localStorage.setItem("cps1-crt", crtToggle.checked ? "1" : "0"); } catch {}
@@ -156,11 +164,13 @@ export function initControlsBar(deps: ControlsBarDeps): void {
   }
 
   // TATE mode
+  setTooltip(tateToggle, "Rotate screen 90° (vertical games)");
   tateToggle.addEventListener("change", () => {
     canvasWrapper.classList.toggle("tate", tateToggle.checked);
   });
 
   // Quit button
+  setTooltip(quitBtn, "Stop and return to game select");
   quitBtn.addEventListener("click", () => {
     if (document.fullscreenElement) void document.exitFullscreen();
     getDebugPanel()?.destroy();

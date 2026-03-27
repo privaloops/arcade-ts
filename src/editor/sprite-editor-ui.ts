@@ -19,6 +19,8 @@ import { findTileReferences } from './tile-refs';
 import type { Emulator } from '../emulator';
 import { pencilCursor, fillCursor, eyedropperCursor, eraserCursor } from './tool-cursors';
 import { showToast } from '../ui/toast';
+import { setTooltip } from '../ui/tooltip';
+import { createStatusBar, setStatus } from '../ui/status-bar';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -26,12 +28,19 @@ import { showToast } from '../ui/toast';
 
 const GRID_SIZE = 256; // fixed canvas size
 
-const TOOL_DEFS: { id: EditorTool; label: string; key: string; icon: string }[] = [
-  { id: 'pencil',     label: 'Pencil',     key: 'B', icon: '\u270F\uFE0F' },
-  { id: 'fill',       label: 'Fill',       key: 'G', icon: '\u{1F4A7}' },
-  { id: 'eyedropper', label: 'Eyedropper', key: 'I', icon: '\u{1F4CD}' },
-  { id: 'eraser',     label: 'Eraser',     key: 'X', icon: '\u{1F6AB}' },
+const TOOL_DEFS: { id: EditorTool; label: string; key: string; icon: string; tip: string }[] = [
+  { id: 'pencil',     label: 'Pencil',     key: 'B', icon: '\u270F\uFE0F', tip: 'Draw pixels one by one' },
+  { id: 'fill',       label: 'Fill',       key: 'G', icon: '\u{1F4A7}',    tip: 'Flood fill connected area' },
+  { id: 'eyedropper', label: 'Eyedropper', key: 'I', icon: '\u{1F4CD}',    tip: 'Pick color from tile' },
+  { id: 'eraser',     label: 'Eraser',     key: 'X', icon: '\u{1F6AB}',    tip: 'Set pixels to transparent' },
 ];
+
+const TOOL_STATUS: Record<EditorTool, string> = {
+  pencil: 'Click to draw — Shift+click: line',
+  fill: 'Click to flood fill area',
+  eyedropper: 'Click to pick color from tile',
+  eraser: 'Click to erase to transparent',
+};
 
 const TOOL_CURSORS: Record<string, string> = {
   pencil: pencilCursor,
@@ -171,36 +180,37 @@ export class SpriteEditorUI {
 
     this.undoBtn = el('button', 'ctrl-btn') as HTMLButtonElement;
     this.undoBtn.textContent = 'Undo';
-    this.undoBtn.title = 'Ctrl+Z';
+    setTooltip(this.undoBtn, 'Undo — Ctrl+Z');
     this.undoBtn.onclick = () => { this.editor.undo(); this.refreshUndoButtons(); };
     actions.appendChild(this.undoBtn);
 
     this.redoBtn = el('button', 'ctrl-btn') as HTMLButtonElement;
     this.redoBtn.textContent = 'Redo';
-    this.redoBtn.title = 'Ctrl+Shift+Z';
+    setTooltip(this.redoBtn, 'Redo — Ctrl+Shift+Z');
     this.redoBtn.onclick = () => { this.editor.redo(); this.refreshUndoButtons(); };
     actions.appendChild(this.redoBtn);
 
     this.resetBtn = el('button', 'ctrl-btn') as HTMLButtonElement;
     this.resetBtn.textContent = 'Reset Tile';
+    setTooltip(this.resetBtn, 'Restore tile to original ROM data');
     this.resetBtn.onclick = () => { this.editor.resetTile(); this.refreshUndoButtons(); };
     actions.appendChild(this.resetBtn);
 
     const eraseBtn = el('button', 'ctrl-btn') as HTMLButtonElement;
     eraseBtn.textContent = 'Erase Tile';
-    eraseBtn.title = 'Clear all pixels to transparent (pen 15)';
+    setTooltip(eraseBtn, 'Clear all pixels to transparent');
     eraseBtn.onclick = () => { this.editor.eraseTile(); this.refreshUndoButtons(); };
     actions.appendChild(eraseBtn);
 
     const importImgBtn = el('button', 'ctrl-btn') as HTMLButtonElement;
     importImgBtn.innerHTML = '\u{1F4E5} Import';
-    importImgBtn.title = 'Import image onto this tile';
+    setTooltip(importImgBtn, 'Import image onto this tile');
     importImgBtn.onclick = () => this.importImageOnCurrentTile();
     actions.appendChild(importImgBtn);
 
     const exportImgBtn = el('button', 'ctrl-btn') as HTMLButtonElement;
     exportImgBtn.innerHTML = '\u{1F4E4} Export';
-    exportImgBtn.title = 'Export this tile as PNG';
+    setTooltip(exportImgBtn, 'Export this tile as PNG');
     exportImgBtn.onclick = () => this.exportCurrentTile();
     actions.appendChild(exportImgBtn);
 
@@ -224,7 +234,7 @@ export class SpriteEditorUI {
     for (const def of TOOL_DEFS) {
       const btn = el('button', 'ctrl-btn edit-tool-btn') as HTMLButtonElement;
       btn.innerHTML = `<span class="edit-tool-icon">${def.icon}</span> ${def.label}`;
-      btn.title = `${def.label} (${def.key})`;
+      setTooltip(btn, `${def.label} (${def.key}) — ${def.tip}`);
       btn.dataset['tool'] = def.id;
       btn.onclick = () => this.editor.setTool(def.id);
       this.toolBtns.set(def.id, btn);
@@ -257,6 +267,10 @@ export class SpriteEditorUI {
     this.capturesList = el('div', 'edit-captures-list') as HTMLDivElement;
     this.capturesSection.appendChild(this.capturesList);
     container.appendChild(this.capturesSection);
+
+    // Status bar (contextual hint at bottom)
+    container.appendChild(createStatusBar());
+    this.updateStatus();
   }
 
   toggle(): void {
@@ -496,6 +510,7 @@ export class SpriteEditorUI {
       hasEntries = true;
 
       const card = el('div', 'edit-capture-card') as HTMLDivElement;
+      setTooltip(card, 'Open sprite sheet viewer');
       card.onclick = () => {
         this.activeGroupIndex = gi;
         this.activeLayerIndex = -1;
@@ -527,6 +542,7 @@ export class SpriteEditorUI {
     for (const [palette, session] of this.activeSessions) {
       hasEntries = true;
       const card = el('div', 'edit-capture-card edit-capture-active') as HTMLDivElement;
+      setTooltip(card, 'Click to stop capture');
       card.onclick = () => this.stopCaptureForPalette(palette);
 
       const thumb = document.createElement('canvas');
@@ -1322,7 +1338,7 @@ export class SpriteEditorUI {
         swatch.classList.add('edit-swatch-nuance');
       }
 
-      swatch.title = `Color ${i} (Shift+click to toggle nuance group)`;
+      setTooltip(swatch, `Color ${i} — Click: select / Shift+click: nuance group / Double-click: edit`);
       swatch.onclick = (e) => {
         if (e.shiftKey && i < 15) {
           if (this.nuanceGroup.has(i)) this.nuanceGroup.delete(i);
@@ -1337,6 +1353,7 @@ export class SpriteEditorUI {
     }
 
     this.paletteContainer.appendChild(grid);
+    this.updateStatus();
   }
 
   private openColorPicker(colorIndex: number): void {
@@ -1361,6 +1378,7 @@ export class SpriteEditorUI {
     transCb.type = 'checkbox';
     transCb.checked = isTransparent;
     transLabel.append(transCb, ' Transparent');
+    setTooltip(transLabel, 'Mark this color index as transparent');
 
     // Nuances checkbox (hue shift similar colors)
     const nuancesLabel = el('label', 'edit-color-trans-label') as HTMLLabelElement;
@@ -1368,12 +1386,12 @@ export class SpriteEditorUI {
     nuancesCb.type = 'checkbox';
     nuancesCb.checked = false;
     nuancesLabel.append(nuancesCb, ' Nuances');
-    nuancesLabel.title = 'Apply hue shift to all similar colors in the palette';
+    setTooltip(nuancesLabel, 'Hue-shift all similar colors together (or selected nuance group)');
 
     // Reset button
     const resetBtn = el('button', 'edit-color-reset-btn') as HTMLButtonElement;
     resetBtn.textContent = 'Reset';
-    resetBtn.title = 'Reset palette to state before editing';
+    setTooltip(resetBtn, 'Reset palette to original ROM colors');
 
     dialog.append(input, transLabel, nuancesLabel, resetBtn);
     this.paletteContainer?.appendChild(dialog);
@@ -1496,6 +1514,7 @@ export class SpriteEditorUI {
               '-1,1': '\u2199', '0,1': '\u2193', '1,1': '\u2198',
             };
             cell.textContent = arrows[`${dx},${dy}`] ?? '';
+            setTooltip(cell, 'Navigate to neighbor tile — Arrow keys');
             cell.onclick = () => {
               this.editor.selectNeighborTile(tnxs, tnys);
               this.refreshTileGrid();
@@ -1555,6 +1574,24 @@ export class SpriteEditorUI {
     // Update cursor on tile canvas only (tools only work there)
     const cursor = TOOL_CURSORS[currentTool] ?? 'crosshair';
     if (this.tileCanvas) this.tileCanvas.style.cursor = cursor;
+    this.updateStatus();
+  }
+
+  private updateStatus(): void {
+    if (this.spriteSheetMode) {
+      setStatus('Up/Down: browse poses — Left/Right: browse tiles — Escape: back');
+      return;
+    }
+    if (this.hasLayers) {
+      const n = this.nuanceGroup.size;
+      if (n > 0) {
+        setStatus(`${n} color${n > 1 ? 's' : ''} selected for hue shifting`);
+      } else {
+        setStatus('Shift+Arrows: move layer — +/-: resize — Drop image to add');
+      }
+      return;
+    }
+    setStatus(TOOL_STATUS[this.editor.tool] ?? '');
   }
 
   private refreshUndoButtons(): void {
@@ -1798,6 +1835,7 @@ export class SpriteEditorUI {
     // Refresh all previews from current GFX ROM state, then show edit view
     this.refreshAllPosePreviews();
     this.renderSheetZoomedView();
+    this.updateStatus();
   }
 
   /** Render the pose grid view inside the sheet container. */
@@ -1819,6 +1857,7 @@ export class SpriteEditorUI {
 
     const backBtn = el('button', 'sprite-sheet-back') as HTMLButtonElement;
     backBtn.textContent = 'Close';
+    setTooltip(backBtn, 'Back to game — Escape');
     backBtn.onclick = () => this.exitSpriteSheetMode();
     header.appendChild(backBtn);
     main.appendChild(header);
@@ -1829,6 +1868,7 @@ export class SpriteEditorUI {
     for (let i = 0; i < poses.length; i++) {
       const pose = poses[i]!;
       const cell = el('div', 'sprite-sheet-cell') as HTMLDivElement;
+      setTooltip(cell, 'Click to zoom into this pose');
       if (i === this.sheetSelectedPose) cell.classList.add('selected');
 
       cell.onclick = () => {
@@ -1909,6 +1949,7 @@ export class SpriteEditorUI {
       badge.textContent = `${i}`;
       cell.appendChild(badge);
 
+      setTooltip(cell, 'Switch to this pose — Up/Down arrows');
       cell.onclick = () => this.selectPoseInSheet(i);
       sidebar.appendChild(cell);
     }
@@ -1925,11 +1966,13 @@ export class SpriteEditorUI {
 
     const exportBtn = el('button', 'sprite-sheet-back') as HTMLButtonElement;
     exportBtn.textContent = 'Export PNG';
+    setTooltip(exportBtn, 'Download this pose as transparent PNG');
     exportBtn.onclick = () => this.exportPosePng();
     header.appendChild(exportBtn);
 
     const backBtn = el('button', 'sprite-sheet-back') as HTMLButtonElement;
     backBtn.textContent = 'Close';
+    setTooltip(backBtn, 'Back to game — Escape');
     backBtn.onclick = () => this.exitSpriteSheetMode();
     header.appendChild(backBtn);
     main.appendChild(header);
@@ -2123,10 +2166,11 @@ export class SpriteEditorUI {
       if (isShared) {
         const badge = el('div', 'sprite-sheet-tile-shared') as HTMLDivElement;
         badge.textContent = `×${refs.length}`;
-        badge.title = `Shared: ${refs.length} references`;
+        setTooltip(badge, `Shared by ${refs.length} sprites — editing affects all of them`);
         tileWrap.appendChild(badge);
       }
 
+      setTooltip(tileWrap, 'Click to edit this tile — Left/Right arrows');
       tileWrap.onclick = () => {
         this.sheetSelectedTile = i;
         this.selectSheetTile(i);
@@ -2189,6 +2233,7 @@ export class SpriteEditorUI {
       this.emulator.resume();
       this.emulator.resumeAudio();
     }
+    this.updateStatus();
   }
 
   // -- Pose PNG Export / Import --
@@ -2587,11 +2632,13 @@ export class SpriteEditorUI {
     const mergeBtn = el('button', 'ctrl-btn edit-merge-btn') as HTMLButtonElement;
     const quantizeBtn = el('button', 'ctrl-btn edit-quantize-btn') as HTMLButtonElement;
     quantizeBtn.textContent = 'Quantize';
+    setTooltip(quantizeBtn, 'Convert photo to palette colors (Atkinson dithering)');
     quantizeBtn.style.display = 'none';
     quantizeBtn.onclick = () => this.quantizeLayer();
     this.headSection.appendChild(quantizeBtn);
 
     mergeBtn.textContent = 'Merge Layer';
+    setTooltip(mergeBtn, 'Write pixels into GFX ROM — irreversible');
     mergeBtn.style.display = 'none';
     mergeBtn.onclick = () => { this.mergeAll(); mergeBtn.style.display = 'none'; quantizeBtn.style.display = 'none'; };
     this.headSection.appendChild(mergeBtn);
@@ -3114,6 +3161,7 @@ export class SpriteEditorUI {
     if (!gallery) return;
 
     const card = el('div', 'edit-variant-card') as HTMLDivElement;
+    setTooltip(card, 'Select this pose variant');
     if (index === this.selectedPoseIndex) card.classList.add('edit-variant-ref');
 
     card.onclick = () => {

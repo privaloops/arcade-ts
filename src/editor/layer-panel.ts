@@ -7,6 +7,7 @@
 
 import type { PhotoLayer, LayerGroup } from './layer-model';
 import { getTileStats } from './tile-allocator';
+import { setTooltip } from '../ui/tooltip';
 
 // ---------------------------------------------------------------------------
 // Callbacks
@@ -56,6 +57,7 @@ export class LayerPanel {
       const closeBtn = document.createElement('button');
       closeBtn.className = 'layer-close';
       closeBtn.textContent = '\u00D7';
+      setTooltip(closeBtn, 'Close layer panel');
       closeBtn.addEventListener('click', () => this.hide());
       header.appendChild(closeBtn);
       this.container.insertBefore(header, this.container.firstChild);
@@ -127,6 +129,7 @@ export class LayerPanel {
 
       const headerLabel = document.createElement('span');
       headerLabel.textContent = group.name;
+      setTooltip(headerLabel, 'Click to collapse/expand');
       headerLabel.onclick = () => groupEl.classList.toggle('layer-group-collapsed');
       groupHeader.appendChild(headerLabel);
 
@@ -140,13 +143,12 @@ export class LayerPanel {
         const eyeBtn = document.createElement('button');
         eyeBtn.className = 'layer-eye-btn';
         eyeBtn.textContent = '\u{1F441}';
-        eyeBtn.title = isVisible ? 'Hide layer' : 'Show layer';
+        setTooltip(eyeBtn, 'Toggle layer visibility');
         eyeBtn.style.opacity = isVisible ? '1' : '0.3';
         eyeBtn.onclick = (e) => {
           e.stopPropagation();
           const newVisible = eyeBtn.style.opacity === '0.3';
           eyeBtn.style.opacity = newVisible ? '1' : '0.3';
-          eyeBtn.title = newVisible ? 'Hide layer' : 'Show layer';
           this.callbacks.onToggleHwLayer(hwLayerId, newVisible);
         };
         hwControls.appendChild(eyeBtn);
@@ -154,8 +156,8 @@ export class LayerPanel {
         const gridCb = document.createElement('input');
         gridCb.type = 'checkbox';
         gridCb.checked = hwLayerState.grid.get(hwLayerId) === true;
-        gridCb.title = 'Show tile grid';
         gridCb.className = 'layer-hw-cb';
+        setTooltip(gridCb, 'Show tile grid overlay on this layer');
         gridCb.onclick = (e) => { e.stopPropagation(); this.callbacks.onToggleGrid(hwLayerId, gridCb.checked); };
 
         const gridLabel = document.createElement('span');
@@ -191,6 +193,7 @@ export class LayerPanel {
         const mergeBtn = document.createElement('button');
         mergeBtn.className = 'layer-btn layer-merge-btn';
         mergeBtn.textContent = 'Merge All';
+        setTooltip(mergeBtn, 'Merge all quantized layers into ROM');
         mergeBtn.onclick = () => this.callbacks.onMergeGroup(gi);
         actions.appendChild(mergeBtn);
       }
@@ -202,6 +205,7 @@ export class LayerPanel {
         const dropZone = document.createElement('div');
         dropZone.className = 'layer-drop-zone';
         dropZone.textContent = '+ Drop or click to add image';
+        setTooltip(dropZone, 'Drop image or click to import photo');
 
         const fileInput = document.createElement('input');
         fileInput.type = 'file';
@@ -252,6 +256,7 @@ export class LayerPanel {
     slider.max = '100';
     slider.value = '0';
     slider.className = 'layer-3d-slider';
+    setTooltip(slider, 'Adjust 3D layer separation');
     slider.oninput = () => this.callbacks.onSpreadChange(parseInt(slider.value, 10));
     sec3d.appendChild(slider);
     this.content.appendChild(sec3d);
@@ -298,13 +303,14 @@ export class LayerPanel {
     });
 
     // Click to select
+    setTooltip(row, 'Select this layer');
     row.onclick = () => this.callbacks.onSelectLayer(groupIdx, layerIdx);
 
     // Visibility toggle
     const eye = document.createElement('button');
     eye.className = 'layer-eye-btn';
     eye.textContent = layer.visible ? '\u{1F441}' : '\u{1F441}\u{FE0F}\u{200D}\u{1F5E8}\u{FE0F}';
-    eye.title = layer.visible ? 'Hide layer' : 'Show layer';
+    setTooltip(eye, 'Toggle layer visibility');
     eye.style.opacity = layer.visible ? '1' : '0.3';
     eye.onclick = (e) => { e.stopPropagation(); this.callbacks.onToggleVisibility(groupIdx, layerIdx); };
     row.appendChild(eye);
@@ -337,7 +343,7 @@ export class LayerPanel {
     const badge = document.createElement('span');
     badge.className = 'layer-badge';
     badge.textContent = layer.quantized ? 'Q' : 'RGBA';
-    badge.title = layer.quantized ? 'Quantized (ready for merge)' : 'Raw photo (needs quantize)';
+    setTooltip(badge, layer.quantized ? 'Quantized — ready to merge into ROM' : 'Raw photo — quantize before merging');
     row.appendChild(badge);
 
     // Quantize button (only if not yet quantized)
@@ -345,7 +351,7 @@ export class LayerPanel {
       const qBtn = document.createElement('button');
       qBtn.className = 'layer-btn';
       qBtn.textContent = 'Q';
-      qBtn.title = 'Quantize to palette';
+      setTooltip(qBtn, 'Quantize to palette colors');
       qBtn.onclick = (e) => { e.stopPropagation(); this.callbacks.onQuantizeLayer(groupIdx, layerIdx); };
       row.appendChild(qBtn);
     }
@@ -354,7 +360,7 @@ export class LayerPanel {
     const delBtn = document.createElement('button');
     delBtn.className = 'layer-btn layer-del-btn';
     delBtn.textContent = '\u00D7';
-    delBtn.title = 'Delete layer';
+    setTooltip(delBtn, 'Delete this layer');
     delBtn.onclick = (e) => { e.stopPropagation(); this.callbacks.onDeleteLayer(groupIdx, layerIdx); };
     row.appendChild(delBtn);
 

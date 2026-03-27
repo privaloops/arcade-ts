@@ -22,6 +22,7 @@ import { initShortcuts } from "./ui/shortcuts";
 import { exportSaveFile, parseSaveFile, applySaveFile } from "./editor/romstudio-save";
 import { hasAutoSave, loadAutoSave, clearAutoSave, scheduleAutoSave } from "./editor/romstudio-autosave";
 import { showToast } from "./ui/toast";
+import { setTooltip } from "./ui/tooltip";
 
 // ── DOM lookups ──────────────────────────────────────────────────────────────
 
@@ -168,6 +169,9 @@ function triggerAutoSave(): void {
   if (romStore) scheduleAutoSave(romStore, getAllPoses());
 }
 
+setTooltip(saveStudioBtn, "Save project (.romstudio) — Ctrl+S");
+setTooltip(loadStudioBtn, "Load project (.romstudio) — Ctrl+O");
+setTooltip(toggleEmuBarBtn, "Show/hide toolbar");
 saveStudioBtn.addEventListener('click', saveStudio);
 loadStudioBtn.addEventListener('click', loadStudio);
 toggleEmuBarBtn.addEventListener('click', () => {
@@ -295,6 +299,7 @@ function closeControlsModal(): void {
   if (!ctrlWasPaused && emulator.isPaused()) { emulator.resume(); if (!muted) emulator.resumeAudio(); }
 }
 
+setTooltip(controlsBtn, "Settings — F1");
 controlsBtn.addEventListener("click", openControlsModal);
 ctrlCloseBtn.addEventListener("click", closeControlsModal);
 ctrlOverlay.addEventListener("click", (e) => { if (e.target === ctrlOverlay) closeControlsModal(); });

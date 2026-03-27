@@ -3,6 +3,7 @@ import { LAYER_OBJ, LAYER_SCROLL1, LAYER_SCROLL2, LAYER_SCROLL3 } from "../video
 import { SpriteEditorUI } from "../editor/sprite-editor-ui";
 import { SCREEN_WIDTH, SCREEN_HEIGHT } from "../constants";
 import type { Emulator } from "../emulator";
+import { setTooltip } from "../ui/tooltip";
 
 // Layer display order (visual, back→front by default)
 const LAYER_IDS = [LAYER_SCROLL1, LAYER_OBJ, LAYER_SCROLL2, LAYER_SCROLL3];
@@ -161,6 +162,7 @@ export class DebugPanel {
     title.textContent = "Sprites & Tiles";
     const closeBtn = el("button", "dbg-close");
     closeBtn.textContent = "\u00D7";
+    setTooltip(closeBtn, "Close panel");
     closeBtn.addEventListener("click", () => this.toggle());
     header.append(title, closeBtn);
     c.appendChild(header);
@@ -169,6 +171,7 @@ export class DebugPanel {
     this.frameCounter = document.getElementById('frame-counter');
     // Step button (moved to header)
     const stepBtn = document.getElementById('step-btn') as HTMLButtonElement | null;
+    if (stepBtn) setTooltip(stepBtn, "Step one frame");
     stepBtn?.addEventListener("click", () => {
       const pauseBtn = document.getElementById('pause-btn');
       if (!this.emulator.isPaused()) {
@@ -242,6 +245,7 @@ export class DebugPanel {
       for (let p = 0; p < 6; p++) {
         const btn = el("button", "dbg-page-btn") as HTMLButtonElement;
         btn.textContent = String(p);
+        setTooltip(btn, `Palette page ${p}`);
         if (p === 0) btn.classList.add("active");
         btn.addEventListener("click", () => {
           this.palettePage = p;
@@ -380,6 +384,7 @@ export class DebugPanel {
 
     const flashBtn = el("button", "dbg-flash-btn") as HTMLButtonElement;
     flashBtn.textContent = "Flash";
+    setTooltip(flashBtn, "Flash this layer to identify it");
 
     cb.addEventListener("change", () => {
       this.renderer.setLayerEnabled(layerId, cb.checked);
@@ -389,8 +394,8 @@ export class DebugPanel {
     const gridCb = document.createElement("input");
     gridCb.type = "checkbox";
     gridCb.checked = false;
-    gridCb.title = "Show tile grid";
     gridCb.className = "dbg-grid-cb";
+    setTooltip(gridCb, "Show tile grid");
     this.gridEnabled.set(layerId, gridCb.checked);
     gridCb.addEventListener("change", () => {
       this.gridEnabled.set(layerId, gridCb.checked);
@@ -581,7 +586,7 @@ function collapsibleSection(text: string, tooltip: string, open = true): [HTMLDi
 
   const header = document.createElement("div");
   header.className = "dbg-section-title";
-  header.title = tooltip;
+  setTooltip(header, "Click to collapse/expand");
 
   const arrow = document.createElement("span");
   arrow.className = "dbg-section-arrow";
