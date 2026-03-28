@@ -2034,6 +2034,40 @@ export class SpriteEditorUI {
 
   /** Forward tool shortcuts while in sheet zoomed view. */
   private handleToolShortcut(e: KeyboardEvent): void {
+    // Layer controls: Shift+arrows = move, +/- = resize
+    const layer = this.activeGroup?.layers[this.activeLayerIndex];
+    if (layer) {
+      if (e.shiftKey && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+        e.preventDefault();
+        if (e.key === 'ArrowUp') layer.offsetY--;
+        else if (e.key === 'ArrowDown') layer.offsetY++;
+        else if (e.key === 'ArrowLeft') layer.offsetX--;
+        else if (e.key === 'ArrowRight') layer.offsetX++;
+        this.renderSheetZoomedPose();
+        return;
+      }
+      if (e.key === '+' || e.key === '=') {
+        e.preventDefault();
+        const newW = layer.width + 1;
+        const newH = layer.height + 1;
+        layer.rgbaData = resizeRgba(layer.rgbaOriginal, newW, newH);
+        layer.width = newW;
+        layer.height = newH;
+        this.renderSheetZoomedPose();
+        return;
+      }
+      if (e.key === '-') {
+        e.preventDefault();
+        const newW = Math.max(4, layer.width - 1);
+        const newH = Math.max(4, layer.height - 1);
+        layer.rgbaData = resizeRgba(layer.rgbaOriginal, newW, newH);
+        layer.width = newW;
+        layer.height = newH;
+        this.renderSheetZoomedPose();
+        return;
+      }
+    }
+
     switch (e.key) {
       case 'b': case 'B':
         this.editor.setTool('pencil'); e.preventDefault(); break;
@@ -2043,6 +2077,13 @@ export class SpriteEditorUI {
         this.editor.setTool('eyedropper'); e.preventDefault(); break;
       case 'x': case 'X':
         this.editor.setTool('eraser'); e.preventDefault(); break;
+      case 'w': case 'W':
+        this.editor.setTool('wand'); e.preventDefault(); break;
+      case 'Delete': case 'Backspace':
+        this.editor.eraseTile();
+        this.refreshUndoButtons();
+        if (this.spriteSheetMode) this.refreshSheetAfterEdit();
+        e.preventDefault(); break;
       case 'z': case 'Z':
         if (e.ctrlKey || e.metaKey) {
           if (e.shiftKey) this.editor.redo(); else this.editor.undo();
@@ -2545,6 +2586,13 @@ export class SpriteEditorUI {
         }
         ctx.drawImage(layerCvs, layer.offsetX, layer.offsetY);
       }
+    }
+
+    // Draw tile grid overlay (16x16 boundaries)
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.lineWidth = 0.5;
+    for (const t of pose.tiles) {
+      ctx.strokeRect(t.relX + 0.5, t.relY + 0.5, 15, 15);
     }
 
     // Draw selected tile highlight (dashed outline, no fill)
