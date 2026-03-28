@@ -183,6 +183,7 @@ export class SpriteEditorUI {
       this.emulator.rerender();
       this.emulator.getRomStore()?.onModified?.();
       if (this.spriteSheetMode) this.refreshSheetAfterEdit();
+      this.refreshCapturesPanel();
     });
     this.editor.setOnToolChanged(() => this.refreshToolButtons());
     this.editor.setOnColorChanged(() => this.refreshPalette());
@@ -1626,7 +1627,19 @@ export class SpriteEditorUI {
     resetBtn.textContent = 'Reset';
     setTooltip(resetBtn, 'Reset palette to original ROM colors');
 
-    dialog.append(input, transLabel, nuancesLabel, resetBtn);
+    // Saturation slider
+    const satLabel = el('label', 'edit-color-sat-label') as HTMLLabelElement;
+    satLabel.textContent = 'Saturation';
+    const satSlider = document.createElement('input');
+    satSlider.type = 'range';
+    satSlider.min = '0';
+    satSlider.max = '200';
+    satSlider.value = '100';
+    satSlider.className = 'edit-color-sat-slider';
+    satLabel.appendChild(satSlider);
+
+    satLabel.appendChild(resetBtn);
+    dialog.append(input, transLabel, nuancesLabel, satLabel);
     this.paletteContainer?.appendChild(dialog);
 
     // Snapshot original RGB for reset
@@ -1692,7 +1705,35 @@ export class SpriteEditorUI {
       transCb.checked = transCb.checked; // preserve state
     });
 
+    satSlider.addEventListener('input', () => {
+      const factor = parseInt(satSlider.value, 10) / 100; // 0 = grayscale, 1 = original, 2 = boosted
+
+      // Apply saturation to selected nuance group or all colors
+      const targets = this.nuanceGroup.size > 0
+        ? this.nuanceGroup
+        : new Set(Array.from({ length: 15 }, (_, i) => i));
+
+      for (const i of targets) {
+        const [h, s, l] = origHsl[i] ?? [0, 0, 0];
+        const newS = Math.min(1, s * factor);
+        const [sr, sg, sb] = hslToRgb(h, newS, l);
+        this.editor.editPaletteColor(i, sr, sg, sb);
+      }
+
+      // Update swatches
+      const updatedPalette = this.editor.getCurrentPalette();
+      const swatches = this.paletteContainer?.querySelectorAll('.edit-swatch');
+      if (swatches) {
+        for (let i = 0; i < Math.min(swatches.length, 15); i++) {
+          const sw = swatches[i] as HTMLDivElement;
+          const [ur, ug, ub] = updatedPalette[i] ?? [0, 0, 0];
+          sw.style.backgroundColor = `rgb(${ur},${ug},${ub})`;
+        }
+      }
+    });
+
     resetBtn.addEventListener('click', () => {
+      satSlider.value = '100';
       for (let i = 0; i < 15; i++) {
         const [or, og, ob] = origRgb[i] ?? [0, 0, 0];
         this.editor.editPaletteColor(i, or, og, ob);
@@ -2356,6 +2397,7 @@ export class SpriteEditorUI {
     // Mouse interaction: drag/resize layer or click to select tile
     let draggingPhotoLayer = false;
     let resizingPhotoLayer = false;
+    let resizeCorner = '';
     let dragStartX = 0;
     let dragStartY = 0;
     let dragMoved = false;
@@ -2365,19 +2407,33 @@ export class SpriteEditorUI {
       const px = Math.floor((e.clientX - rect.left) / cssScale);
       const py = Math.floor((e.clientY - rect.top) / cssScale);
 
-      // If there's a photo layer, start drag (Shift = resize)
       const layer = this.activeGroup?.layers[this.activeLayerIndex];
       if (layer) {
-        if (e.shiftKey) {
-          resizingPhotoLayer = true;
-          dragStartX = px;
-          dragStartY = py;
-          dragMoved = false;
-          e.preventDefault();
-          return;
+        const lx = layer.offsetX;
+        const ly = layer.offsetY;
+        const lw = layer.width;
+        const lh = layer.height;
+        const ht = 3; // corner handle tolerance in CPS1 pixels
+
+        // Check corner handles first → resize
+        const corners: [string, number, number][] = [
+          ['tl', lx, ly], ['tr', lx + lw, ly],
+          ['bl', lx, ly + lh], ['br', lx + lw, ly + lh],
+        ];
+        for (const [corner, cx, cy] of corners) {
+          if (Math.abs(px - cx) <= ht && Math.abs(py - cy) <= ht) {
+            resizingPhotoLayer = true;
+            resizeCorner = corner;
+            dragStartX = px;
+            dragStartY = py;
+            dragMoved = false;
+            e.preventDefault();
+            return;
+          }
         }
-        if (px >= layer.offsetX && px < layer.offsetX + layer.width
-            && py >= layer.offsetY && py < layer.offsetY + layer.height) {
+
+        // Click inside layer → drag
+        if (px >= lx && px < lx + lw && py >= ly && py < ly + lh) {
           draggingPhotoLayer = true;
           dragStartX = px;
           dragStartY = py;
@@ -2400,11 +2456,16 @@ export class SpriteEditorUI {
       dragMoved = true;
 
       if (resizingPhotoLayer) {
-        // Resize: scale the layer
-        const newW = Math.max(4, layer.width + dx);
-        const newH = Math.max(4, layer.height + dy);
-        const resized = resizeRgba(layer.rgbaOriginal, newW, newH);
-        layer.rgbaData = resized;
+        // Resize from corner handle — maintain aspect ratio
+        const delta = Math.abs(dx) > Math.abs(dy) ? dx : dy;
+        const sign = (resizeCorner === 'tl' || resizeCorner === 'bl') ? -1 : 1;
+        const origW = layer.rgbaOriginal.width;
+        const origH = layer.rgbaOriginal.height;
+        const newW = Math.max(4, layer.width + delta * sign);
+        const newH = Math.max(4, Math.round(newW * origH / origW));
+        if (resizeCorner.includes('l')) layer.offsetX += layer.width - newW;
+        if (resizeCorner.includes('t')) layer.offsetY += layer.height - newH;
+        layer.rgbaData = resizeRgba(layer.rgbaOriginal, newW, newH);
         layer.width = newW;
         layer.height = newH;
       } else if (draggingPhotoLayer) {
@@ -2500,6 +2561,10 @@ export class SpriteEditorUI {
     this.refreshAllPosePreviews();
     this.renderSheetZoomedPose();
     this.refreshSheetSidebar();
+    // Refresh tile grid
+    const tilesGrid = this.sheetContainer?.querySelector('.sprite-sheet-tiles');
+    const pose = this.activePoses[this.sheetSelectedPose];
+    if (tilesGrid && pose) this.renderSheetTileGrid(tilesGrid as HTMLElement, pose);
   }
 
   /** Re-read ALL pose previews from the current GFX ROM. */
@@ -2593,6 +2658,29 @@ export class SpriteEditorUI {
     ctx.lineWidth = 0.5;
     for (const t of pose.tiles) {
       ctx.strokeRect(t.relX + 0.5, t.relY + 0.5, 15, 15);
+    }
+
+    // Draw active photo layer selection outline + resize handles
+    const activeLayer = group?.layers[this.activeLayerIndex];
+    if (activeLayer) {
+      const lx = activeLayer.offsetX;
+      const ly = activeLayer.offsetY;
+      const lw = activeLayer.width;
+      const lh = activeLayer.height;
+
+      ctx.strokeStyle = 'rgba(0, 200, 255, 0.7)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 3]);
+      ctx.strokeRect(lx - 0.5, ly - 0.5, lw + 1, lh + 1);
+      ctx.setLineDash([]);
+
+      // Resize handles (4 corners)
+      const hs = 2;
+      ctx.fillStyle = 'rgba(0, 200, 255, 0.9)';
+      ctx.fillRect(lx - hs, ly - hs, hs * 2, hs * 2);
+      ctx.fillRect(lx + lw - hs, ly - hs, hs * 2, hs * 2);
+      ctx.fillRect(lx - hs, ly + lh - hs, hs * 2, hs * 2);
+      ctx.fillRect(lx + lw - hs, ly + lh - hs, hs * 2, hs * 2);
     }
 
     // Draw selected tile highlight (dashed outline, no fill)
@@ -2971,10 +3059,44 @@ export class SpriteEditorUI {
     // Read the (possibly updated) palette and quantize
     const palette = readPalette(bufs.vram, video.getPaletteBase(), paletteIdx);
     layer.pixels = quantizeWithDithering(layer.rgbaData, palette);
+
+    // Add 1px black outline: find darkest palette color, fill transparent neighbors of opaque pixels
+    let darkestIdx = 0;
+    let darkestLum = Infinity;
+    for (let c = 0; c < 15; c++) {
+      const [cr, cg, cb] = palette[c] ?? [0, 0, 0];
+      const lum = cr * 0.299 + cg * 0.587 + cb * 0.114;
+      if (lum < darkestLum) { darkestLum = lum; darkestIdx = c; }
+    }
+    const w = layer.width;
+    const h = layer.height;
+    // Two-pass outline: first pass detects border pixels, second pass writes them
+    // (avoids outline leaking into the interior)
+    const border = new Uint8Array(w * h);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        if (layer.pixels[y * w + x] !== 0) continue; // not transparent
+        // Check 8 neighbors (including diagonals) for non-transparent pixels
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            if (dx === 0 && dy === 0) continue;
+            const nx = x + dx;
+            const ny = y + dy;
+            if (nx >= 0 && nx < w && ny >= 0 && ny < h && layer.pixels[ny * w + nx] !== 0) {
+              border[y * w + x] = 1;
+            }
+          }
+        }
+      }
+    }
+    for (let i = 0; i < border.length; i++) {
+      if (border[i]) layer.pixels[i] = darkestIdx;
+    }
+
     layer.quantized = true;
 
     this.refreshSheetAfterEdit();
-    showToast('Quantized', true);
+    showToast('Quantized with outline', true);
   }
 
   /** Merge the quantized sprite photo layer onto pose tiles (refCount = 1 only). */
@@ -3035,6 +3157,7 @@ export class SpriteEditorUI {
     this.activeLayerIndex = -1;
 
     this.refreshSheetAfterEdit();
+    this.refreshCapturesPanel();
     this.emulator.rerender();
 
     showToast(

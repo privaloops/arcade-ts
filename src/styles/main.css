@@ -1010,7 +1010,7 @@
       }
 
       .edit-color-dialog {
-        display: flex; align-items: center; gap: 8px;
+        display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
         padding: 6px 0; margin-top: 4px;
       }
       .edit-color-input { width: 36px; height: 28px; padding: 0; border: 1px solid var(--color-border); border-radius: 3px; cursor: pointer; }
@@ -1025,6 +1025,13 @@
         color: var(--color-text); cursor: pointer; margin-left: auto;
       }
       .edit-color-reset-btn:hover { border-color: var(--color-accent); color: var(--color-accent); }
+
+      .edit-color-sat-label {
+        display: flex; flex-wrap: wrap; align-items: center; gap: 4px;
+        font: 0.65rem var(--font-system); color: var(--color-text-dim);
+        width: 100%; margin-top: 4px;
+      }
+      .edit-color-sat-slider { flex: 1; min-width: 60px; accent-color: var(--color-accent); cursor: pointer; }
 
       .edit-neighbors-section { margin-bottom: 18px; }
       .edit-neighbors {
