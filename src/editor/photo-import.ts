@@ -763,3 +763,92 @@ function enhanceSaturation(image: ImageData, factor: number): void {
     d[i + 2] = clamp(gray + (b - gray) * factor);
   }
 }
+
+// ---------------------------------------------------------------------------
+// Median Cut — generate optimal palette from image
+// ---------------------------------------------------------------------------
+
+interface ColorBox {
+  pixels: Array<[number, number, number]>;
+  rMin: number; rMax: number;
+  gMin: number; gMax: number;
+  bMin: number; bMax: number;
+}
+
+function makeBox(pixels: Array<[number, number, number]>): ColorBox {
+  let rMin = 255, rMax = 0, gMin = 255, gMax = 0, bMin = 255, bMax = 0;
+  for (const [r, g, b] of pixels) {
+    if (r < rMin) rMin = r; if (r > rMax) rMax = r;
+    if (g < gMin) gMin = g; if (g > gMax) gMax = g;
+    if (b < bMin) bMin = b; if (b > bMax) bMax = b;
+  }
+  return { pixels, rMin, rMax, gMin, gMax, bMin, bMax };
+}
+
+function splitBox(box: ColorBox): [ColorBox, ColorBox] {
+  const rRange = box.rMax - box.rMin;
+  const gRange = box.gMax - box.gMin;
+  const bRange = box.bMax - box.bMin;
+
+  // Sort by the longest axis
+  let axis: 0 | 1 | 2;
+  if (rRange >= gRange && rRange >= bRange) axis = 0;
+  else if (gRange >= rRange && gRange >= bRange) axis = 1;
+  else axis = 2;
+
+  box.pixels.sort((a, b) => a[axis]! - b[axis]!);
+  const mid = Math.floor(box.pixels.length / 2);
+
+  return [
+    makeBox(box.pixels.slice(0, mid)),
+    makeBox(box.pixels.slice(mid)),
+  ];
+}
+
+function boxAverage(box: ColorBox): [number, number, number] {
+  let rSum = 0, gSum = 0, bSum = 0;
+  for (const [r, g, b] of box.pixels) {
+    rSum += r; gSum += g; bSum += b;
+  }
+  const n = box.pixels.length;
+  return [Math.round(rSum / n), Math.round(gSum / n), Math.round(bSum / n)];
+}
+
+/**
+ * Extract an optimal N-color palette from an RGBA image using median cut.
+ * Ignores transparent pixels (alpha < 128).
+ */
+export function generatePalette(rgba: ImageData, numColors: number): Array<[number, number, number]> {
+  const pixels: Array<[number, number, number]> = [];
+  const d = rgba.data;
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i + 3]! < 128) continue; // skip transparent
+    pixels.push([d[i]!, d[i + 1]!, d[i + 2]!]);
+  }
+
+  if (pixels.length === 0) return Array.from({ length: numColors }, () => [0, 0, 0] as [number, number, number]);
+
+  let boxes: ColorBox[] = [makeBox(pixels)];
+
+  while (boxes.length < numColors) {
+    // Find the box with the largest volume (range)
+    let bestIdx = 0;
+    let bestRange = 0;
+    for (let i = 0; i < boxes.length; i++) {
+      const b = boxes[i]!;
+      const range = Math.max(b.rMax - b.rMin, b.gMax - b.gMin, b.bMax - b.bMin);
+      if (range > bestRange && b.pixels.length > 1) {
+        bestRange = range;
+        bestIdx = i;
+      }
+    }
+
+    if (bestRange === 0) break; // can't split further
+
+    const [a, b] = splitBox(boxes[bestIdx]!);
+    boxes.splice(bestIdx, 1, a, b);
+  }
+
+  return boxes.map(boxAverage);
+}
+

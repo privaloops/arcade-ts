@@ -10,7 +10,8 @@ import { SpriteEditor, type EditorTool } from './sprite-editor';
 import { SCREEN_WIDTH, SCREEN_HEIGHT } from '../constants';
 import { LAYER_OBJ, LAYER_SCROLL1, LAYER_SCROLL2, LAYER_SCROLL3, readWord, type CPS1Video } from '../video/cps1-video';
 import { readAllSprites, groupCharacter, poseHash, capturePose, assembleCharacter, type SpriteGroup as SpriteGroupData, type CapturedPose } from './sprite-analyzer';
-import { loadPhotoRgba, resizeRgba, quantizeWithDithering, placePhotoOnTiles } from './photo-import';
+import { loadPhotoRgba, resizeRgba, quantizeWithDithering, placePhotoOnTiles, generatePalette } from './photo-import';
+import { encodeColor } from './palette-editor';
 import { readPixel as readPixelFn, writePixel as writePixelFn, writeScrollPixel, readTile as readTileFn } from './tile-encoder';
 import { readPalette, rgbToHsl, hslToRgb } from './palette-editor';
 import { createLayer, createSpriteGroup, createScrollGroup, type PhotoLayer, type LayerGroup } from './layer-model';
@@ -2246,6 +2247,51 @@ export class SpriteEditorUI {
     exportBtn.onclick = () => this.exportPosePng();
     header.appendChild(exportBtn);
 
+    // Sprite photo layer controls (shown when layers exist)
+    const hasPhotoLayers = (this.activeGroup?.layers.length ?? 0) > 0;
+    if (hasPhotoLayers) {
+      const activeLayer = this.activeGroup?.layers[this.activeLayerIndex];
+      const isQuantized = activeLayer?.quantized ?? false;
+
+      if (!isQuantized) {
+        const updatePalLabel = el('label', 'sprite-sheet-update-pal') as HTMLLabelElement;
+        const updatePalCb = document.createElement('input');
+        updatePalCb.type = 'checkbox';
+        updatePalCb.id = 'update-palette-cb';
+        const updatePalText = document.createElement('span');
+        updatePalText.textContent = 'Update palette';
+        updatePalLabel.append(updatePalCb, updatePalText);
+        header.appendChild(updatePalLabel);
+
+        const quantizeBtn = el('button', 'sprite-sheet-back') as HTMLButtonElement;
+        quantizeBtn.textContent = 'Quantize';
+        quantizeBtn.onclick = () => {
+          this.quantizeSpritePhotoLayer(updatePalCb.checked);
+          this.renderSheetZoomedView();
+        };
+        header.appendChild(quantizeBtn);
+      } else {
+        const mergeBtn = el('button', 'sprite-sheet-back') as HTMLButtonElement;
+        mergeBtn.textContent = 'Merge';
+        mergeBtn.onclick = () => {
+          this.mergeSpritePhotoLayer();
+          this.renderSheetZoomedView();
+        };
+        header.appendChild(mergeBtn);
+      }
+
+      const removeBtn = el('button', 'sprite-sheet-back') as HTMLButtonElement;
+      removeBtn.textContent = 'Remove Photo';
+      removeBtn.onclick = () => {
+        if (this.activeGroup) {
+          this.activeGroup.layers.splice(this.activeLayerIndex, 1);
+          this.activeLayerIndex = -1;
+          this.renderSheetZoomedView();
+        }
+      };
+      header.appendChild(removeBtn);
+    }
+
     const backBtn = el('button', 'sprite-sheet-back') as HTMLButtonElement;
     backBtn.textContent = 'Close';
     setTooltip(backBtn, 'Back to game — Escape');
@@ -2266,8 +2312,78 @@ export class SpriteEditorUI {
     this.sheetZoomCtx = zoomCvs.getContext('2d')!;
     this.sheetZoomCtx.imageSmoothingEnabled = false;
 
-    // Click handler: find tile at position (convert CSS coords to CPS1 coords)
-    zoomCvs.addEventListener('click', (e) => {
+    // Mouse interaction: drag/resize layer or click to select tile
+    let draggingPhotoLayer = false;
+    let resizingPhotoLayer = false;
+    let dragStartX = 0;
+    let dragStartY = 0;
+    let dragMoved = false;
+
+    zoomCvs.addEventListener('mousedown', (e) => {
+      const rect = zoomCvs.getBoundingClientRect();
+      const px = Math.floor((e.clientX - rect.left) / cssScale);
+      const py = Math.floor((e.clientY - rect.top) / cssScale);
+
+      // If there's a photo layer, start drag (Shift = resize)
+      const layer = this.activeGroup?.layers[this.activeLayerIndex];
+      if (layer) {
+        if (e.shiftKey) {
+          resizingPhotoLayer = true;
+          dragStartX = px;
+          dragStartY = py;
+          dragMoved = false;
+          e.preventDefault();
+          return;
+        }
+        if (px >= layer.offsetX && px < layer.offsetX + layer.width
+            && py >= layer.offsetY && py < layer.offsetY + layer.height) {
+          draggingPhotoLayer = true;
+          dragStartX = px;
+          dragStartY = py;
+          dragMoved = false;
+          e.preventDefault();
+          return;
+        }
+      }
+    });
+
+    const onMove = (e: MouseEvent) => {
+      const layer = this.activeGroup?.layers[this.activeLayerIndex];
+      if (!layer) return;
+      const rect = zoomCvs.getBoundingClientRect();
+      const px = Math.floor((e.clientX - rect.left) / cssScale);
+      const py = Math.floor((e.clientY - rect.top) / cssScale);
+      const dx = px - dragStartX;
+      const dy = py - dragStartY;
+      if (dx === 0 && dy === 0) return;
+      dragMoved = true;
+
+      if (resizingPhotoLayer) {
+        // Resize: scale the layer
+        const newW = Math.max(4, layer.width + dx);
+        const newH = Math.max(4, layer.height + dy);
+        const resized = resizeRgba(layer.rgbaOriginal, newW, newH);
+        layer.rgbaData = resized;
+        layer.width = newW;
+        layer.height = newH;
+      } else if (draggingPhotoLayer) {
+        layer.offsetX += dx;
+        layer.offsetY += dy;
+      } else {
+        return;
+      }
+      dragStartX = px;
+      dragStartY = py;
+      this.renderSheetZoomedPose();
+    };
+
+    const onUp = (e: MouseEvent) => {
+      if (draggingPhotoLayer || resizingPhotoLayer) {
+        draggingPhotoLayer = false;
+        resizingPhotoLayer = false;
+        if (dragMoved) return; // don't select tile if we dragged
+      }
+      // Click to select tile (only if not dragging)
       const rect = zoomCvs.getBoundingClientRect();
       const px = Math.floor((e.clientX - rect.left) / cssScale);
       const py = Math.floor((e.clientY - rect.top) / cssScale);
@@ -2279,10 +2395,51 @@ export class SpriteEditorUI {
         this.sheetSelectedTile = tileIdx;
         this.selectSheetTile(tileIdx);
       }
+    };
+
+    // Use document for move/up so drag works even outside canvas
+    zoomCvs.addEventListener('mousedown', () => {
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp, { once: true });
+    });
+    zoomCvs.addEventListener('mouseup', () => {
+      document.removeEventListener('mousemove', onMove);
     });
 
     this.renderSheetZoomedPose();
     zoomSection.appendChild(zoomCvs);
+
+    // Hint text when no photo layer
+    if (!hasPhotoLayers) {
+      const hint = el('div', 'edit-capture-hint') as HTMLDivElement;
+      hint.textContent = 'Drop an image on the sprite to overlay it';
+      zoomSection.appendChild(hint);
+    }
+
+    // Drop zone for photo import onto sprite
+    const dropHint = el('div', 'sprite-sheet-drop-hint') as HTMLDivElement;
+    dropHint.textContent = 'Drop image here';
+    dropHint.style.display = 'none';
+    zoomSection.appendChild(dropHint);
+
+    zoomSection.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropHint.style.display = '';
+      zoomSection.classList.add('drop-active');
+    });
+    zoomSection.addEventListener('dragleave', (e) => {
+      if (!zoomSection.contains(e.relatedTarget as Node)) {
+        dropHint.style.display = 'none';
+        zoomSection.classList.remove('drop-active');
+      }
+    });
+    zoomSection.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropHint.style.display = 'none';
+      zoomSection.classList.remove('drop-active');
+      const file = (e as DragEvent).dataTransfer?.files[0];
+      if (file?.type.startsWith('image/')) this.handleSpritePhotoDrop(file);
+    });
 
     // Tile strip (horizontal row)
     const tilesLabel = el('div', 'edit-section-label');
@@ -2360,6 +2517,35 @@ export class SpriteEditorUI {
 
     ctx.clearRect(0, 0, cvs.width, cvs.height);
     ctx.drawImage(tmp, 0, 0);
+
+    // Draw photo layers on top of sprite
+    const group = this.activeGroup;
+    if (group) {
+      for (const layer of group.layers) {
+        if (!layer.visible) continue;
+        const layerCvs = document.createElement('canvas');
+        layerCvs.width = layer.width;
+        layerCvs.height = layer.height;
+        const layerCtx = layerCvs.getContext('2d')!;
+        if (layer.quantized) {
+          const palArr = readPalette(bufs.vram, video.getPaletteBase(), pal);
+          const imgData = new ImageData(layer.width, layer.height);
+          for (let i = 0; i < layer.pixels.length; i++) {
+            const ci = layer.pixels[i]!;
+            if (ci === 0) continue;
+            const [r, g, b] = palArr[ci] ?? [0, 0, 0];
+            imgData.data[i * 4] = r;
+            imgData.data[i * 4 + 1] = g;
+            imgData.data[i * 4 + 2] = b;
+            imgData.data[i * 4 + 3] = 255;
+          }
+          layerCtx.putImageData(imgData, 0, 0);
+        } else {
+          layerCtx.putImageData(layer.rgbaData, 0, 0);
+        }
+        ctx.drawImage(layerCvs, layer.offsetX, layer.offsetY);
+      }
+    }
 
     // Draw selected tile highlight (dashed outline, no fill)
     if (this.sheetSelectedTile >= 0 && this.sheetSelectedTile < pose.tiles.length) {
@@ -2489,6 +2675,13 @@ export class SpriteEditorUI {
   /** Exit sprite sheet mode and return to the game. */
   private exitSpriteSheetMode(): void {
     if (!this.spriteSheetMode) return;
+
+    // Clean up any un-merged photo layers on the active sprite group
+    const group = this.activeGroup;
+    if (group?.type === 'sprite' && group.layers.length > 0) {
+      group.layers.length = 0;
+      this.activeLayerIndex = -1;
+    }
 
     this.spriteSheetMode = false;
     this.sheetZoomed = false;
@@ -2687,6 +2880,145 @@ export class SpriteEditorUI {
       a.click();
       URL.revokeObjectURL(url);
     }, 'image/png');
+  }
+
+  /** Quantize the active sprite photo layer. Optionally update palette from image colors. */
+  private quantizeSpritePhotoLayer(updatePalette: boolean): void {
+    const group = this.activeGroup;
+    if (!group?.spriteCapture) return;
+    const layer = group.layers[this.activeLayerIndex];
+    if (!layer || layer.quantized) return;
+
+    const video = this.emulator.getVideo();
+    if (!video) return;
+    const bufs = this.emulator.getBusBuffers();
+    const paletteIdx = group.spriteCapture.palette;
+
+    if (updatePalette) {
+      // Generate optimal palette from the photo via median cut
+      const newColors = generatePalette(layer.rgbaData, 15);
+
+      // Write new palette to VRAM (immediate visual effect)
+      const paletteBase = video.getPaletteBase();
+      const vramOff = paletteBase + paletteIdx * 32;
+      for (let i = 0; i < 15; i++) {
+        const [r, g, b] = newColors[i] ?? [0, 0, 0];
+        const word = encodeColor(r, g, b);
+        bufs.vram[vramOff + i * 2] = (word >> 8) & 0xFF;
+        bufs.vram[vramOff + i * 2 + 1] = word & 0xFF;
+      }
+
+      // Patch program ROM so the palette persists
+      const romStore = this.emulator.getRomStore();
+      if (romStore) {
+        for (let i = 0; i < 15; i++) {
+          const [r, g, b] = newColors[i] ?? [0, 0, 0];
+          romStore.patchProgramPalette(bufs.vram, video.getPaletteBase(), paletteIdx, i, encodeColor(r, g, b));
+        }
+      }
+
+      showToast('Palette updated from image', true);
+    }
+
+    // Read the (possibly updated) palette and quantize
+    const palette = readPalette(bufs.vram, video.getPaletteBase(), paletteIdx);
+    layer.pixels = quantizeWithDithering(layer.rgbaData, palette);
+    layer.quantized = true;
+
+    this.refreshSheetAfterEdit();
+    showToast('Quantized', true);
+  }
+
+  /** Merge the quantized sprite photo layer onto pose tiles (refCount = 1 only). */
+  private mergeSpritePhotoLayer(): void {
+    const group = this.activeGroup;
+    if (!group?.spriteCapture) return;
+    const layer = group.layers[this.activeLayerIndex];
+    if (!layer?.quantized) return;
+
+    const pose = this.activePoses[this.sheetSelectedPose];
+    if (!pose) return;
+
+    const gfxRom = this.editor.getGfxRom();
+    if (!gfxRom) return;
+    const video = this.emulator.getVideo();
+    if (!video) return;
+    const bufs = this.emulator.getBusBuffers();
+
+    // Build refCount for each tile in the pose
+    const objBuf = video.getObjBuffer();
+    const cpsaRegs = video.getCpsaRegs();
+    const mapperTable = video.getMapperTable();
+    const bankSizes = video.getBankSizes();
+    const bankBases = video.getBankBases();
+
+    let written = 0;
+    let skipped = 0;
+
+    for (const tile of pose.tiles) {
+      const refs = findTileReferences(tile.mappedCode, objBuf, bufs.vram, cpsaRegs, mapperTable, bankSizes, bankBases);
+      if (refs.length > 1) {
+        skipped += 16 * 16;
+        continue;
+      }
+
+      // Write photo pixels onto this tile
+      for (let py = 0; py < 16; py++) {
+        for (let px = 0; px < 16; px++) {
+          const bx = tile.relX + px;
+          const by = tile.relY + py;
+          const qx = bx - layer.offsetX;
+          const qy = by - layer.offsetY;
+          if (qx < 0 || qx >= layer.width || qy < 0 || qy >= layer.height) continue;
+
+          const colorIndex = layer.pixels[qy * layer.width + qx]!;
+          if (colorIndex === 0) continue;
+
+          const localX = tile.flipX ? 15 - px : px;
+          const localY = tile.flipY ? 15 - py : py;
+          writePixelFn(gfxRom, tile.mappedCode, localX, localY, colorIndex);
+          written++;
+        }
+      }
+    }
+
+    // Remove the merged layer
+    group.layers.splice(this.activeLayerIndex, 1);
+    this.activeLayerIndex = -1;
+
+    this.refreshSheetAfterEdit();
+    this.emulator.rerender();
+
+    showToast(
+      skipped > 0
+        ? `Merged ${written} pixels (${skipped} skipped — shared tiles)`
+        : `Merged ${written} pixels`,
+      true,
+    );
+  }
+
+  /** Handle photo drop on the sprite sheet viewer. Creates a PhotoLayer for positioning. */
+  private async handleSpritePhotoDrop(file: File): Promise<void> {
+    const group = this.activeGroup;
+    if (!group?.spriteCapture) return;
+    const pose = this.activePoses[this.sheetSelectedPose];
+    if (!pose) return;
+
+    const rgba = await loadPhotoRgba(file, pose.w, pose.h);
+
+    // Create a photo layer centered on the pose
+    const newLayer = createLayer(
+      file.name,
+      rgba,
+      Math.round((pose.w - rgba.width) / 2),
+      Math.round((pose.h - rgba.height) / 2),
+    );
+    group.layers.push(newLayer);
+    this.activeLayerIndex = group.layers.length - 1;
+
+    // Re-render the zoomed view with the photo overlay
+    this.renderSheetZoomedView();
+    showToast('Photo added — drag to position, then Quantize', true);
   }
 
   private importImageOnCurrentTile(): void {
