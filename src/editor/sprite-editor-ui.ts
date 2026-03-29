@@ -22,6 +22,7 @@ import { pencilCursor, fillCursor, eyedropperCursor, eraserCursor, wandCursor } 
 import { showToast } from '../ui/toast';
 import { writeAseprite, downloadAseprite, type AsepriteFrame, type AsepritePaletteEntry } from './aseprite-writer';
 import { readAseprite } from './aseprite-reader';
+import { createScrollSession, captureScrollFrame, buildScrollSets, scrollLayerName, type ScrollCaptureSession, type ScrollSet, type ScrollTile } from './scroll-capture';
 import { setTooltip } from '../ui/tooltip';
 import { createStatusBar, setStatus } from '../ui/status-bar';
 
@@ -87,6 +88,11 @@ export class SpriteEditorUI {
   // Capture state — multiple simultaneous captures keyed by palette
   private activeSessions = new Map<number, { poses: CapturedPose[]; seenHashes: Set<string>; refTileCount: number }>();
   private captureCounter = 0;
+
+  // Scroll capture
+  private scrollSessions = new Map<number, ScrollCaptureSession>();
+  private scrollSets: ScrollSet[] = [];
+  private scrollSetsList: HTMLDivElement | null = null;
 
   // Head editor
   private headSection: HTMLDivElement | null = null;
@@ -247,6 +253,37 @@ export class SpriteEditorUI {
     this.capturesList = el('div', 'edit-captures-list') as HTMLDivElement;
     this.capturesSection.appendChild(this.capturesList);
     container.appendChild(this.capturesSection);
+
+    // Scroll Sets section
+    const scrollSection = el('div', 'edit-scroll-section') as HTMLDivElement;
+    const scrollHeader = el('div', 'edit-section-header') as HTMLDivElement;
+    scrollHeader.style.display = 'flex';
+    scrollHeader.style.justifyContent = 'space-between';
+    scrollHeader.style.alignItems = 'center';
+    const scrollLabel = el('div', 'edit-section-label');
+    scrollLabel.textContent = 'Scroll Sets';
+    scrollHeader.appendChild(scrollLabel);
+    scrollSection.appendChild(scrollHeader);
+
+    // Capture buttons for each scroll layer
+    const scrollBtns = el('div', 'edit-scroll-btns') as HTMLDivElement;
+    scrollBtns.style.display = 'flex';
+    scrollBtns.style.gap = '4px';
+    scrollBtns.style.padding = '4px 0';
+    for (const [label, layerId] of [['BG1', 1], ['BG2', 2], ['BG3', 3]] as const) {
+      const btn = el('button', 'ctrl-btn') as HTMLButtonElement;
+      btn.textContent = `Capture ${label}`;
+      btn.style.fontSize = '10px';
+      btn.style.padding = '2px 6px';
+      setTooltip(btn, `Start/stop capturing ${label} tiles as you scroll`);
+      btn.onclick = () => this.toggleScrollCapture(layerId, btn);
+      scrollBtns.appendChild(btn);
+    }
+    scrollSection.appendChild(scrollBtns);
+
+    this.scrollSetsList = el('div', 'edit-scroll-list') as HTMLDivElement;
+    scrollSection.appendChild(this.scrollSetsList);
+    container.appendChild(scrollSection);
 
     // Status bar (contextual hint at bottom)
     container.appendChild(createStatusBar());
@@ -577,6 +614,7 @@ export class SpriteEditorUI {
       this.drawSelectedOverlay();
       this.drawPhotoLayers();
       this.captureFrame();
+      this.captureScrollTick();
       this.overlayRafId = requestAnimationFrame(loop);
     };
     this.overlayRafId = requestAnimationFrame(loop);
@@ -2763,6 +2801,148 @@ export class SpriteEditorUI {
       this.emulator.resumeAudio();
     }
     this.updateStatus();
+  }
+
+  // -- Scroll Capture --
+
+  private toggleScrollCapture(layerId: number, btn: HTMLButtonElement): void {
+    if (this.scrollSessions.has(layerId)) {
+      // Stop capture
+      const session = this.scrollSessions.get(layerId)!;
+      this.scrollSessions.delete(layerId);
+      btn.textContent = `Capture ${layerId === 1 ? 'BG1' : layerId === 2 ? 'BG2' : 'BG3'}`;
+      btn.classList.remove('active');
+
+      const sets = buildScrollSets(session);
+      this.scrollSets.push(...sets);
+      this.refreshScrollSetsList();
+      showToast(`Captured ${session.tileMap.size} tiles → ${sets.length} scroll set(s)`, true);
+    } else {
+      // Start capture
+      const session = createScrollSession(layerId);
+      this.scrollSessions.set(layerId, session);
+      btn.textContent = `Stop ${layerId === 1 ? 'BG1' : layerId === 2 ? 'BG2' : 'BG3'}`;
+      btn.classList.add('active');
+      showToast(`Recording ${scrollLayerName(layerId)} — scroll around to capture tiles`, true);
+    }
+  }
+
+  /** Called each frame to capture scroll tiles for active sessions. */
+  captureScrollTick(): void {
+    const video = this.emulator.getVideo();
+    if (!video) return;
+    for (const session of this.scrollSessions.values()) {
+      captureScrollFrame(session, video);
+    }
+  }
+
+  private refreshScrollSetsList(): void {
+    if (!this.scrollSetsList) return;
+    this.scrollSetsList.innerHTML = '';
+
+    for (let i = 0; i < this.scrollSets.length; i++) {
+      const set = this.scrollSets[i]!;
+      const card = el('div', 'edit-capture-card') as HTMLDivElement;
+      card.style.cursor = 'pointer';
+
+      const name = el('div', 'edit-capture-name');
+      name.textContent = `${scrollLayerName(set.layerId)} · Pal ${set.palette} · ${set.tiles.length} tiles`;
+      card.appendChild(name);
+
+      // Export button
+      const exportBtn = el('button', 'ctrl-btn') as HTMLButtonElement;
+      exportBtn.textContent = 'Export .aseprite';
+      exportBtn.style.fontSize = '10px';
+      exportBtn.style.padding = '2px 4px';
+      exportBtn.onclick = (e) => {
+        e.stopPropagation();
+        this.exportScrollSet(set);
+      };
+      card.appendChild(exportBtn);
+
+      this.scrollSetsList.appendChild(card);
+    }
+  }
+
+  private exportScrollSet(set: ScrollSet): void {
+    const gfxRom = this.editor.getGfxRom();
+    if (!gfxRom) { showToast('No GFX ROM loaded', false); return; }
+    const video = this.emulator.getVideo();
+    if (!video) return;
+    const bufs = this.emulator.getBusBuffers();
+    const palette = readPalette(bufs.vram, video.getPaletteBase(), set.palette);
+
+    // Build Aseprite palette
+    const asePalette: AsepritePaletteEntry[] = palette.map(([r, g, b]) => ({ r, g, b, a: 255 }));
+    if (asePalette[15]) asePalette[15] = { r: 0, g: 0, b: 0, a: 0 }; // transparent pen
+
+    // Deduplicate tiles by tileCode (same visual tile)
+    const uniqueTiles = new Map<number, ScrollTile>();
+    for (const tile of set.tiles) {
+      if (!uniqueTiles.has(tile.tileCode)) {
+        uniqueTiles.set(tile.tileCode, tile);
+      }
+    }
+
+    // Build a sprite sheet: all unique tiles in a grid
+    const tilesArr = [...uniqueTiles.values()];
+    const cols = Math.ceil(Math.sqrt(tilesArr.length));
+    const rows = Math.ceil(tilesArr.length / cols);
+    const sheetW = cols * set.tileW;
+    const sheetH = rows * set.tileH;
+
+    const pixels = new Uint8Array(sheetW * sheetH).fill(15); // transparent
+
+    const manifestTiles: Array<{ address: string; sheetX: number; sheetY: number; tileCode: number }> = [];
+
+    for (let i = 0; i < tilesArr.length; i++) {
+      const tile = tilesArr[i]!;
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      const destX = col * set.tileW;
+      const destY = row * set.tileH;
+
+      const tilePixels = readTileFn(gfxRom, tile.tileCode, tile.tileW, tile.tileH, tile.charSize);
+
+      for (let ty = 0; ty < tile.tileH; ty++) {
+        for (let tx = 0; tx < tile.tileW; tx++) {
+          const palIdx = tilePixels[ty * tile.tileW + tx]!;
+          pixels[(destY + ty) * sheetW + (destX + tx)] = palIdx;
+        }
+      }
+
+      manifestTiles.push({
+        address: '0x' + (tile.tileCode * tile.charSize).toString(16).toUpperCase(),
+        sheetX: destX,
+        sheetY: destY,
+        tileCode: tile.tileCode,
+      });
+    }
+
+    const manifest = {
+      type: 'scroll',
+      game: (this.emulator as any).gameDef?.name ?? 'unknown',
+      layerId: set.layerId,
+      layerName: scrollLayerName(set.layerId),
+      palette: set.palette,
+      tileW: set.tileW,
+      tileH: set.tileH,
+      tiles: manifestTiles,
+    };
+
+    const data = writeAseprite({
+      width: sheetW,
+      height: sheetH,
+      palette: asePalette,
+      frames: [{ pixels, duration: 0 }],
+      transparentIndex: 15,
+      layerName: `${scrollLayerName(set.layerId)} pal${set.palette}`,
+      manifest,
+    });
+
+    const filename = `${manifest.game}_scroll${set.layerId}_pal${set.palette}_${tilesArr.length}tiles.aseprite`;
+    downloadAseprite(data, filename);
+    showToast(`Exported ${tilesArr.length} unique tiles to ${filename}`, true);
   }
 
   // -- Pose PNG Export / Import --
