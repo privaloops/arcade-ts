@@ -1027,6 +1027,21 @@ export class CPS1Video {
     return this.paletteCache;
   }
 
+  /** Get scroll X/Y for a scroll layer (in pixels, with CPS_HBEND/VBEND applied). */
+  getScrollXY(layerId: number): { scrollX: number; scrollY: number } {
+    let xReg: number, yReg: number;
+    switch (layerId) {
+      case LAYER_SCROLL1: xReg = CPSA_SCROLL1_XSCR; yReg = CPSA_SCROLL1_YSCR; break;
+      case LAYER_SCROLL2: xReg = CPSA_SCROLL2_XSCR; yReg = CPSA_SCROLL2_YSCR; break;
+      case LAYER_SCROLL3: xReg = CPSA_SCROLL3_XSCR; yReg = CPSA_SCROLL3_YSCR; break;
+      default: return { scrollX: 0, scrollY: 0 };
+    }
+    return {
+      scrollX: (this.readCpsaReg(xReg) + CPS_HBEND) & 0xFFFF,
+      scrollY: (this.readCpsaReg(yReg) + CPS_VBEND) & 0xFFFF,
+    };
+  }
+
   /** Returns the VRAM byte offset where palette data starts. */
   getPaletteBase(): number {
     return this.vramBaseOffset(CPSA_PALETTE_BASE, PALETTE_ALIGN);
