@@ -1,7 +1,9 @@
 # ROMstudio
 
 CPS1 (Capcom Play System 1) arcade studio in the browser.
-Play, inspect, and modify — TypeScript strict + WebGL2 + Web Worker audio + WASM. Zero emulation dependencies.
+Play, capture, and export to Aseprite — TypeScript strict + WebGL2 + Web Worker audio + WASM. Zero emulation dependencies.
+
+"Work in Aseprite, play in ROMstudio."
 
 ## Commands
 
@@ -43,17 +45,20 @@ src/
     kabuki.ts       # Kabuki Z80 decryption (QSound games)
     eeprom-93c46.ts # EEPROM 93C46 serial protocol (QSound games)
   editor/
-    tile-encoder.ts   # GFX ROM tile encode/decode (inverse of decodeRow)
-    palette-editor.ts # VRAM palette read/write, RGB↔CPS1 conversion
-    sprite-editor.ts  # Sprite editor logic: tools, undo, paint, flood fill
-    sprite-editor-ui.ts # DOM panel, tile grid, overlay, shortcuts
-    tile-refs.ts      # Tile reference counter + duplication
+    tile-encoder.ts     # GFX ROM tile encode/decode (inverse of decodeRow)
+    palette-editor.ts   # VRAM palette read/write, RGB↔CPS1 conversion
+    sprite-editor.ts    # Sprite editor logic (retained for internal use)
+    sprite-editor-ui.ts # Tile viewer, sprite sets, scroll sets, Aseprite export/import
+    tile-refs.ts        # Tile reference counter + duplication
     sprite-analyzer.ts  # Character grouping, pose capture, sprite sheet viewer
-    photo-import.ts   # Multi-layer photo import with Atkinson dithering
-    layer-model.ts    # Layer group model for photo overlays
-    layer-panel.ts    # Left sidebar layer panel with visibility/reorder
-    tile-allocator.ts # Private tile allocation, GFX ROM expansion
-    tool-cursors.ts   # Per-tool canvas cursors (pencil, bucket, eyedropper, eraser, wand)
+    aseprite-writer.ts  # .aseprite file writer (indexed 8bpp, tilemap, zlib, user data)
+    aseprite-reader.ts  # .aseprite file reader (palette, cels, tileset, tilemap, manifest)
+    scroll-capture.ts   # Scroll layer capture (accumulate BG tiles during gameplay)
+    photo-import.ts     # Multi-layer photo import with Atkinson dithering
+    layer-model.ts      # Layer group model for photo overlays
+    layer-panel.ts      # Left sidebar layer panel with visibility/reorder
+    tile-allocator.ts   # Private tile allocation, GFX ROM expansion
+    tool-cursors.ts     # Per-tool canvas cursors (retained for internal use)
   input/
     input.ts        # Keyboard + Gamepad API + device assignment + autofire
   ui/
@@ -90,6 +95,7 @@ src/__tests__/
   tile-encoder.test.ts    # Tile encoder roundtrip tests
   palette-editor.test.ts  # Palette encode/decode tests
   tile-refs.test.ts       # Tile reference counter tests
+  aseprite-writer.test.ts # Aseprite writer roundtrip tests (9 tests)
 tests/
   68000/*.json      # Tom Harte M68000 test vectors (ProcessorTests)
   z80/*.json        # Z80 SingleStepTests vectors (JSMoo)
@@ -151,7 +157,7 @@ ROMs loaded from public/roms/ (not included in the repo).
 | P | Pause / Resume |
 | M | Mute |
 | F1 | Config |
-| E | Sprite Editor |
+| E | Tile Viewer / Sprite Sets / Scroll Sets |
 | F3 | Audio panel |
 | F5 | Save state |
 | F8 | Load state |
@@ -160,27 +166,38 @@ ROMs loaded from public/roms/ (not included in the repo).
 | Double-click | Fullscreen |
 | Escape | Close dialog |
 
-## Sprite Editor shortcuts (when editor is active)
+## Aseprite Workflow
 
-| Key | Action |
-|-----|--------|
-| B | Pencil tool |
-| G | Fill tool |
-| I | Eyedropper |
-| X | Eraser |
-| W | Magic wand (erase similar colors) |
-| Delete / Backspace | Erase entire tile |
-| Ctrl+Z | Undo |
-| Ctrl+Shift+Z | Redo |
-| [ / ] | Previous / next palette color |
-| Shift+[ / Shift+] | Decrease / increase wand tolerance |
-| Scroll wheel | Zoom in/out (centered on cursor) |
-| Space+drag / Middle-click+drag | Pan when zoomed |
-| 0 | Reset zoom to ×1 |
-| Arrow keys | Navigate neighbor tiles |
-| Right Arrow | Step 1 frame |
-| Shift+Right | Step 10 frames |
-| Escape | Close editor |
+ROMstudio is the bridge between CPS1 ROMs and Aseprite. Pixel artists work in Aseprite,
+their edits are written back to the ROM and rendered in real-time.
+
+### Sprites
+1. Open tile viewer (E), Shift+click a sprite to start capturing
+2. Play the game — each new pose is captured automatically
+3. Stop capture → sprite set appears in panel
+4. Click sprite set → sheet viewer with "Export .aseprite" button
+5. Edit in Aseprite (indexed 8bpp, 16-color CPS1 palette)
+6. Import back → tiles written to GFX ROM, immediate re-render
+
+### Scroll / Decors
+1. Open tile viewer (E), click "Capture BG2" (or BG1/BG3)
+2. Play the game — scroll around to capture the full stage
+3. Stop capture → scroll sets grouped by palette
+4. Export as **Image** (flat, easy editing) or **Tilemap** (deduplicated, tile changes propagate)
+5. Both modes use a mega-palette (up to 256 colors = 16 CPS1 palettes merged)
+6. Edit in Aseprite → import back → tiles written to GFX ROM
+
+### Manifest
+Each .aseprite file embeds a JSON manifest in User Data containing:
+- Game name, layer ID, palette mapping
+- Tile ROM addresses for round-trip write-back
+- Grid mapping for image mode import
+
+### Constraints
+- CPS1 transparent pen = palette index 15 (not 0)
+- Scroll tiles are deduplicated in ROM — modifying one tile affects all occurrences
+- In tilemap mode: use Aseprite Pixel mode (not Tile mode) to edit tile content
+- Mega-palette: each 16-color block maps to a CPS1 palette (indices 0-15, 16-31, etc.)
 
 ## Sprite Sheet Viewer shortcuts (when viewer is active)
 
@@ -189,7 +206,6 @@ ROMs loaded from public/roms/ (not included in the repo).
 | Arrow Up/Down | Navigate between poses |
 | Arrow Left/Right | Navigate between tiles |
 | Escape | Back to game |
-| B, G, I, X | Tool shortcuts (same as editor) |
 
 ## Audio architecture
 
