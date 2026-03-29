@@ -3122,28 +3122,47 @@ export class SpriteEditorUI {
       const gridCols = manifest.gridCols as number;
       const gridRows = manifest.gridRows as number;
 
+      // First pass: collect ALL tile indices per tileCode (a tileCode may have multiple cells)
+      const codeToTileIdx = new Map<number, number>(); // tileCode → best tileset index
+      const origTilesetIdx = new Map<number, number>(); // tileCode → original tileset index from manifest
+      for (const entry of tilesetEntries) {
+        origTilesetIdx.set(entry.tileCode, entry.idx);
+      }
+
       for (let gy = 0; gy < Math.min(gridRows, heightInTiles); gy++) {
         for (let gx = 0; gx < Math.min(gridCols, widthInTiles); gx++) {
           const origCode = grid[gy * gridCols + gx];
           if (origCode === undefined || origCode < 0) continue;
-          if (writtenCodes.has(origCode)) continue;
 
-          // Read current tile index from tilemap (may differ from original if Aseprite created new tiles)
           const tmVal = tmData[gy * widthInTiles + gx]!;
           const currentTileIdx = tmVal & 0x1FFFFFFF;
           if (currentTileIdx === 0 || currentTileIdx >= tileset.tiles.length) continue;
 
-          const tilePixels = tileset.tiles[currentTileIdx]!;
-          for (let ty = 0; ty < tileH; ty++) {
-            for (let tx = 0; tx < tileW; tx++) {
-              const megaIdx = tilePixels[ty * tileW + tx]!;
-              const localIdx = indexToLocal(megaIdx);
-              writePixelFn(gfxRom, origCode, tx, ty, localIdx);
-            }
+          const origIdx = origTilesetIdx.get(origCode);
+          const existing = codeToTileIdx.get(origCode);
+
+          if (existing === undefined) {
+            // First occurrence — take it
+            codeToTileIdx.set(origCode, currentTileIdx);
+          } else if (currentTileIdx !== origIdx && existing === origIdx) {
+            // Current cell has a DIFFERENT tile than original, and we previously stored the original
+            // → prefer the modified version
+            codeToTileIdx.set(origCode, currentTileIdx);
           }
-          writtenCodes.add(origCode);
-          tilesWritten++;
         }
+      }
+
+      // Second pass: write each unique tile
+      for (const [origCode, tileIdx] of codeToTileIdx) {
+        const tilePixels = tileset.tiles[tileIdx]!;
+        for (let ty = 0; ty < tileH; ty++) {
+          for (let tx = 0; tx < tileW; tx++) {
+            const megaIdx = tilePixels[ty * tileW + tx]!;
+            const localIdx = indexToLocal(megaIdx);
+            writePixelFn(gfxRom, origCode, tx, ty, localIdx);
+          }
+        }
+        tilesWritten++;
       }
     } else {
       // Fallback: use tileset entries from manifest (original behavior)
