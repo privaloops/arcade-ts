@@ -110,66 +110,19 @@ export class LayerPanel {
   ): void {
     this.content.innerHTML = '';
 
-    // REC buttons for capture
-    const recSection = document.createElement('div');
-    recSection.className = 'layer-rec-section';
-    recSection.style.cssText = 'padding: 8px; display: flex; flex-wrap: wrap; gap: 4px;';
-
-    type RecKey = 'sprites' | 'bg1' | 'bg2' | 'bg3';
-    const recButtons: Array<{ label: string; key: RecKey; layerId?: number }> = [
-      { label: 'Sprites', key: 'sprites' },
-      { label: 'BG1', key: 'bg1', layerId: 1 },
-      { label: 'BG2', key: 'bg2', layerId: 2 },
-      { label: 'BG3', key: 'bg3', layerId: 3 },
-    ];
-
-    const states = this.recStates;
-    for (const rec of recButtons) {
-      const key = rec.key;
-      const btn = document.createElement('button');
-      btn.className = 'layer-rec-btn' + (states[key] ? ' recording' : '');
-      btn.innerHTML = `<span class="rec-dot${states[key] ? ' rec-blink' : ''}"></span> ${rec.label}`;
-      btn.style.cssText = 'font-size: 11px; padding: 3px 8px; cursor: pointer; border: 1px solid #555; border-radius: 3px; background: #222; color: #ccc; display: flex; align-items: center; gap: 4px;';
-      if (states[key]) {
-        btn.style.borderColor = '#f44';
-        btn.style.color = '#f44';
-      }
-      btn.onclick = () => {
-        states[key] = !states[key];
-        if (key === 'sprites') {
-          this.callbacks.onToggleRecSprites?.();
-        } else {
-          this.callbacks.onToggleRecScroll?.(rec.layerId!);
-        }
-        const dot = btn.querySelector('.rec-dot');
-        if (states[key]) {
-          btn.classList.add('recording');
-          btn.style.borderColor = '#f44';
-          btn.style.color = '#f44';
-          if (dot) dot.classList.add('rec-blink');
-        } else {
-          btn.classList.remove('recording');
-          btn.style.borderColor = '#555';
-          btn.style.color = '#ccc';
-          if (dot) dot.classList.remove('rec-blink');
-        }
-      };
-      recSection.appendChild(btn);
-    }
-
-    // Inject CSS for blinking dot (once)
+    // Inject CSS for REC blinking dot (once)
     if (!document.getElementById('rec-dot-style')) {
       const style = document.createElement('style');
       style.id = 'rec-dot-style';
       style.textContent = `
-        .rec-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #666; }
+        .rec-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #666; flex-shrink: 0; }
         .rec-dot.rec-blink { background: #f44; animation: rec-blink 1s infinite; }
         @keyframes rec-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.2; } }
+        .layer-rec-btn { font-size: 10px; padding: 2px 6px; cursor: pointer; border: 1px solid #555; border-radius: 3px; background: #222; color: #ccc; display: inline-flex; align-items: center; gap: 3px; margin-left: 4px; }
+        .layer-rec-btn.recording { border-color: #f44; color: #f44; }
       `;
       document.head.appendChild(style);
     }
-
-    this.content.appendChild(recSection);
 
     // Update memory indicator
     if (gfxRom) {
@@ -230,6 +183,35 @@ export class LayerPanel {
 
         hwControls.append(gridCb, gridLabel);
         groupHeader.appendChild(hwControls);
+
+        // REC button for this layer
+        type RecKey = 'sprites' | 'bg1' | 'bg2' | 'bg3';
+        const recKeyMap: Record<number, RecKey> = { 0: 'sprites', 1: 'bg1', 2: 'bg2', 3: 'bg3' };
+        const recKey = recKeyMap[hwLayerId];
+        if (recKey) {
+          const isRec = this.recStates[recKey];
+          const recBtn = document.createElement('button');
+          recBtn.className = 'layer-rec-btn' + (isRec ? ' recording' : '');
+          recBtn.innerHTML = `<span class="rec-dot${isRec ? ' rec-blink' : ''}"></span> REC`;
+          recBtn.onclick = (e) => {
+            e.stopPropagation();
+            this.recStates[recKey] = !this.recStates[recKey];
+            if (recKey === 'sprites') {
+              this.callbacks.onToggleRecSprites?.();
+            } else {
+              this.callbacks.onToggleRecScroll?.(hwLayerId);
+            }
+            const dot = recBtn.querySelector('.rec-dot');
+            if (this.recStates[recKey]) {
+              recBtn.classList.add('recording');
+              if (dot) dot.classList.add('rec-blink');
+            } else {
+              recBtn.classList.remove('recording');
+              if (dot) dot.classList.remove('rec-blink');
+            }
+          };
+          groupHeader.appendChild(recBtn);
+        }
       }
 
       groupEl.appendChild(groupHeader);
