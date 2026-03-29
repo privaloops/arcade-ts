@@ -2459,38 +2459,15 @@ export class SpriteEditorUI {
     // Hint text when no photo layer
     if (!hasPhotoLayers) {
       const hint = el('div', 'edit-capture-hint') as HTMLDivElement;
-      hint.textContent = 'Drop an image on the sprite to overlay it';
+      hint.textContent = 'Export to Aseprite to edit';
       zoomSection.appendChild(hint);
     }
 
-    // Drop zone for photo import onto sprite
-    const dropHint = el('div', 'sprite-sheet-drop-hint') as HTMLDivElement;
-    dropHint.textContent = 'Drop image here';
-    dropHint.style.display = 'none';
-    zoomSection.appendChild(dropHint);
-
-    zoomSection.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      dropHint.style.display = '';
-      zoomSection.classList.add('drop-active');
-    });
-    zoomSection.addEventListener('dragleave', (e) => {
-      if (!zoomSection.contains(e.relatedTarget as Node)) {
-        dropHint.style.display = 'none';
-        zoomSection.classList.remove('drop-active');
-      }
-    });
-    zoomSection.addEventListener('drop', (e) => {
-      e.preventDefault();
-      dropHint.style.display = 'none';
-      zoomSection.classList.remove('drop-active');
-      const file = (e as DragEvent).dataTransfer?.files[0];
-      if (file?.type.startsWith('image/')) this.handleSpritePhotoDrop(file);
-    });
+    // Drop zone disabled — editing happens in Aseprite
 
     // Tile strip (horizontal row)
     const tilesLabel = el('div', 'edit-section-label');
-    tilesLabel.textContent = 'Tiles (click to edit)';
+    tilesLabel.textContent = 'Tiles';
     zoomSection.appendChild(tilesLabel);
 
     const tilesGrid = el('div', 'sprite-sheet-tiles');
