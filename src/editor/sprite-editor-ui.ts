@@ -13,7 +13,7 @@ import { readAllSprites, groupCharacter, poseHash, capturePose, assembleCharacte
 import { loadPhotoRgba, resizeRgba, quantizeWithDithering, placePhotoOnTiles, generatePalette } from './photo-import';
 import { encodeColor } from './palette-editor';
 import { readPixel as readPixelFn, writePixel as writePixelFn, writeScrollPixel, readTile as readTileFn } from './tile-encoder';
-import { readPalette, rgbToHsl, hslToRgb } from './palette-editor';
+import { readPalette, writeColor, rgbToHsl, hslToRgb } from './palette-editor';
 import { createLayer, createSpriteGroup, createScrollGroup, type PhotoLayer, type LayerGroup } from './layer-model';
 import { LayerPanel } from './layer-panel';
 import { findTileReferences } from './tile-refs';
@@ -3126,8 +3126,32 @@ export class SpriteEditorUI {
       tilesWritten++;
     }
 
+    // Sync palettes if modified in Aseprite (mega-palette → CPS1 palettes)
+    let colorsChanged = 0;
+    if (ase.palette.length > 0) {
+      const video = this.emulator.getVideo();
+      const bufs2 = this.emulator.getBusBuffers();
+      if (video && bufs2) {
+        const palBase = video.getPaletteBase();
+        for (const palInfo of palettes) {
+          const cps1Pal = readPalette(bufs2.vram, palBase, palInfo.palette);
+          for (let c = 0; c < 16; c++) {
+            const megaIdx = palInfo.indexOffset + c;
+            if (megaIdx >= ase.palette.length) continue;
+            const ap = ase.palette[megaIdx]!;
+            const [or, og, ob] = cps1Pal[c] ?? [0, 0, 0];
+            if (ap.r !== or || ap.g !== og || ap.b !== ob) {
+              writeColor(bufs2.vram, palBase, palInfo.palette, c, ap.r, ap.g, ap.b);
+              colorsChanged++;
+            }
+          }
+        }
+      }
+    }
+
     this.emulator.rerender();
-    showToast(`Scroll import: ${tilesWritten} unique tiles written to ROM`, true);
+    const palMsg = colorsChanged > 0 ? `, ${colorsChanged} palette colors updated` : '';
+    showToast(`Scroll import: ${tilesWritten} unique tiles written to ROM${palMsg}`, true);
   }
 
   // importScrollImage removed — tilemap mode only
@@ -3389,7 +3413,35 @@ export class SpriteEditorUI {
           }
         }
 
-        showToast(`Imported ${framesWritten} frames, ${tilesWritten} tiles written to ROM`, true);
+        // Sync palette if modified in Aseprite
+        if (manifest.palette !== undefined && ase.palette.length > 0) {
+          const video = this.emulator.getVideo();
+          const bufs = this.emulator.getBusBuffers();
+          if (video && bufs) {
+            const palBase = video.getPaletteBase();
+            const palIdx = manifest.palette as number;
+            const origPal = readPalette(bufs.vram, palBase, palIdx);
+            let colorsChanged = 0;
+            for (let c = 0; c < 16 && c < ase.palette.length; c++) {
+              const ap = ase.palette[c]!;
+              const [or, og, ob] = origPal[c] ?? [0, 0, 0];
+              if (ap.r !== or || ap.g !== og || ap.b !== ob) {
+                writeColor(bufs.vram, palBase, palIdx, c, ap.r, ap.g, ap.b);
+                colorsChanged++;
+              }
+            }
+            if (colorsChanged > 0) {
+              this.emulator.rerender();
+              showToast(`Imported ${framesWritten} frames, ${tilesWritten} tiles, ${colorsChanged} palette colors updated`, true);
+            } else {
+              showToast(`Imported ${framesWritten} frames, ${tilesWritten} tiles written to ROM`, true);
+            }
+          } else {
+            showToast(`Imported ${framesWritten} frames, ${tilesWritten} tiles written to ROM`, true);
+          }
+        } else {
+          showToast(`Imported ${framesWritten} frames, ${tilesWritten} tiles written to ROM`, true);
+        }
       } catch (err) {
         showToast(`Import failed: ${(err as Error).message}`, false);
       }
