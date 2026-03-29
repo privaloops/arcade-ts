@@ -205,9 +205,8 @@ export class SpriteEditorUI {
 
     // Action buttons removed — editing happens in Aseprite now
 
-    // Tile grid hidden — editing happens in Aseprite
+    // Tile grid (read-only viewer)
     const tileSection = el('div', 'edit-tile-section');
-    tileSection.style.display = 'none';
     const cvs = document.createElement('canvas');
     cvs.width = GRID_SIZE;
     cvs.height = GRID_SIZE;
@@ -1822,13 +1821,7 @@ export class SpriteEditorUI {
       }
       return;
     }
-    const toolStatus = this.editor.tool === 'wand'
-      ? `Click to erase similar colors — Shift+[ / ]: tolerance (${this.wandTolerance})`
-      : TOOL_STATUS[this.editor.tool] ?? '';
-    const zoomInfo = this.tileZoom > 1 || this.gameZoom > 1
-      ? ` — Zoom ×${Math.round(Math.max(this.tileZoom, this.gameZoom) * 10) / 10} (0: reset, Space+drag: pan)`
-      : '';
-    setStatus(toolStatus + zoomInfo);
+    setStatus('Shift+click sprite to capture — E to close');
   }
 
   private refreshUndoButtons(): void {

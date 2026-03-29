@@ -159,7 +159,7 @@ export class DebugPanel {
     // Header
     const header = el("div", "dbg-header");
     const title = el("h2");
-    title.textContent = "Sprites & Tiles";
+    title.textContent = "Tiles";
     const closeBtn = el("button", "dbg-close");
     closeBtn.textContent = "\u00D7";
     setTooltip(closeBtn, "Close panel");
@@ -226,144 +226,7 @@ export class DebugPanel {
 
     }
 
-    // ── Palette (closed by default) ──
-    {
-      const CELL_W = 15;
-      const CELL_H = 7;
-
-      const [sec, content] = collapsibleSection("Palette",
-        "The CPS1 doesn't store pixel colors directly — it uses a color lookup table (palette).\n\n" +
-        "Each tile stores color indices (0-15) that point to a palette of 16 colors. " +
-        "The hardware has 192 palettes organized in 6 pages of 32:\n" +
-        "• Page 0: Sprite palettes (characters, projectiles)\n" +
-        "• Page 1: Scroll 1 palettes (HUD, text)\n" +
-        "• Page 2: Scroll 2 palettes (main background)\n" +
-        "• Page 3: Scroll 3 palettes (far background)\n\n" +
-        "Watch palettes change live during fades, hit flashes, and character recolors (P1 vs P2).", false);
-
-      const pageRow = el("div", "dbg-palette-pages");
-      for (let p = 0; p < 6; p++) {
-        const btn = el("button", "dbg-page-btn") as HTMLButtonElement;
-        btn.textContent = String(p);
-        setTooltip(btn, `Palette page ${p}`);
-        if (p === 0) btn.classList.add("active");
-        btn.addEventListener("click", () => {
-          this.palettePage = p;
-          pageRow.querySelectorAll(".dbg-page-btn").forEach(b => b.classList.remove("active"));
-          btn.classList.add("active");
-        });
-        pageRow.appendChild(btn);
-      }
-      const pageLabel = el("span");
-      pageLabel.style.cssText = "font-size:0.65rem;color:#555;margin-left:6px;";
-      pageLabel.textContent = "page";
-      pageRow.appendChild(pageLabel);
-      content.appendChild(pageRow);
-
-      const palCanvas = document.createElement("canvas");
-      palCanvas.width = 16 * CELL_W;
-      palCanvas.height = 32 * CELL_H;
-      palCanvas.className = "dbg-palette-canvas";
-      this.paletteCanvas = palCanvas;
-      this.paletteCtx = palCanvas.getContext("2d")!;
-      content.appendChild(palCanvas);
-
-      this.paletteInfo = el("div", "dbg-palette-info") as HTMLDivElement;
-      this.paletteInfo.textContent = "Hover to inspect";
-      content.appendChild(this.paletteInfo);
-
-      palCanvas.addEventListener("mousemove", (e) => {
-        const rect = palCanvas.getBoundingClientRect();
-        const sx = palCanvas.width / rect.width;
-        const sy = palCanvas.height / rect.height;
-        const cx = Math.floor((e.clientX - rect.left) * sx);
-        const cy = Math.floor((e.clientY - rect.top) * sy);
-        const colIdx = Math.floor(cx / CELL_W);
-        const palIdx = Math.floor(cy / CELL_H);
-        if (colIdx < 0 || colIdx >= 16 || palIdx < 0 || palIdx >= 32) return;
-
-        const video = this.emulator.getVideo();
-        if (!video) return;
-        const cache = video.getPaletteCache();
-        const absIdx = (this.palettePage * 32 + palIdx) * 16 + colIdx;
-        const packed = cache[absIdx] ?? 0;
-        const r = packed & 0xFF;
-        const g = (packed >> 8) & 0xFF;
-        const b = (packed >> 16) & 0xFF;
-        const hex = `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
-
-        const absPal = this.palettePage * 32 + palIdx;
-        let group = "";
-        if (absPal < 32) group = " (Sprites)";
-        else if (absPal < 64) group = " (Scroll 1)";
-        else if (absPal < 96) group = " (Scroll 2)";
-        else if (absPal < 128) group = " (Scroll 3)";
-
-        this.paletteInfo!.innerHTML =
-          `<span style="display:inline-block;width:12px;height:12px;background:${hex};border:1px solid #333;vertical-align:middle;margin-right:4px;"></span>` +
-          `Pal <b>${absPal}</b>${group} · Col <b>${colIdx}</b> · <code>${hex.toUpperCase()}</code>`;
-      });
-
-      palCanvas.addEventListener("mouseleave", () => {
-        this.paletteInfo!.textContent = "Hover to inspect";
-      });
-
-      c.appendChild(sec);
-    }
-
-    // ── Tile Inspector (closed by default) ──
-    {
-      const [sec, content] = collapsibleSection("Tile Inspector",
-        "Click any pixel on the game screen to find out which hardware layer drew it.\n\n" +
-        "The CPS1 renders each pixel from multiple overlapping layers. " +
-        "This tool scans layers front-to-back to identify the first non-transparent layer " +
-        "that owns the clicked pixel, showing its color and position.", false);
-
-      const inspHint = el("div");
-      inspHint.style.cssText = "font-size:0.7rem;color:#555;padding:0 0 8px;";
-      inspHint.textContent = "Click on the game screen to inspect a pixel";
-      content.appendChild(inspHint);
-
-      this.inspectorInfo = el("div", "dbg-inspector-info") as HTMLDivElement;
-      this.inspectorInfo.textContent = "No pixel selected";
-      content.appendChild(this.inspectorInfo);
-
-      c.appendChild(sec);
-    }
-
-    // ── Sprites (closed by default) ──
-    {
-      const [sec, content] = collapsibleSection("Sprites",
-        "Live list of active sprite objects on screen.\n\n" +
-        "Each sprite entry shows:\n" +
-        "• # — index in the sprite table (lower = drawn on top)\n" +
-        "• Code — tile number in the graphics ROM\n" +
-        "• (X,Y) — screen position in pixels\n" +
-        "• P — palette index (0-31)\n" +
-        "• Flip — X/Y mirroring (used for left/right facing)\n\n" +
-        "CPS1 supports up to 256 sprites per frame. Characters are typically multi-tile sprites.", false);
-
-      this.spriteListDiv = el("div", "dbg-sprite-list") as HTMLDivElement;
-      content.appendChild(this.spriteListDiv);
-
-      c.appendChild(sec);
-    }
-
-    // ── Registers (closed by default) ──
-    {
-      const [sec, content] = collapsibleSection("Registers",
-        "Live hardware register values from the CPS-A and CPS-B custom chips.\n\n" +
-        "• Scroll XY — the camera offset for each background layer (in pixels)\n" +
-        "• Layer order — which layers are drawn first (back) to last (front)\n" +
-        "• Layer enables — whether each scroll layer is active\n\n" +
-        "Games manipulate these registers every frame to scroll backgrounds, " +
-        "enable/disable layers during transitions, and change draw priority.", false);
-
-      this.registerDiv = el("div", "dbg-register-view") as HTMLDivElement;
-      content.appendChild(this.registerDiv);
-
-      c.appendChild(sec);
-    }
+    // Palette, Tile Inspector, Sprites, Registers — removed (editing in Aseprite)
   }
 
   private createLayerRow(layerId: number): HTMLDivElement {
