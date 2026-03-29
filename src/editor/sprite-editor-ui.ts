@@ -202,47 +202,7 @@ export class SpriteEditorUI {
     this.infoBar = el('div', 'edit-info') as HTMLDivElement;
     container.appendChild(this.infoBar);
 
-    // Action buttons (above tile grid)
-    const actions = el('div', 'edit-actions');
-
-    this.undoBtn = el('button', 'ctrl-btn') as HTMLButtonElement;
-    this.undoBtn.textContent = 'Undo';
-    setTooltip(this.undoBtn, 'Undo — Ctrl+Z');
-    this.undoBtn.onclick = () => { this.editor.undo(); this.refreshUndoButtons(); };
-    actions.appendChild(this.undoBtn);
-
-    this.redoBtn = el('button', 'ctrl-btn') as HTMLButtonElement;
-    this.redoBtn.textContent = 'Redo';
-    setTooltip(this.redoBtn, 'Redo — Ctrl+Shift+Z');
-    this.redoBtn.onclick = () => { this.editor.redo(); this.refreshUndoButtons(); };
-    actions.appendChild(this.redoBtn);
-
-    this.resetBtn = el('button', 'ctrl-btn') as HTMLButtonElement;
-    this.resetBtn.textContent = 'Reset Tile';
-    setTooltip(this.resetBtn, 'Restore tile to original ROM data');
-    this.resetBtn.onclick = () => { this.editor.resetTile(); this.refreshUndoButtons(); };
-    actions.appendChild(this.resetBtn);
-
-    const eraseBtn = el('button', 'ctrl-btn') as HTMLButtonElement;
-    eraseBtn.textContent = 'Erase Tile';
-    setTooltip(eraseBtn, 'Clear all pixels to transparent — Delete');
-    eraseBtn.onclick = () => { this.editor.eraseTile(); this.refreshUndoButtons(); };
-    actions.appendChild(eraseBtn);
-
-    const importImgBtn = el('button', 'ctrl-btn') as HTMLButtonElement;
-    importImgBtn.innerHTML = '\u{1F4E5} Import';
-    setTooltip(importImgBtn, 'Import image onto this tile');
-    importImgBtn.onclick = () => this.importImageOnCurrentTile();
-    actions.appendChild(importImgBtn);
-
-    const exportImgBtn = el('button', 'ctrl-btn') as HTMLButtonElement;
-    exportImgBtn.innerHTML = '\u{1F4E4} Export';
-    setTooltip(exportImgBtn, 'Export this tile as PNG');
-    exportImgBtn.onclick = () => this.exportCurrentTile();
-    actions.appendChild(exportImgBtn);
-
-    container.appendChild(actions);
-    this.refreshUndoButtons();
+    // Action buttons removed — editing happens in Aseprite now
 
     // Tile grid canvas
     const tileSection = el('div', 'edit-tile-section');
@@ -256,32 +216,13 @@ export class SpriteEditorUI {
     tileSection.appendChild(cvs);
     container.appendChild(tileSection);
 
-    // Tools bar
-    const toolsBar = el('div', 'edit-tools');
-    for (const def of TOOL_DEFS) {
-      const btn = el('button', 'ctrl-btn edit-tool-btn') as HTMLButtonElement;
-      btn.innerHTML = `<span class="edit-tool-icon">${def.icon}</span> ${def.label}`;
-      setTooltip(btn, `${def.label} (${def.key}) — ${def.tip}`);
-      btn.dataset['tool'] = def.id;
-      btn.onclick = () => this.editor.setTool(def.id);
-      this.toolBtns.set(def.id, btn);
-      toolsBar.appendChild(btn);
-    }
-    container.appendChild(toolsBar);
-    this.refreshToolButtons();
+    // Tools bar removed — editing happens in Aseprite now
 
     // Palette
     this.paletteContainer = el('div', 'edit-palette') as HTMLDivElement;
     container.appendChild(this.paletteContainer);
 
-    // Tile neighbors
-    const neighborsSection = el('div', 'edit-neighbors-section');
-    const neighborsLabel = el('div', 'edit-section-label');
-    neighborsLabel.textContent = 'Tile Neighbors';
-    neighborsSection.appendChild(neighborsLabel);
-    this.neighborGrid = el('div', 'edit-neighbors') as HTMLDivElement;
-    neighborsSection.appendChild(this.neighborGrid);
-    container.appendChild(neighborsSection);
+    // Tile neighbors removed — editing happens in Aseprite now
 
     // Sprite Sets section (captures + imports)
     this.capturesSection = el('div', 'edit-captures-section') as HTMLDivElement;
