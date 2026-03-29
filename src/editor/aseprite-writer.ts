@@ -169,6 +169,85 @@ function buildCelChunk(
   return buildChunk(0x2005, w.toUint8Array());
 }
 
+/** Tilemap Layer chunk (0x2004) — type=2 (tilemap), references a tileset */
+function buildTilemapLayerChunk(name: string, tilesetIndex: number): Uint8Array {
+  const w = new BufWriter();
+  w.word(1);              // flags: visible
+  w.word(2);              // layer type: tilemap
+  w.word(0);              // child level
+  w.word(0);              // default width (ignored)
+  w.word(0);              // default height (ignored)
+  w.word(0);              // blend mode: normal
+  w.byte(255);            // opacity
+  w.zeros(3);             // reserved
+  w.string(name);
+  w.dword(tilesetIndex);  // tileset index (extra field for tilemap layers)
+  return buildChunk(0x2004, w.toUint8Array());
+}
+
+/** Tileset chunk (0x2023) — embedded tile images */
+function buildTilesetChunk(
+  tilesetId: number,
+  tileW: number,
+  tileH: number,
+  tiles: Uint8Array[], // each tile = tileW*tileH bytes (indexed pixels)
+): Uint8Array {
+  // Stack all tiles vertically into one image, then compress
+  const numTiles = tiles.length + 1; // +1 for empty tile 0
+  const tileSize = tileW * tileH;
+  const imageData = new Uint8Array(numTiles * tileSize);
+  // Tile 0 = empty (already zeros)
+  for (let i = 0; i < tiles.length; i++) {
+    imageData.set(tiles[i]!, (i + 1) * tileSize);
+  }
+  const compressed = pako.deflate(imageData);
+
+  const w = new BufWriter();
+  w.dword(tilesetId);       // tileset ID
+  w.dword(2 | 4);           // flags: tiles embedded (2) + tile 0 is empty (4)
+  w.dword(numTiles);        // number of tiles (including empty tile 0)
+  w.word(tileW);
+  w.word(tileH);
+  w.short(1);               // base index
+  w.zeros(14);              // reserved
+  w.string(`tileset_${tilesetId}`);
+  // Compressed tileset image
+  w.dword(compressed.length);
+  w.bytes(compressed);
+  return buildChunk(0x2023, w.toUint8Array());
+}
+
+/** Tilemap Cel chunk (0x2005) — cel type 3 (compressed tilemap) */
+function buildTilemapCelChunk(
+  layerIndex: number,
+  widthInTiles: number,
+  heightInTiles: number,
+  tileIds: Uint32Array, // tile ID per cell (0 = empty)
+): Uint8Array {
+  // Compress tile data (DWORD per tile)
+  const rawData = new Uint8Array(tileIds.buffer, tileIds.byteOffset, tileIds.byteLength);
+  const compressed = pako.deflate(rawData);
+
+  const w = new BufWriter();
+  w.word(layerIndex);         // layer index
+  w.short(0);                 // x position
+  w.short(0);                 // y position
+  w.byte(255);                // opacity
+  w.word(3);                  // cel type: compressed tilemap
+  w.short(0);                 // z-index
+  w.zeros(5);                 // reserved
+  w.word(widthInTiles);
+  w.word(heightInTiles);
+  w.word(32);                 // bits per tile
+  w.dword(0x1FFFFFFF);       // tile ID bitmask
+  w.dword(0x20000000);       // X flip bitmask
+  w.dword(0x40000000);       // Y flip bitmask
+  w.dword(0x80000000);       // diagonal flip bitmask
+  w.zeros(10);                // reserved
+  w.bytes(compressed);
+  return buildChunk(0x2005, w.toUint8Array());
+}
+
 /** User Data chunk (0x2020) — text only */
 function buildUserDataChunk(text: string): Uint8Array {
   const w = new BufWriter();
@@ -292,6 +371,89 @@ export function writeAseprite(opts: AsepriteOptions): Uint8Array {
 // ---------------------------------------------------------------------------
 // Helper: trigger download in browser
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Tilemap writer
+// ---------------------------------------------------------------------------
+
+export interface AsepriteTilemapOptions {
+  /** Canvas width in pixels (= widthInTiles * tileW) */
+  width: number;
+  /** Canvas height in pixels (= heightInTiles * tileH) */
+  height: number;
+  tileW: number;
+  tileH: number;
+  palette: AsepritePaletteEntry[];
+  /** Unique tiles (indexed pixels, tileW*tileH bytes each). Tile 0 = empty is implicit. */
+  tiles: Uint8Array[];
+  /** Tilemap grid: row-major, each value = 1-based tile index (0 = empty). Can include flip bits. */
+  tilemap: Uint32Array;
+  widthInTiles: number;
+  heightInTiles: number;
+  transparentIndex?: number;
+  layerName?: string;
+  manifest?: object;
+}
+
+export function writeAsepriteTilemap(opts: AsepriteTilemapOptions): Uint8Array {
+  const {
+    width, height, tileW, tileH, palette, tiles, tilemap,
+    widthInTiles, heightInTiles,
+    transparentIndex = 0,
+    layerName = 'Tilemap',
+    manifest,
+  } = opts;
+
+  const chunks: Uint8Array[] = [];
+
+  // Color profile
+  chunks.push(buildColorProfileChunk());
+  // Palette
+  chunks.push(buildPaletteChunk(palette));
+  // Tileset (ID 0)
+  chunks.push(buildTilesetChunk(0, tileW, tileH, tiles));
+  // Tilemap layer (references tileset 0)
+  chunks.push(buildTilemapLayerChunk(layerName, 0));
+  // User data (manifest)
+  if (manifest) {
+    chunks.push(buildUserDataChunk(JSON.stringify(manifest)));
+  }
+  // Tilemap cel
+  chunks.push(buildTilemapCelChunk(0, widthInTiles, heightInTiles, tilemap));
+
+  // Single frame
+  const frameBuffer = buildFrame(chunks, 0);
+
+  // File header
+  const fileSize = 128 + frameBuffer.length;
+  const header = new BufWriter();
+  header.dword(fileSize);
+  header.word(0xA5E0);
+  header.word(1);                // 1 frame
+  header.word(width);
+  header.word(height);
+  header.word(8);                // indexed
+  header.dword(1);               // flags
+  header.word(0);                // speed
+  header.dword(0);
+  header.dword(0);
+  header.byte(transparentIndex);
+  header.zeros(3);
+  header.word(palette.length);
+  header.byte(1);                // pixel width
+  header.byte(1);                // pixel height
+  header.short(0);               // grid X
+  header.short(0);               // grid Y
+  header.word(tileW);            // grid width = tile width
+  header.word(tileH);            // grid height = tile height
+  header.zeros(84);
+
+  const headerBuf = header.toUint8Array();
+  const file = new Uint8Array(fileSize);
+  file.set(headerBuf, 0);
+  file.set(frameBuffer, 128);
+  return file;
+}
 
 export function downloadAseprite(data: Uint8Array, filename: string): void {
   const blob = new Blob([data.buffer as ArrayBuffer], { type: 'application/octet-stream' });

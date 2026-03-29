@@ -20,7 +20,7 @@ import { findTileReferences } from './tile-refs';
 import type { Emulator } from '../emulator';
 import { pencilCursor, fillCursor, eyedropperCursor, eraserCursor, wandCursor } from './tool-cursors';
 import { showToast } from '../ui/toast';
-import { writeAseprite, downloadAseprite, type AsepriteFrame, type AsepritePaletteEntry } from './aseprite-writer';
+import { writeAseprite, writeAsepriteTilemap, downloadAseprite, type AsepriteFrame, type AsepritePaletteEntry } from './aseprite-writer';
 import { readAseprite } from './aseprite-reader';
 import { createScrollSession, captureScrollFrame, buildScrollSets, scrollLayerName, type ScrollCaptureSession, type ScrollSet, type ScrollTile } from './scroll-capture';
 import { setTooltip } from '../ui/tooltip';
@@ -2932,8 +2932,8 @@ export class SpriteEditorUI {
       megaPalette.push({ r: 0, g: 0, b: 0, a: 0 });
     }
 
-    // Find bounding box across ALL sets
-    let minCol = 64, minRow = 64, maxCol = 0, maxRow = 0;
+    // Find bounding box across ALL sets (tile coords)
+    let minCol = Infinity, minRow = Infinity, maxCol = -Infinity, maxRow = -Infinity;
     for (const set of sets) {
       for (const tile of set.tiles) {
         if (tile.tileCol < minCol) minCol = tile.tileCol;
@@ -2948,72 +2948,85 @@ export class SpriteEditorUI {
     const sheetW = gridCols * tileW;
     const sheetH = gridRows * tileH;
 
-    // Use first palette's pen 15 slot as global transparent index
-    const transparentIndex = 15; // pen 15 of slot 0
-    const pixels = new Uint8Array(sheetW * sheetH).fill(transparentIndex);
+    // Build deduplicated tileset + tilemap
+    const tilesetKey = (code: number, slot: number) => `${code}:${slot}`;
+    const tilesetMap = new Map<string, number>(); // key → 1-based index
+    const tilesetPixels: Uint8Array[] = [];
+
+    const tilemap = new Uint32Array(gridCols * gridRows); // 0 = empty
 
     const manifestTiles: Array<{ address: string; col: number; row: number; tileCode: number; palette: number; paletteSlot: number; flipX: boolean; flipY: boolean }> = [];
 
     for (const set of sets) {
       const slot = palSlot.get(set.palette) ?? 0;
-      const indexOffset = slot * 16; // offset into mega-palette
+      const indexOffset = slot * 16;
 
       for (const tile of set.tiles) {
-        const destX = (tile.tileCol - minCol) * tileW;
-        const destY = (tile.tileRow - minRow) * tileH;
+        // Unique tile = tileCode + palette slot (same tile can look different with different palette)
+        const tk = tilesetKey(tile.tileCode, slot);
+        let tileIdx = tilesetMap.get(tk);
 
-        const tilePixels = readTileFn(gfxRom, tile.tileCode, tile.tileW, tile.tileH, tile.charSize);
-
-        for (let ty = 0; ty < tile.tileH; ty++) {
-          for (let tx = 0; tx < tile.tileW; tx++) {
-            const srcX = tile.flipX ? tile.tileW - 1 - tx : tx;
-            const srcY = tile.flipY ? tile.tileH - 1 - ty : ty;
-            const palIdx = tilePixels[srcY * tile.tileW + srcX]!;
-            if (palIdx === 15) continue; // transparent pen
-            const dx = destX + tx, dy = destY + ty;
-            if (dx >= 0 && dx < sheetW && dy >= 0 && dy < sheetH) {
-              pixels[dy * sheetW + dx] = indexOffset + palIdx;
-            }
+        if (tileIdx === undefined) {
+          // Read raw pixels and remap to mega-palette
+          const rawPixels = readTileFn(gfxRom, tile.tileCode, tile.tileW, tile.tileH, tile.charSize);
+          const remapped = new Uint8Array(tile.tileW * tile.tileH);
+          for (let i = 0; i < rawPixels.length; i++) {
+            remapped[i] = rawPixels[i] === 15 ? 15 : indexOffset + rawPixels[i]!;
           }
+          tilesetPixels.push(remapped);
+          tileIdx = tilesetPixels.length; // 1-based
+          tilesetMap.set(tk, tileIdx);
+        }
+
+        // Place in tilemap
+        const gx = tile.tileCol - minCol;
+        const gy = tile.tileRow - minRow;
+        if (gx >= 0 && gx < gridCols && gy >= 0 && gy < gridRows) {
+          let val = tileIdx;
+          if (tile.flipX) val |= 0x20000000;
+          if (tile.flipY) val |= 0x40000000;
+          tilemap[gy * gridCols + gx] = val;
         }
 
         manifestTiles.push({
           address: '0x' + (tile.tileCode * tile.charSize).toString(16).toUpperCase(),
-          col: tile.tileCol,
-          row: tile.tileRow,
+          col: tile.tileCol, row: tile.tileRow,
           tileCode: tile.tileCode,
-          palette: set.palette,
-          paletteSlot: slot,
-          flipX: tile.flipX,
-          flipY: tile.flipY,
+          palette: set.palette, paletteSlot: slot,
+          flipX: tile.flipX, flipY: tile.flipY,
         });
       }
     }
 
     const manifest = {
-      type: 'scroll_merged',
+      type: 'scroll_tilemap',
       game: (this.emulator as any).gameDef?.name ?? 'unknown',
       layerId,
       layerName: scrollLayerName(layerId),
       palettes: paletteIndices.map((palIdx, slot) => ({ palette: palIdx, slot, indexOffset: slot * 16 })),
       tileW, tileH,
       gridOrigin: { col: minCol, row: minRow },
+      uniqueTiles: tilesetPixels.length,
       tiles: manifestTiles,
     };
 
-    const data = writeAseprite({
+    const data = writeAsepriteTilemap({
       width: sheetW,
       height: sheetH,
+      tileW, tileH,
       palette: megaPalette,
-      frames: [{ pixels, duration: 0 }],
-      transparentIndex,
+      tiles: tilesetPixels,
+      tilemap,
+      widthInTiles: gridCols,
+      heightInTiles: gridRows,
+      transparentIndex: 15,
       layerName: `${scrollLayerName(layerId)} full`,
       manifest,
     });
 
-    const filename = `${manifest.game}_scroll${layerId}_full_${manifestTiles.length}tiles.aseprite`;
+    const filename = `${manifest.game}_scroll${layerId}_tilemap_${tilesetPixels.length}unique.aseprite`;
     downloadAseprite(data, filename);
-    showToast(`Exported full decor: ${manifestTiles.length} tiles, ${paletteIndices.length} palettes, ${sheetW}×${sheetH}px`, true);
+    showToast(`Tilemap: ${tilesetPixels.length} unique tiles, ${gridCols}×${gridRows} grid, ${paletteIndices.length} palettes`, true);
   }
 
   private exportScrollSet(set: ScrollSet): void {
