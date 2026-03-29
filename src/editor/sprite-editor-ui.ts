@@ -218,9 +218,8 @@ export class SpriteEditorUI {
 
     // Tools bar removed — editing happens in Aseprite now
 
-    // Palette hidden — read-only viewing not needed, editing in Aseprite
+    // Palette (read-only)
     this.paletteContainer = el('div', 'edit-palette') as HTMLDivElement;
-    this.paletteContainer.style.display = 'none';
     container.appendChild(this.paletteContainer);
 
     // Tile neighbors removed — editing happens in Aseprite now
@@ -1528,17 +1527,7 @@ export class SpriteEditorUI {
         swatch.classList.add('edit-swatch-nuance');
       }
 
-      setTooltip(swatch, `Color ${i} — Click: select / Shift+click: nuance group / Double-click: edit`);
-      swatch.onclick = (e) => {
-        if (e.shiftKey && i < 15) {
-          if (this.nuanceGroup.has(i)) this.nuanceGroup.delete(i);
-          else this.nuanceGroup.add(i);
-          this.refreshPalette();
-        } else {
-          this.editor.setActiveColor(i);
-        }
-      };
-      swatch.ondblclick = () => this.openColorPicker(i);
+      setTooltip(swatch, `Color ${i}`);
       grid.appendChild(swatch);
     }
 
