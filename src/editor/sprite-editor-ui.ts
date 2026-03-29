@@ -2998,6 +2998,16 @@ export class SpriteEditorUI {
       }
     }
 
+    // Compact tileset manifest: one entry per unique tile (not per grid position)
+    const tilesetManifest: Array<{ idx: number; address: string; tileCode: number; paletteSlot: number }> = [];
+    const seenTiles = new Set<string>();
+    for (const mt of manifestTiles) {
+      const key = `${mt.tileCode}:${mt.paletteSlot}`;
+      if (seenTiles.has(key)) continue;
+      seenTiles.add(key);
+      tilesetManifest.push({ idx: tilesetManifest.length + 1, address: mt.address, tileCode: mt.tileCode, paletteSlot: mt.paletteSlot });
+    }
+
     const manifest = {
       type: 'scroll_tilemap',
       game: (this.emulator as any).gameDef?.name ?? 'unknown',
@@ -3006,8 +3016,7 @@ export class SpriteEditorUI {
       palettes: paletteIndices.map((palIdx, slot) => ({ palette: palIdx, slot, indexOffset: slot * 16 })),
       tileW, tileH,
       gridOrigin: { col: minCol, row: minRow },
-      uniqueTiles: tilesetPixels.length,
-      tiles: manifestTiles,
+      tileset: tilesetManifest,
     };
 
     const data = writeAsepriteTilemap({
@@ -3148,21 +3157,17 @@ export class SpriteEditorUI {
     // We need to know which tileset tile corresponds to which ROM tile
     const manifestTiles = manifest.tiles as Array<{ address: string; tileCode: number; paletteSlot: number }>;
 
-    // Build a map from tileset index → ROM tileCode + paletteSlot
-    // Each unique (tileCode, paletteSlot) got a tileset index during export
-    const tilesetToRom = new Map<number, { tileCode: number; charSize: number }>();
-    const seen = new Set<string>();
-    let tilesetIdx = 1; // 1-based (tile 0 = empty)
+    // Build map from tileset index → ROM tileCode from compact manifest
+    const tilesetEntries = manifest.tileset as Array<{ idx: number; address: string; tileCode: number; paletteSlot: number }>;
+    if (!tilesetEntries?.length) {
+      showToast('No tileset mapping in manifest', false);
+      return;
+    }
 
-    for (const mt of manifestTiles) {
-      const key = `${mt.tileCode}:${mt.paletteSlot}`;
-      if (!seen.has(key)) {
-        seen.add(key);
-        const romAddr = typeof mt.address === 'string' ? parseInt(mt.address, 16) : mt.address;
-        const charSize = tileW * tileH <= 64 ? 64 : tileW * tileH <= 128 ? 128 : 512;
-        tilesetToRom.set(tilesetIdx, { tileCode: Math.floor(romAddr / charSize), charSize });
-        tilesetIdx++;
-      }
+    const tilesetToRom = new Map<number, { tileCode: number; charSize: number }>();
+    const charSize = tileW * tileH <= 64 ? 64 : tileW * tileH <= 128 ? 128 : 512;
+    for (const entry of tilesetEntries) {
+      tilesetToRom.set(entry.idx, { tileCode: entry.tileCode, charSize });
     }
 
     // Write modified tiles back to GFX ROM
