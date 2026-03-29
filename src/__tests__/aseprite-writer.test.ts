@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { writeAseprite, type AsepriteOptions } from '../editor/aseprite-writer';
+import { readAseprite } from '../editor/aseprite-reader';
 import Aseprite from 'ase-parser';
 
 /** Parse an .aseprite buffer using ase-parser (expects Node Buffer). */
@@ -210,5 +211,54 @@ describe('aseprite-writer', () => {
         expect(raw[i]).toBe(i % 4);
       }
     }
+  });
+
+  it('should roundtrip write→read with our reader', () => {
+    const manifest = { game: 'ff1', character: 'cody', frames: [{ id: 'p0' }] };
+    const palette = Array.from({ length: 16 }, (_, i) => ({
+      r: i * 16, g: 255 - i * 16, b: i * 8,
+    }));
+
+    const frames = [
+      { pixels: new Uint8Array(32 * 48).fill(1), duration: 100 },
+      { pixels: new Uint8Array(32 * 48).fill(5), duration: 200 },
+    ];
+
+    const data = writeAseprite({
+      width: 32, height: 48,
+      palette, frames,
+      transparentIndex: 15,
+      layerName: 'cody',
+      manifest,
+    });
+
+    const ase = readAseprite(data.buffer as ArrayBuffer);
+
+    expect(ase.width).toBe(32);
+    expect(ase.height).toBe(48);
+    expect(ase.colorDepth).toBe(8);
+    expect(ase.transparentIndex).toBe(15);
+    expect(ase.numFrames).toBe(2);
+    expect(ase.frames.length).toBe(2);
+
+    // Palette
+    expect(ase.palette.length).toBeGreaterThanOrEqual(16);
+    expect(ase.palette[0]!.r).toBe(0);
+    expect(ase.palette[1]!.r).toBe(16);
+    expect(ase.palette[1]!.g).toBe(239);
+
+    // Pixels
+    expect(ase.frames[0]!.pixels).not.toBeNull();
+    expect(ase.frames[0]!.pixels![0]).toBe(1);
+    expect(ase.frames[1]!.pixels![0]).toBe(5);
+
+    // Manifest
+    expect(ase.manifest).not.toBeNull();
+    expect(ase.manifest.game).toBe('ff1');
+    expect(ase.manifest.character).toBe('cody');
+
+    // Frame durations
+    expect(ase.frames[0]!.duration).toBe(100);
+    expect(ase.frames[1]!.duration).toBe(200);
   });
 });

@@ -21,6 +21,7 @@ import type { Emulator } from '../emulator';
 import { pencilCursor, fillCursor, eyedropperCursor, eraserCursor, wandCursor } from './tool-cursors';
 import { showToast } from '../ui/toast';
 import { writeAseprite, downloadAseprite, type AsepriteFrame, type AsepritePaletteEntry } from './aseprite-writer';
+import { readAseprite } from './aseprite-reader';
 import { setTooltip } from '../ui/tooltip';
 import { createStatusBar, setStatus } from '../ui/status-bar';
 
@@ -282,11 +283,23 @@ export class SpriteEditorUI {
     neighborsSection.appendChild(this.neighborGrid);
     container.appendChild(neighborsSection);
 
-    // Captured sprites section
+    // Sprite Sets section (captures + imports)
     this.capturesSection = el('div', 'edit-captures-section') as HTMLDivElement;
+    const capturesHeader = el('div', 'edit-section-header') as HTMLDivElement;
+    capturesHeader.style.display = 'flex';
+    capturesHeader.style.justifyContent = 'space-between';
+    capturesHeader.style.alignItems = 'center';
     const capturesLabel = el('div', 'edit-section-label');
-    capturesLabel.textContent = 'Captured Sprites';
-    this.capturesSection.appendChild(capturesLabel);
+    capturesLabel.textContent = 'Sprite Sets';
+    capturesHeader.appendChild(capturesLabel);
+    const importAseBtn = el('button', 'edit-import-ase-btn') as HTMLButtonElement;
+    importAseBtn.textContent = 'Import .aseprite';
+    importAseBtn.style.fontSize = '10px';
+    importAseBtn.style.padding = '2px 6px';
+    setTooltip(importAseBtn, 'Import an edited .aseprite file back into the ROM');
+    importAseBtn.onclick = () => this.importAseprite();
+    capturesHeader.appendChild(importAseBtn);
+    this.capturesSection.appendChild(capturesHeader);
     const capturesHint = el('div', 'edit-capture-hint') as HTMLDivElement;
     capturesHint.textContent = 'Shift+click a sprite to capture';
     this.capturesSection.appendChild(capturesHint);
@@ -2977,7 +2990,121 @@ export class SpriteEditorUI {
     showToast(`Exported ${poses.length} poses to ${filename}`, true);
   }
 
-  /** Import a PNG and write it into the GFX ROM tiles of the selected pose. */
+  /** Import a .aseprite file: read manifest, write tiles back to GFX ROM, create sprite set. */
+  private importAseprite(): void {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.aseprite,.ase';
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+
+      try {
+        const buffer = await file.arrayBuffer();
+        const ase = readAseprite(buffer);
+
+        if (!ase.manifest) {
+          showToast('No ROM manifest found in .aseprite file', false);
+          return;
+        }
+
+        const manifest = ase.manifest;
+        const gfxRom = this.editor.getGfxRom();
+        if (!gfxRom) { showToast('No GFX ROM loaded', false); return; }
+
+        let tilesWritten = 0;
+        let framesWritten = 0;
+
+        for (let f = 0; f < ase.frames.length; f++) {
+          const frame = ase.frames[f];
+          if (!frame?.pixels) continue;
+
+          const manifestFrame = manifest.frames?.[f];
+          if (!manifestFrame?.tiles) continue;
+
+          for (const tileInfo of manifestFrame.tiles) {
+            // Parse ROM address back to tile code
+            const romAddr = typeof tileInfo.address === 'string'
+              ? parseInt(tileInfo.address, 16)
+              : tileInfo.address;
+            const tileCode = Math.floor(romAddr / 128); // CHAR_SIZE_16 = 128
+
+            // Extract tile pixels from the frame
+            for (let ty = 0; ty < 16; ty++) {
+              for (let tx = 0; tx < 16; tx++) {
+                const srcX = tileInfo.flipX ? 15 - tx : tx;
+                const srcY = tileInfo.flipY ? 15 - ty : ty;
+                const frameX = tileInfo.x + tx;
+                const frameY = tileInfo.y + ty;
+
+                if (frameX < 0 || frameX >= ase.width || frameY < 0 || frameY >= ase.height) continue;
+
+                const palIdx = frame.pixels[frameY * ase.width + frameX]!;
+                writePixelFn(gfxRom, tileCode, srcX, srcY, palIdx);
+              }
+            }
+            tilesWritten++;
+          }
+          framesWritten++;
+        }
+
+        // Force re-render
+        this.emulator.rerender();
+
+        // Create a sprite set entry from the imported frames
+        if (manifest.frames?.length > 0 && manifest.palette !== undefined) {
+          const poses: CapturedPose[] = [];
+          const video = this.emulator.getVideo();
+          const bufs = this.emulator.getBusBuffers();
+          if (video && bufs) {
+            const palette = readPalette(bufs.vram, video.getPaletteBase(), manifest.palette);
+
+            for (let f = 0; f < manifest.frames.length; f++) {
+              const mf = manifest.frames[f];
+              if (!mf?.tiles) continue;
+
+              const tiles = mf.tiles.map((t: any) => ({
+                relX: t.x as number,
+                relY: t.y as number,
+                mappedCode: Math.floor((typeof t.address === 'string' ? parseInt(t.address, 16) : t.address) / 128),
+                flipX: t.flipX as boolean,
+                flipY: t.flipY as boolean,
+              }));
+
+              const w = manifest.frameSize?.w ?? ase.width;
+              const h = manifest.frameSize?.h ?? ase.height;
+
+              const sprGroup: SpriteGroupData = {
+                sprites: [], palette: manifest.palette,
+                bounds: { x: 0, y: 0, w, h },
+                tiles,
+              };
+              const preview = assembleCharacter(gfxRom, sprGroup, palette);
+
+              poses.push({
+                tileHash: mf.id ?? `imported_${f}`,
+                tiles,
+                w, h,
+                palette: manifest.palette,
+                preview,
+              });
+            }
+
+            if (poses.length > 0) {
+              this.restorePoses(poses);
+              this.refreshCapturesPanel();
+            }
+          }
+        }
+
+        showToast(`Imported ${framesWritten} frames, ${tilesWritten} tiles written to ROM`, true);
+      } catch (err) {
+        showToast(`Import failed: ${(err as Error).message}`, false);
+      }
+    };
+    input.click();
+  }
+
   /** Import PNG onto a single tile. If image is larger than 16x16, crop from center. */
   private importTilePng(tileIndex: number, isShared: boolean): void {
     if (isShared) {
