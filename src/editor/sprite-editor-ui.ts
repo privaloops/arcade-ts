@@ -2861,40 +2861,17 @@ export class SpriteEditorUI {
       btns.style.gap = '4px';
       btns.style.marginTop = '4px';
 
-      // Export as flat image (easy editing)
-      const exportImageBtn = el('button', 'ctrl-btn') as HTMLButtonElement;
-      exportImageBtn.textContent = 'Export Image';
-      exportImageBtn.style.fontSize = '10px';
-      exportImageBtn.style.padding = '2px 4px';
-      setTooltip(exportImageBtn, 'Export as flat image — draw freely in Aseprite');
-      exportImageBtn.onclick = (e) => {
-        e.stopPropagation();
-        this.exportScrollMerged(sets, 'image');
-      };
-      btns.appendChild(exportImageBtn);
-
-      // Export as tilemap (advanced)
-      const exportTilemapBtn = el('button', 'ctrl-btn') as HTMLButtonElement;
-      exportTilemapBtn.textContent = 'Export Tilemap';
-      exportTilemapBtn.style.fontSize = '10px';
-      exportTilemapBtn.style.padding = '2px 4px';
-      setTooltip(exportTilemapBtn, 'Export as tilemap — edit tiles, changes propagate everywhere');
-      exportTilemapBtn.onclick = (e) => {
+      // Export as tilemap
+      const exportBtn = el('button', 'ctrl-btn') as HTMLButtonElement;
+      exportBtn.textContent = 'Export .aseprite';
+      exportBtn.style.fontSize = '10px';
+      exportBtn.style.padding = '2px 4px';
+      setTooltip(exportBtn, 'Export as Aseprite tilemap — edit tiles, changes propagate everywhere');
+      exportBtn.onclick = (e) => {
         e.stopPropagation();
         this.exportScrollMerged(sets, 'tilemap');
       };
-      btns.appendChild(exportTilemapBtn);
-
-      // Individual palette exports
-      for (const set of sets) {
-        const btn = el('button', 'ctrl-btn') as HTMLButtonElement;
-        btn.textContent = `Pal ${set.palette}`;
-        btn.style.fontSize = '10px';
-        btn.style.padding = '2px 4px';
-        setTooltip(btn, `Export palette ${set.palette} only (${set.tiles.length} tiles)`);
-        btn.onclick = (e) => { e.stopPropagation(); this.exportScrollSet(set); };
-        btns.appendChild(btn);
-      }
+      btns.appendChild(exportBtn);
 
       layerCard.appendChild(btns);
       this.scrollSetsList.appendChild(layerCard);
@@ -2902,7 +2879,7 @@ export class SpriteEditorUI {
   }
 
   /** Export all scroll sets of a layer as one image with merged mega-palette (up to 256 colors). */
-  private exportScrollMerged(sets: ScrollSet[], mode: 'image' | 'tilemap' = 'image'): void {
+  private exportScrollMerged(sets: ScrollSet[], mode: 'tilemap' = 'tilemap'): void {
     if (sets.length === 0) return;
     const gfxRom = this.editor.getGfxRom();
     if (!gfxRom) { showToast('No GFX ROM loaded', false); return; }
@@ -3038,146 +3015,24 @@ export class SpriteEditorUI {
       grid: gridMap,
     };
 
-    let data: Uint8Array;
-    let filename: string;
-
-    if (mode === 'tilemap') {
-      data = writeAsepriteTilemap({
-        width: sheetW, height: sheetH,
-        tileW, tileH,
-        palette: megaPalette,
-        tiles: tilesetPixels,
-        tilemap,
-        widthInTiles: gridCols, heightInTiles: gridRows,
-        transparentIndex: 15,
-        layerName: `${scrollLayerName(layerId)} full`,
-        manifest,
-      });
-      filename = `${manifest.game}_scroll${layerId}_tilemap_${tilesetPixels.length}unique.aseprite`;
-    } else {
-      // Flat image: render all tiles into a pixel buffer
-      const pixels = new Uint8Array(sheetW * sheetH).fill(15);
-      for (const set of sets) {
-        const slot = palSlot.get(set.palette) ?? 0;
-        const indexOffset = slot * 16;
-        for (const tile of set.tiles) {
-          const destX = (tile.tileCol - minCol) * tileW;
-          const destY = (tile.tileRow - minRow) * tileH;
-          const raw = readTileFn(gfxRom, tile.tileCode, tile.tileW, tile.tileH, tile.charSize);
-          for (let ty = 0; ty < tile.tileH; ty++) {
-            for (let tx = 0; tx < tile.tileW; tx++) {
-              const srcX = tile.flipX ? tile.tileW - 1 - tx : tx;
-              const srcY = tile.flipY ? tile.tileH - 1 - ty : ty;
-              const palIdx = raw[srcY * tile.tileW + srcX]!;
-              if (palIdx === 15) continue;
-              const dx = destX + tx, dy = destY + ty;
-              if (dx >= 0 && dx < sheetW && dy >= 0 && dy < sheetH) {
-                pixels[dy * sheetW + dx] = indexOffset + palIdx;
-              }
-            }
-          }
-        }
-      }
-      data = writeAseprite({
-        width: sheetW, height: sheetH,
-        palette: megaPalette,
-        frames: [{ pixels, duration: 0 }],
-        transparentIndex: 15,
-        layerName: `${scrollLayerName(layerId)} full`,
-        manifest,
-      });
-      filename = `${manifest.game}_scroll${layerId}_image_${tilesetPixels.length}unique.aseprite`;
-    }
-
-    downloadAseprite(data, filename);
-    showToast(`Exported ${mode}: ${tilesetPixels.length} unique tiles, ${sheetW}×${sheetH}px`, true);
-  }
-
-  private exportScrollSet(set: ScrollSet): void {
-    const gfxRom = this.editor.getGfxRom();
-    if (!gfxRom) { showToast('No GFX ROM loaded', false); return; }
-    const video = this.emulator.getVideo();
-    if (!video) return;
-    const bufs = this.emulator.getBusBuffers();
-    const palette = readPalette(bufs.vram, video.getPaletteBase(), set.palette);
-
-    // Build Aseprite palette
-    const asePalette: AsepritePaletteEntry[] = palette.map(([r, g, b]) => ({ r, g, b, a: 255 }));
-    if (asePalette[15]) asePalette[15] = { r: 0, g: 0, b: 0, a: 0 }; // transparent pen
-
-    // Place tiles at their real tilemap positions
-    // Find bounding box in tile coordinates
-    let minCol = 64, minRow = 64, maxCol = 0, maxRow = 0;
-    for (const tile of set.tiles) {
-      if (tile.tileCol < minCol) minCol = tile.tileCol;
-      if (tile.tileRow < minRow) minRow = tile.tileRow;
-      if (tile.tileCol > maxCol) maxCol = tile.tileCol;
-      if (tile.tileRow > maxRow) maxRow = tile.tileRow;
-    }
-
-    const gridCols = maxCol - minCol + 1;
-    const gridRows = maxRow - minRow + 1;
-    const sheetW = gridCols * set.tileW;
-    const sheetH = gridRows * set.tileH;
-
-    const pixels = new Uint8Array(sheetW * sheetH).fill(15); // transparent
-
-    const manifestTiles: Array<{ address: string; col: number; row: number; tileCode: number; flipX: boolean; flipY: boolean }> = [];
-
-    for (const tile of set.tiles) {
-      const destX = (tile.tileCol - minCol) * set.tileW;
-      const destY = (tile.tileRow - minRow) * set.tileH;
-
-      const tilePixels = readTileFn(gfxRom, tile.tileCode, tile.tileW, tile.tileH, tile.charSize);
-
-      for (let ty = 0; ty < tile.tileH; ty++) {
-        for (let tx = 0; tx < tile.tileW; tx++) {
-          const srcX = tile.flipX ? tile.tileW - 1 - tx : tx;
-          const srcY = tile.flipY ? tile.tileH - 1 - ty : ty;
-          const palIdx = tilePixels[srcY * tile.tileW + srcX]!;
-          if (palIdx === 15) continue; // transparent
-          const dx = destX + tx, dy = destY + ty;
-          if (dx >= 0 && dx < sheetW && dy >= 0 && dy < sheetH) {
-            pixels[dy * sheetW + dx] = palIdx;
-          }
-        }
-      }
-
-      manifestTiles.push({
-        address: '0x' + (tile.tileCode * tile.charSize).toString(16).toUpperCase(),
-        col: tile.tileCol,
-        row: tile.tileRow,
-        tileCode: tile.tileCode,
-        flipX: tile.flipX,
-        flipY: tile.flipY,
-      });
-    }
-
-    const manifest = {
-      type: 'scroll',
-      game: (this.emulator as any).gameDef?.name ?? 'unknown',
-      layerId: set.layerId,
-      layerName: scrollLayerName(set.layerId),
-      palette: set.palette,
-      tileW: set.tileW,
-      tileH: set.tileH,
-      tiles: manifestTiles,
-    };
-
-    const data = writeAseprite({
-      width: sheetW,
-      height: sheetH,
-      palette: asePalette,
-      frames: [{ pixels, duration: 0 }],
+    const data = writeAsepriteTilemap({
+      width: sheetW, height: sheetH,
+      tileW, tileH,
+      palette: megaPalette,
+      tiles: tilesetPixels,
+      tilemap,
+      widthInTiles: gridCols, heightInTiles: gridRows,
       transparentIndex: 15,
-      layerName: `${scrollLayerName(set.layerId)} pal${set.palette}`,
+      layerName: `${scrollLayerName(layerId)} full`,
       manifest,
     });
 
-    const filename = `${manifest.game}_scroll${set.layerId}_pal${set.palette}_${set.tiles.length}tiles.aseprite`;
+    const filename = `${manifest.game}_scroll${layerId}_${tilesetPixels.length}tiles.aseprite`;
     downloadAseprite(data, filename);
-    showToast(`Exported ${set.tiles.length} tiles (${sheetW}×${sheetH}) to ${filename}`, true);
+    showToast(`Exported ${tilesetPixels.length} unique tiles, ${gridCols}×${gridRows} grid`, true);
   }
+
+  // exportScrollSet removed — use exportScrollMerged (tilemap mode) instead
 
   // -- Scroll Tilemap Import --
 
@@ -3247,64 +3102,7 @@ export class SpriteEditorUI {
     showToast(`Scroll import: ${tilesWritten} unique tiles written to ROM`, true);
   }
 
-  /** Import scroll from flat image: slice into tiles, compare, write changed tiles to ROM. */
-  private importScrollImage(ase: ReturnType<typeof readAseprite>, manifest: any, gfxRom: Uint8Array): void {
-    const frame = ase.frames[0];
-    if (!frame?.pixels) { showToast('No pixel data in .aseprite', false); return; }
-
-    const { tileW, tileH, gridCols, gridRows } = manifest;
-    const palettes = manifest.palettes as Array<{ palette: number; slot: number; indexOffset: number }>;
-    const grid = manifest.grid as number[]; // tileCode per cell, -1 = empty
-    const tilesetEntries = manifest.tileset as Array<{ idx: number; tileCode: number; paletteSlot: number }>;
-
-    if (!grid?.length || !palettes?.length || !tilesetEntries?.length) {
-      showToast('Invalid manifest for scroll image import', false);
-      return;
-    }
-
-    // Build lookup: tileCode → paletteSlot
-    const codeToSlot = new Map<number, number>();
-    for (const e of tilesetEntries) codeToSlot.set(e.tileCode, e.paletteSlot);
-
-    // Reverse: mega-palette index → local CPS1 index
-    const indexToLocal = (megaIdx: number): number => {
-      for (const p of palettes) {
-        if (megaIdx >= p.indexOffset && megaIdx < p.indexOffset + 16) return megaIdx - p.indexOffset;
-      }
-      return megaIdx;
-    };
-
-    const charSize = tileW * tileH <= 64 ? 64 : tileW * tileH <= 128 ? 128 : 512;
-    const writtenCodes = new Set<number>();
-    let tilesWritten = 0;
-
-    // For each grid cell with a tile
-    for (let gy = 0; gy < gridRows; gy++) {
-      for (let gx = 0; gx < gridCols; gx++) {
-        const tileCode = grid[gy * gridCols + gx]!;
-        if (tileCode < 0) continue; // empty cell
-        if (writtenCodes.has(tileCode)) continue; // already written
-
-        // Read tile pixels from the image
-        for (let ty = 0; ty < tileH; ty++) {
-          for (let tx = 0; tx < tileW; tx++) {
-            const px = gx * tileW + tx;
-            const py = gy * tileH + ty;
-            if (px >= ase.width || py >= ase.height) continue;
-            const megaIdx = frame.pixels[py * ase.width + px]!;
-            const localIdx = indexToLocal(megaIdx);
-            writePixelFn(gfxRom, tileCode, tx, ty, localIdx);
-          }
-        }
-
-        writtenCodes.add(tileCode);
-        tilesWritten++;
-      }
-    }
-
-    this.emulator.rerender();
-    showToast(`Scroll image import: ${tilesWritten} unique tiles written to ROM`, true);
-  }
+  // importScrollImage removed — tilemap mode only
 
   // -- Pose PNG Export / Import --
 
@@ -3460,10 +3258,7 @@ export class SpriteEditorUI {
           this.importScrollTilemap(ase, manifest, gfxRom);
           return;
         }
-        if (manifest.type === 'scroll_image') {
-          this.importScrollImage(ase, manifest, gfxRom);
-          return;
-        }
+        // scroll_image mode removed — tilemap only
 
         let tilesWritten = 0;
         let framesWritten = 0;
