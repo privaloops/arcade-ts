@@ -196,7 +196,7 @@ function onRomLoaded(gameName: string): void {
     const toast = document.createElement('div');
     toast.className = 'smp-toast autosave-prompt';
     toast.innerHTML = `
-      <span>Modifications non sauvegardées trouvées.</span>
+      <span>Sauvegarde automatique trouvée.</span>
       <button class="restore-btn">Restaurer</button>
       <button class="ignore-btn">Ignorer</button>
     `;
