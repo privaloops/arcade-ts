@@ -20,7 +20,7 @@ import { findTileReferences } from './tile-refs';
 import type { Emulator } from '../emulator';
 import { pencilCursor, fillCursor, eyedropperCursor, eraserCursor, wandCursor } from './tool-cursors';
 import { showToast } from '../ui/toast';
-import { writeAseprite, writeAsepriteTilemap, downloadAseprite, type AsepriteFrame, type AsepritePaletteEntry } from './aseprite-writer';
+import { writeAseprite, writeAsepriteTilemap, writeAsepriteMultiLayerTilemap, downloadAseprite, type AsepriteFrame, type AsepritePaletteEntry, type AsepriteLayerDef } from './aseprite-writer';
 import { readAseprite } from './aseprite-reader';
 import { createScrollSession, captureScrollFrame, buildScrollSets, scrollLayerName, type ScrollCaptureSession, type ScrollSet, type ScrollTile } from './scroll-capture';
 import { setTooltip } from '../ui/tooltip';
@@ -81,8 +81,7 @@ export class SpriteEditorUI {
   private capturePanel: HTMLDivElement | null = null;
   private captureGallery: HTMLDivElement | null = null;
   private captureStatus: HTMLDivElement | null = null;
-  private capturesSection: HTMLDivElement | null = null;
-  private capturesList: HTMLDivElement | null = null;
+  private capturesSection: HTMLDivElement | null = null; // kept for compat
   private selectedPoseIndex = 0;
 
   // Capture state — multiple simultaneous captures keyed by palette
@@ -92,7 +91,10 @@ export class SpriteEditorUI {
   // Scroll capture
   private scrollSessions = new Map<number, ScrollCaptureSession>();
   private scrollSets: ScrollSet[] = [];
-  private scrollSetsList: HTMLDivElement | null = null;
+  // scrollSetsList removed — now in layer panel
+  private scrollHighlightOverlay: HTMLCanvasElement | null = null;
+  private highlightedScrollSet: ScrollSet | null = null;
+  private scrollTickCounter = 0;
 
   // Head editor
   private headSection: HTMLDivElement | null = null;
@@ -230,46 +232,19 @@ export class SpriteEditorUI {
 
     // Tile neighbors removed — editing happens in Aseprite now
 
-    // Sprite Sets section (captures + imports)
-    this.capturesSection = el('div', 'edit-captures-section') as HTMLDivElement;
-    const capturesHeader = el('div', 'edit-section-header') as HTMLDivElement;
-    capturesHeader.style.display = 'flex';
-    capturesHeader.style.justifyContent = 'space-between';
-    capturesHeader.style.alignItems = 'center';
-    const capturesLabel = el('div', 'edit-section-label');
-    capturesLabel.textContent = 'Sprite Sets';
-    capturesHeader.appendChild(capturesLabel);
-    const importAseBtn = el('button', 'edit-import-ase-btn') as HTMLButtonElement;
+    // Import button (for .aseprite round-trip)
+    const importRow = el('div') as HTMLDivElement;
+    importRow.style.display = 'flex';
+    importRow.style.justifyContent = 'flex-end';
+    importRow.style.padding = '4px 0';
+    const importAseBtn = el('button', 'ctrl-btn') as HTMLButtonElement;
     importAseBtn.textContent = 'Import .aseprite';
     importAseBtn.style.fontSize = '10px';
     importAseBtn.style.padding = '2px 6px';
     setTooltip(importAseBtn, 'Import an edited .aseprite file back into the ROM');
     importAseBtn.onclick = () => this.importAseprite();
-    capturesHeader.appendChild(importAseBtn);
-    this.capturesSection.appendChild(capturesHeader);
-    const capturesHint = el('div', 'edit-capture-hint') as HTMLDivElement;
-    capturesHint.style.display = 'none';
-    this.capturesSection.appendChild(capturesHint);
-    this.capturesList = el('div', 'edit-captures-list') as HTMLDivElement;
-    this.capturesSection.appendChild(this.capturesList);
-    container.appendChild(this.capturesSection);
-
-    // Scroll Sets section
-    const scrollSection = el('div', 'edit-scroll-section') as HTMLDivElement;
-    const scrollHeader = el('div', 'edit-section-header') as HTMLDivElement;
-    scrollHeader.style.display = 'flex';
-    scrollHeader.style.justifyContent = 'space-between';
-    scrollHeader.style.alignItems = 'center';
-    const scrollLabel = el('div', 'edit-section-label');
-    scrollLabel.textContent = 'Scroll Sets';
-    scrollHeader.appendChild(scrollLabel);
-    scrollSection.appendChild(scrollHeader);
-
-    // Capture buttons moved to layer panel (REC buttons)
-
-    this.scrollSetsList = el('div', 'edit-scroll-list') as HTMLDivElement;
-    scrollSection.appendChild(this.scrollSetsList);
-    container.appendChild(scrollSection);
+    importRow.appendChild(importAseBtn);
+    container.appendChild(importRow);
 
     // Status bar (contextual hint at bottom)
     container.appendChild(createStatusBar());
@@ -486,8 +461,21 @@ export class SpriteEditorUI {
         this.toggleAllSpriteCapture();
       },
       onToggleRecScroll: (layerId) => {
-        // Find or create the button to toggle (reuse existing scroll capture logic)
         this.toggleScrollCaptureFromPanel(layerId);
+      },
+      onOpenSpriteSheet: (groupIdx) => {
+        this.activeGroupIndex = groupIdx;
+        this.activeLayerIndex = -1;
+        this.enterSpriteSheetMode();
+      },
+      onExportScrollSet: (set) => {
+        this.exportScrollSingle(set);
+      },
+      onHighlightScrollSet: (set) => {
+        this.toggleScrollHighlight(set);
+      },
+      onRenderScrollThumb: (set) => {
+        return this.renderScrollSetThumbnail(set);
       },
     });
   }
@@ -509,88 +497,34 @@ export class SpriteEditorUI {
     // Use tracked HW visibility (default to true if not yet toggled)
     for (let i = 0; i < 4; i++) hwState.visible.set(i, this.hwLayerVisible.get(i) !== false);
 
-    this.layerPanel?.refresh(this.layerGroups, this.activeGroupIndex, this.activeLayerIndex, gfxRom, hwState);
-  }
-
-  private refreshCapturesPanel(): void {
-    if (!this.capturesList) return;
-    this.capturesList.innerHTML = '';
-
-    let hasEntries = false;
-
-    // Completed captures first (stable order)
+    // Build sprite set info for the layer panel
+    const spriteSetsInfo: import('./layer-panel').SpriteSetInfo[] = [];
     for (let gi = 0; gi < this.layerGroups.length; gi++) {
       const group = this.layerGroups[gi]!;
       if (group.type !== 'sprite' || !group.spriteCapture || group.spriteCapture.poses.length === 0) continue;
-      hasEntries = true;
-
-      const card = el('div', 'edit-capture-card') as HTMLDivElement;
-      setTooltip(card, 'Open sprite sheet viewer');
-      card.onclick = () => {
-        this.activeGroupIndex = gi;
-        this.activeLayerIndex = -1;
-        this.enterSpriteSheetMode();
-      };
-
-      const thumb = document.createElement('canvas');
-      thumb.className = 'edit-capture-thumb';
       const pose = group.spriteCapture.poses[0]!;
-      thumb.width = pose.w;
-      thumb.height = pose.h;
-      const ctx = thumb.getContext('2d');
-      if (ctx) ctx.putImageData(pose.preview, 0, 0);
-      card.appendChild(thumb);
-
-      const info = el('div', 'edit-capture-info') as HTMLDivElement;
-      const name = el('div', 'edit-capture-name') as HTMLDivElement;
-      name.textContent = group.name;
-      info.appendChild(name);
-      const count = el('div', 'edit-capture-count') as HTMLDivElement;
-      count.textContent = `${group.spriteCapture.poses.length} pose${group.spriteCapture.poses.length !== 1 ? 's' : ''}`;
-      info.appendChild(count);
-      card.appendChild(info);
-
-      this.capturesList.appendChild(card);
+      spriteSetsInfo.push({
+        groupIndex: gi,
+        name: group.name,
+        poseCount: group.spriteCapture.poses.length,
+        preview: pose.preview,
+        previewW: pose.w,
+        previewH: pose.h,
+      });
     }
 
-    // Active capture sessions at the bottom (recording indicator)
-    for (const [palette, session] of this.activeSessions) {
-      hasEntries = true;
-      const card = el('div', 'edit-capture-card edit-capture-active') as HTMLDivElement;
-      setTooltip(card, 'Click to stop capture');
-      card.onclick = () => this.stopCaptureForPalette(palette);
-
-      const thumb = document.createElement('canvas');
-      thumb.className = 'edit-capture-thumb';
-      if (session.poses.length > 0) {
-        const pose = session.poses[0]!;
-        thumb.width = pose.w;
-        thumb.height = pose.h;
-        const ctx = thumb.getContext('2d');
-        if (ctx) ctx.putImageData(pose.preview, 0, 0);
-      } else {
-        thumb.width = 16;
-        thumb.height = 16;
-      }
-      card.appendChild(thumb);
-
-      const info = el('div', 'edit-capture-info') as HTMLDivElement;
-      const name = el('div', 'edit-capture-name') as HTMLDivElement;
-      name.textContent = `Palette ${palette}`;
-      info.appendChild(name);
-      const count = el('div', 'edit-capture-count') as HTMLDivElement;
-      count.textContent = `Recording... ${session.poses.length} pose${session.poses.length !== 1 ? 's' : ''}`;
-      info.appendChild(count);
-      card.appendChild(info);
-
-      this.capturesList.appendChild(card);
+    // Include live scroll sets from active capture sessions
+    const allScrollSets = [...this.scrollSets];
+    for (const session of this.scrollSessions.values()) {
+      allScrollSets.push(...buildScrollSets(session));
     }
 
-    if (!hasEntries) {
-      const empty = el('div', 'edit-capture-empty') as HTMLDivElement;
-      empty.textContent = 'No captures yet';
-      this.capturesList.appendChild(empty);
-    }
+    this.layerPanel?.refresh(this.layerGroups, this.activeGroupIndex, this.activeLayerIndex, gfxRom, hwState, allScrollSets, spriteSetsInfo);
+  }
+
+  /** @deprecated Captures are now shown in the layer panel. Kept as no-op for existing call sites. */
+  private refreshCapturesPanel(): void {
+    this.refreshLayerPanel();
   }
 
   // -- Overlay --
@@ -2824,6 +2758,7 @@ export class SpriteEditorUI {
       const sets = buildScrollSets(session);
       this.scrollSets.push(...sets);
       this.refreshScrollSetsList();
+      this.refreshLayerPanel();
       showToast(`Captured ${session.tileMap.size} tiles → ${sets.length} scroll set(s)`, true);
     } else {
       // Start
@@ -2844,6 +2779,7 @@ export class SpriteEditorUI {
       const sets = buildScrollSets(session);
       this.scrollSets.push(...sets);
       this.refreshScrollSetsList();
+      this.refreshLayerPanel();
       showToast(`Captured ${session.tileMap.size} tiles → ${sets.length} scroll set(s)`, true);
     } else {
       // Start capture
@@ -2862,51 +2798,260 @@ export class SpriteEditorUI {
     for (const session of this.scrollSessions.values()) {
       captureScrollFrame(session, video);
     }
-  }
-
-  private refreshScrollSetsList(): void {
-    if (!this.scrollSetsList) return;
-    this.scrollSetsList.innerHTML = '';
-
-    // Group sets by layer
-    const byLayer = new Map<number, ScrollSet[]>();
-    for (const set of this.scrollSets) {
-      const list = byLayer.get(set.layerId) ?? [];
-      list.push(set);
-      byLayer.set(set.layerId, list);
-    }
-
-    for (const [layerId, sets] of byLayer) {
-      const layerCard = el('div', 'edit-capture-card') as HTMLDivElement;
-
-      const header = el('div', 'edit-capture-name');
-      const totalTiles = sets.reduce((n, s) => n + s.tiles.length, 0);
-      header.textContent = `${scrollLayerName(layerId)} · ${sets.length} palette(s) · ${totalTiles} tiles`;
-      layerCard.appendChild(header);
-
-      const btns = el('div') as HTMLDivElement;
-      btns.style.display = 'flex';
-      btns.style.gap = '4px';
-      btns.style.marginTop = '4px';
-
-      // Export as tilemap
-      const exportBtn = el('button', 'ctrl-btn') as HTMLButtonElement;
-      exportBtn.textContent = 'Export .aseprite';
-      exportBtn.style.fontSize = '10px';
-      exportBtn.style.padding = '2px 4px';
-      setTooltip(exportBtn, 'Export as Aseprite tilemap — edit tiles, changes propagate everywhere');
-      exportBtn.onclick = (e) => {
-        e.stopPropagation();
-        this.exportScrollMerged(sets, 'tilemap');
-      };
-      btns.appendChild(exportBtn);
-
-      layerCard.appendChild(btns);
-      this.scrollSetsList.appendChild(layerCard);
+    // Refresh layer panel every ~60 frames (~1s) during capture
+    if (this.scrollSessions.size > 0 && ++this.scrollTickCounter >= 60) {
+      this.scrollTickCounter = 0;
+      this.refreshLayerPanel();
     }
   }
 
-  /** Export all scroll sets of a layer as one image with merged mega-palette (up to 256 colors). */
+  /** @deprecated Scroll sets are now shown in the layer panel. Kept as no-op for live capture tick. */
+  private refreshScrollSetsList(_setsOverride?: ScrollSet[]): void {
+    // During live capture, refresh the layer panel instead
+    this.refreshLayerPanel();
+  }
+
+  /** Toggle highlight overlay for a scroll set's tiles on the game canvas. */
+  private toggleScrollHighlight(set: ScrollSet): void {
+    if (this.highlightedScrollSet === set) {
+      // Toggle off
+      this.highlightedScrollSet = null;
+      this.clearScrollHighlight();
+      return;
+    }
+    this.highlightedScrollSet = set;
+    this.drawScrollHighlight(set);
+  }
+
+  private clearScrollHighlight(): void {
+    if (this.scrollHighlightOverlay) {
+      this.scrollHighlightOverlay.remove();
+      this.scrollHighlightOverlay = null;
+    }
+  }
+
+  /** Draw highlight rectangles over the game canvas for the given scroll set. */
+  private drawScrollHighlight(set: ScrollSet): void {
+    this.clearScrollHighlight();
+    const video = this.emulator.getVideo();
+    if (!video) return;
+
+    const { layerId, tileW, tileH, tiles } = set;
+    const { scrollX, scrollY } = video.getScrollXY(layerId);
+
+    // Create overlay canvas on top of game canvas
+    const overlay = document.createElement('canvas');
+    const gameRect = this.gameCanvas.getBoundingClientRect();
+    const scaleX = gameRect.width / 384;
+    const scaleY = gameRect.height / 224;
+    overlay.width = gameRect.width;
+    overlay.height = gameRect.height;
+    overlay.style.position = 'absolute';
+    overlay.style.left = `${gameRect.left + window.scrollX}px`;
+    overlay.style.top = `${gameRect.top + window.scrollY}px`;
+    overlay.style.width = `${gameRect.width}px`;
+    overlay.style.height = `${gameRect.height}px`;
+    overlay.style.pointerEvents = 'none';
+    overlay.style.zIndex = '100';
+    document.body.appendChild(overlay);
+    this.scrollHighlightOverlay = overlay;
+
+    const ctx = overlay.getContext('2d')!;
+    ctx.strokeStyle = '#ff0';
+    ctx.lineWidth = 2;
+    ctx.fillStyle = 'rgba(255, 255, 0, 0.15)';
+
+    // Virtual tilemap dimensions
+    const virtualW = 64 * tileW;
+    const virtualH = 64 * tileH;
+
+    for (const tile of tiles) {
+      // Tile absolute position in virtual tilemap
+      const absX = tile.tileCol * tileW;
+      const absY = tile.tileRow * tileH;
+
+      // Screen position = tile pos - scroll pos (with wraparound)
+      let screenX = ((absX - scrollX) % virtualW + virtualW) % virtualW;
+      let screenY = ((absY - scrollY) % virtualH + virtualH) % virtualH;
+
+      // Only draw if visible on screen (384x224)
+      if (screenX >= 384 || screenY >= 224) continue;
+      if (screenX + tileW <= 0 || screenY + tileH <= 0) continue;
+
+      ctx.fillRect(screenX * scaleX, screenY * scaleY, tileW * scaleX, tileH * scaleY);
+      ctx.strokeRect(screenX * scaleX, screenY * scaleY, tileW * scaleX, tileH * scaleY);
+    }
+  }
+
+  /** Render a thumbnail canvas for a scroll set. Returns null if no data. */
+  private renderScrollSetThumbnail(set: ScrollSet): HTMLCanvasElement | null {
+    const gfxRom = this.editor.getGfxRom();
+    if (!gfxRom) return null;
+    const video = this.emulator.getVideo();
+    if (!video) return null;
+    const bufs = this.emulator.getBusBuffers();
+
+    const { tileW, tileH, palette: palIdx, tiles } = set;
+    if (tiles.length === 0) return null;
+
+    // Decode CPS1 palette
+    const colors = readPalette(bufs.vram, video.getPaletteBase(), palIdx);
+
+    // Bounding box
+    let minCol = Infinity, minRow = Infinity, maxCol = -Infinity, maxRow = -Infinity;
+    for (const tile of tiles) {
+      if (tile.tileCol < minCol) minCol = tile.tileCol;
+      if (tile.tileRow < minRow) minRow = tile.tileRow;
+      if (tile.tileCol > maxCol) maxCol = tile.tileCol;
+      if (tile.tileRow > maxRow) maxRow = tile.tileRow;
+    }
+
+    const gridCols = maxCol - minCol + 1;
+    const gridRows = maxRow - minRow + 1;
+    const w = gridCols * tileW;
+    const h = gridRows * tileH;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d')!;
+    ctx.imageSmoothingEnabled = false;
+
+    // Render at 1x into an offscreen ImageData, then scale
+    const imgData = ctx.createImageData(w, h);
+    const data = imgData.data;
+
+    for (const tile of tiles) {
+      const gx = tile.tileCol - minCol;
+      const gy = tile.tileRow - minRow;
+      const pixels = readTileFn(gfxRom, tile.tileCode, tile.tileW, tile.tileH, tile.charSize);
+
+      for (let ty = 0; ty < tileH; ty++) {
+        for (let tx = 0; tx < tileW; tx++) {
+          let lx = tx, ly = ty;
+          if (tile.flipX) lx = tileW - 1 - tx;
+          if (tile.flipY) ly = tileH - 1 - ty;
+          const colorIdx = pixels[ly * tileW + lx]!;
+          if (colorIdx === 15) continue; // transparent
+          const [r, g, b] = colors[colorIdx] ?? [0, 0, 0];
+          const px = gx * tileW + tx;
+          const py = gy * tileH + ty;
+          const off = (py * w + px) * 4;
+          data[off] = r;
+          data[off + 1] = g;
+          data[off + 2] = b;
+          data[off + 3] = 255;
+        }
+      }
+    }
+
+    ctx.putImageData(imgData, 0, 0);
+    return canvas;
+  }
+
+  /** Export a single scroll set as Aseprite tilemap (16 colors, 1 CPS1 palette). */
+  private exportScrollSingle(set: ScrollSet): void {
+    const gfxRom = this.editor.getGfxRom();
+    if (!gfxRom) { showToast('No GFX ROM loaded', false); return; }
+    const video = this.emulator.getVideo();
+    if (!video) return;
+    const bufs = this.emulator.getBusBuffers();
+
+    const { tileW, tileH, layerId, palette: palIdx } = set;
+
+    // Read the 16-color CPS1 palette
+    const colors = readPalette(bufs.vram, video.getPaletteBase(), palIdx);
+    const asePalette: AsepritePaletteEntry[] = [];
+    for (let c = 0; c < 16; c++) {
+      const [r, g, b] = colors[c] ?? [0, 0, 0];
+      if (c === 15) {
+        asePalette.push({ r: 0, g: 0, b: 0, a: 0 }); // transparent pen
+      } else {
+        asePalette.push({ r, g, b, a: 255 });
+      }
+    }
+
+    // Bounding box
+    let minCol = Infinity, minRow = Infinity, maxCol = -Infinity, maxRow = -Infinity;
+    for (const tile of set.tiles) {
+      if (tile.tileCol < minCol) minCol = tile.tileCol;
+      if (tile.tileRow < minRow) minRow = tile.tileRow;
+      if (tile.tileCol > maxCol) maxCol = tile.tileCol;
+      if (tile.tileRow > maxRow) maxRow = tile.tileRow;
+    }
+
+    const gridCols = maxCol - minCol + 1;
+    const gridRows = maxRow - minRow + 1;
+    const sheetW = gridCols * tileW;
+    const sheetH = gridRows * tileH;
+
+    // Build deduplicated tileset + tilemap (16-color local indices, no mega remap)
+    const gridMap: number[] = new Array(gridCols * gridRows).fill(-1);
+    const tilesetMap = new Map<number, number>(); // tileCode → 1-based index
+    const tilesetPixels: Uint8Array[] = [];
+    const tilemap = new Uint32Array(gridCols * gridRows);
+
+    const tilesetManifest: Array<{ idx: number; address: string; tileCode: number; paletteSlot: number }> = [];
+
+    for (const tile of set.tiles) {
+      let tileIdx = tilesetMap.get(tile.tileCode);
+
+      if (tileIdx === undefined) {
+        // Read raw pixels (already local 0-15, no remap needed)
+        const rawPixels = readTileFn(gfxRom, tile.tileCode, tile.tileW, tile.tileH, tile.charSize);
+        tilesetPixels.push(rawPixels);
+        tileIdx = tilesetPixels.length; // 1-based
+        tilesetMap.set(tile.tileCode, tileIdx);
+        tilesetManifest.push({
+          idx: tileIdx,
+          address: '0x' + (tile.tileCode * tile.charSize).toString(16).toUpperCase(),
+          tileCode: tile.tileCode,
+          paletteSlot: 0,
+        });
+      }
+
+      const gx = tile.tileCol - minCol;
+      const gy = tile.tileRow - minRow;
+      if (gx >= 0 && gx < gridCols && gy >= 0 && gy < gridRows) {
+        gridMap[gy * gridCols + gx] = tile.tileCode;
+        let val = tileIdx;
+        if (tile.flipX) val |= 0x20000000;
+        if (tile.flipY) val |= 0x40000000;
+        tilemap[gy * gridCols + gx] = val;
+      }
+    }
+
+    const manifest = {
+      type: 'scroll_tilemap' as const,
+      game: (this.emulator as any).gameDef?.name ?? 'unknown',
+      layerId,
+      layerName: scrollLayerName(layerId),
+      palettes: [{ palette: palIdx, slot: 0, indexOffset: 0 }],
+      tileW, tileH,
+      gridOrigin: { col: minCol, row: minRow },
+      gridCols, gridRows,
+      tileset: tilesetManifest,
+      grid: gridMap,
+    };
+
+    const data = writeAsepriteTilemap({
+      width: sheetW, height: sheetH,
+      tileW, tileH,
+      palette: asePalette,
+      tiles: tilesetPixels,
+      tilemap,
+      widthInTiles: gridCols, heightInTiles: gridRows,
+      transparentIndex: 15,
+      layerName: `${scrollLayerName(layerId)} pal#${palIdx}`,
+      manifest,
+    });
+
+    const filename = `${manifest.game}_scroll${layerId}_pal${palIdx}_${tilesetPixels.length}tiles.aseprite`;
+    downloadAseprite(data, filename);
+    showToast(`Exported ${tilesetPixels.length} tiles, palette #${palIdx} (16 colors), ${gridCols}×${gridRows} grid`, true);
+  }
+
+  /** @deprecated Use exportScrollSingle instead — kept for reference */
   private exportScrollMerged(sets: ScrollSet[], mode: 'tilemap' = 'tilemap'): void {
     if (sets.length === 0) return;
     const gfxRom = this.editor.getGfxRom();
@@ -2966,40 +3111,55 @@ export class SpriteEditorUI {
     const sheetW = gridCols * tileW;
     const sheetH = gridRows * tileH;
 
-    // Grid map: tileCode per cell (-1 = empty). For image mode import.
+    // Grid map: tileCode per cell (-1 = empty)
     const gridMap: number[] = new Array(gridCols * gridRows).fill(-1);
 
-    // Build deduplicated tileset + tilemap
-    const tilesetKey = (code: number, slot: number) => `${code}:${slot}`;
-    const tilesetMap = new Map<string, number>(); // key → 1-based index
-    const tilesetPixels: Uint8Array[] = [];
+    // Build per-slot data: each slot gets its own tileset + tilemap
+    const perSlot = new Map<number, {
+      tilesetMap: Map<number, number>; // tileCode → 1-based index within this slot's tileset
+      tilesetPixels: Uint8Array[];
+      tilemap: Uint32Array;
+      tilesetManifest: Array<{ idx: number; address: string; tileCode: number; paletteSlot: number }>;
+    }>();
 
-    const tilemap = new Uint32Array(gridCols * gridRows); // 0 = empty
+    for (const slot of palSlot.values()) {
+      perSlot.set(slot, {
+        tilesetMap: new Map(),
+        tilesetPixels: [],
+        tilemap: new Uint32Array(gridCols * gridRows),
+        tilesetManifest: [],
+      });
+    }
 
-    const manifestTiles: Array<{ address: string; col: number; row: number; tileCode: number; palette: number; paletteSlot: number; flipX: boolean; flipY: boolean }> = [];
-
+    let totalTiles = 0;
     for (const set of sets) {
       const slot = palSlot.get(set.palette) ?? 0;
       const indexOffset = slot * 16;
+      const slotData = perSlot.get(slot)!;
 
       for (const tile of set.tiles) {
-        // Unique tile = tileCode + palette slot (same tile can look different with different palette)
-        const tk = tilesetKey(tile.tileCode, slot);
-        let tileIdx = tilesetMap.get(tk);
+        let tileIdx = slotData.tilesetMap.get(tile.tileCode);
 
         if (tileIdx === undefined) {
-          // Read raw pixels and remap to mega-palette
+          // Read raw pixels and remap to mega-palette range for this slot
           const rawPixels = readTileFn(gfxRom, tile.tileCode, tile.tileW, tile.tileH, tile.charSize);
           const remapped = new Uint8Array(tile.tileW * tile.tileH);
           for (let i = 0; i < rawPixels.length; i++) {
             remapped[i] = rawPixels[i] === 15 ? 15 : indexOffset + rawPixels[i]!;
           }
-          tilesetPixels.push(remapped);
-          tileIdx = tilesetPixels.length; // 1-based
-          tilesetMap.set(tk, tileIdx);
+          slotData.tilesetPixels.push(remapped);
+          tileIdx = slotData.tilesetPixels.length; // 1-based
+          slotData.tilesetMap.set(tile.tileCode, tileIdx);
+          slotData.tilesetManifest.push({
+            idx: tileIdx,
+            address: '0x' + (tile.tileCode * tile.charSize).toString(16).toUpperCase(),
+            tileCode: tile.tileCode,
+            paletteSlot: slot,
+          });
+          totalTiles++;
         }
 
-        // Place in tilemap
+        // Place in this slot's tilemap + global grid
         const gx = tile.tileCol - minCol;
         const gy = tile.tileRow - minRow;
         if (gx >= 0 && gx < gridCols && gy >= 0 && gy < gridRows) {
@@ -3007,31 +3167,30 @@ export class SpriteEditorUI {
           let val = tileIdx;
           if (tile.flipX) val |= 0x20000000;
           if (tile.flipY) val |= 0x40000000;
-          tilemap[gy * gridCols + gx] = val;
+          slotData.tilemap[gy * gridCols + gx] = val;
         }
-
-        manifestTiles.push({
-          address: '0x' + (tile.tileCode * tile.charSize).toString(16).toUpperCase(),
-          col: tile.tileCol, row: tile.tileRow,
-          tileCode: tile.tileCode,
-          palette: set.palette, paletteSlot: slot,
-          flipX: tile.flipX, flipY: tile.flipY,
-        });
       }
     }
 
-    // Compact tileset manifest: one entry per unique tile (not per grid position)
-    const tilesetManifest: Array<{ idx: number; address: string; tileCode: number; paletteSlot: number }> = [];
-    const seenTiles = new Set<string>();
-    for (const mt of manifestTiles) {
-      const key = `${mt.tileCode}:${mt.paletteSlot}`;
-      if (seenTiles.has(key)) continue;
-      seenTiles.add(key);
-      tilesetManifest.push({ idx: tilesetManifest.length + 1, address: mt.address, tileCode: mt.tileCode, paletteSlot: mt.paletteSlot });
+    // Build Aseprite layers (bottom-to-top = slot 0 first)
+    const sortedSlots = [...perSlot.entries()].sort((a, b) => a[0] - b[0]);
+    const aseLayers: AsepriteLayerDef[] = [];
+    const allTilesetManifests: Array<{ idx: number; address: string; tileCode: number; paletteSlot: number }> = [];
+
+    for (const [slot, slotData] of sortedSlots) {
+      const palIdx = paletteIndices[slot]!;
+      aseLayers.push({
+        name: `CPS1 #${palIdx}`,
+        tiles: slotData.tilesetPixels,
+        tilemap: slotData.tilemap,
+      });
+      for (const entry of slotData.tilesetManifest) {
+        allTilesetManifests.push(entry);
+      }
     }
 
     const manifest = {
-      type: mode === 'tilemap' ? 'scroll_tilemap' : 'scroll_image',
+      type: 'scroll_tilemap_multilayer' as const,
       game: (this.emulator as any).gameDef?.name ?? 'unknown',
       layerId,
       layerName: scrollLayerName(layerId),
@@ -3039,25 +3198,29 @@ export class SpriteEditorUI {
       tileW, tileH,
       gridOrigin: { col: minCol, row: minRow },
       gridCols, gridRows,
-      tileset: tilesetManifest,
+      tileset: allTilesetManifests,
       grid: gridMap,
+      // Per-layer info for multi-layer import
+      layers: sortedSlots.map(([slot]) => ({
+        slot,
+        palette: paletteIndices[slot]!,
+        tileCount: perSlot.get(slot)!.tilesetPixels.length,
+      })),
     };
 
-    const data = writeAsepriteTilemap({
+    const data = writeAsepriteMultiLayerTilemap({
       width: sheetW, height: sheetH,
       tileW, tileH,
       palette: megaPalette,
-      tiles: tilesetPixels,
-      tilemap,
+      layers: aseLayers,
       widthInTiles: gridCols, heightInTiles: gridRows,
       transparentIndex: 15,
-      layerName: `${scrollLayerName(layerId)} full`,
       manifest,
     });
 
-    const filename = `${manifest.game}_scroll${layerId}_${tilesetPixels.length}tiles.aseprite`;
+    const filename = `${manifest.game}_scroll${layerId}_${totalTiles}tiles.aseprite`;
     downloadAseprite(data, filename);
-    showToast(`Exported ${tilesetPixels.length} unique tiles, ${gridCols}×${gridRows} grid`, true);
+    showToast(`Exported ${totalTiles} tiles across ${aseLayers.length} layers, ${gridCols}×${gridRows} grid`, true);
   }
 
   // exportScrollSet removed — use exportScrollMerged (tilemap mode) instead
@@ -3078,10 +3241,8 @@ export class SpriteEditorUI {
       return;
     }
 
-    // Build reverse map: mega-palette index → { cps1Palette, localIndex }
-    // Each slot of 16 indices maps to a CPS1 palette
+    // Build reverse map: mega-palette index → local 0-15 index
     const indexToLocal = (megaIdx: number): number => {
-      // Find which palette slot this index belongs to
       for (const p of palettes) {
         if (megaIdx >= p.indexOffset && megaIdx < p.indexOffset + 16) {
           return megaIdx - p.indexOffset;
@@ -3089,11 +3250,6 @@ export class SpriteEditorUI {
       }
       return megaIdx; // fallback
     };
-
-    // Build a map: tileCode → unique tileset indices that reference it
-    // The manifest.tiles array has tileCode for each grid position
-    // We need to know which tileset tile corresponds to which ROM tile
-    const manifestTiles = manifest.tiles as Array<{ address: string; tileCode: number; paletteSlot: number }>;
 
     // Build map from tileset index → ROM tileCode from compact manifest
     const tilesetEntries = manifest.tileset as Array<{ idx: number; address: string; tileCode: number; paletteSlot: number }>;
@@ -3113,7 +3269,6 @@ export class SpriteEditorUI {
     // then read from the tileset. This handles the case where Aseprite
     // created new tiles (Auto mode) — the tilemap points to the new tile.
     let tilesWritten = 0;
-    const writtenCodes = new Set<number>();
 
     if (ase.tilemap && manifest.grid) {
       // Use grid mapping: for each cell, find original tileCode + current tileset tile
@@ -3154,12 +3309,13 @@ export class SpriteEditorUI {
 
       // Second pass: write each unique tile
       for (const [origCode, tileIdx] of codeToTileIdx) {
-        const tilePixels = tileset.tiles[tileIdx]!;
+        const tilePixels = tileset.tiles[tileIdx];
+        if (!tilePixels) continue;
         for (let ty = 0; ty < tileH; ty++) {
           for (let tx = 0; tx < tileW; tx++) {
             const megaIdx = tilePixels[ty * tileW + tx]!;
             const localIdx = indexToLocal(megaIdx);
-            writePixelFn(gfxRom, origCode, tx, ty, localIdx);
+            writePixelFn(gfxRom, origCode, tx, ty, localIdx, charSize);
           }
         }
         tilesWritten++;
@@ -3173,7 +3329,7 @@ export class SpriteEditorUI {
           for (let tx = 0; tx < tileW; tx++) {
             const megaIdx = tilePixels[ty * tileW + tx]!;
             const localIdx = indexToLocal(megaIdx);
-            writePixelFn(gfxRom, romInfo.tileCode, tx, ty, localIdx);
+            writePixelFn(gfxRom, romInfo.tileCode, tx, ty, localIdx, charSize);
           }
         }
         tilesWritten++;
@@ -3202,13 +3358,200 @@ export class SpriteEditorUI {
         }
       }
     }
-
     this.emulator.rerender();
     const palMsg = colorsChanged > 0 ? `, ${colorsChanged} palette colors updated` : '';
     showToast(`Scroll import: ${tilesWritten} unique tiles written to ROM${palMsg}`, true);
   }
 
   // importScrollImage removed — tilemap mode only
+
+  /**
+   * Import multi-layer tilemap: each Aseprite layer = one CPS1 palette group.
+   * Each layer has its own tileset with pixels in the correct mega-palette range,
+   * so mega→local conversion is a simple subtraction (no cross-slot issues).
+   */
+  private importScrollTilemapMultiLayer(ase: ReturnType<typeof readAseprite>, manifest: any, gfxRom: Uint8Array): void {
+    const { tileW, tileH } = manifest;
+    const palettes = manifest.palettes as Array<{ palette: number; slot: number; indexOffset: number }>;
+    const manifestLayers = manifest.layers as Array<{ slot: number; palette: number; tileCount: number }>;
+    if (!palettes?.length || !manifestLayers?.length) {
+      showToast('Invalid multi-layer manifest', false);
+      return;
+    }
+
+    // Build tileset manifest lookup: tileCode → { paletteSlot, ... } for all layers
+    const tilesetEntries = manifest.tileset as Array<{ idx: number; address: string; tileCode: number; paletteSlot: number }>;
+    if (!tilesetEntries?.length) {
+      showToast('No tileset mapping in manifest', false);
+      return;
+    }
+    const charSize = tileW * tileH <= 64 ? 64 : tileW * tileH <= 128 ? 128 : 512;
+
+    // We need the grid and grid dimensions for modified-tile detection
+    const grid = manifest.grid as number[];
+    const gridCols = manifest.gridCols as number;
+    const gridRows = manifest.gridRows as number;
+
+    let tilesWritten = 0;
+
+    // Process each Aseprite layer → one CPS1 palette group
+    for (let layerIdx = 0; layerIdx < manifestLayers.length; layerIdx++) {
+      const mLayer = manifestLayers[layerIdx]!;
+      const indexOffset = mLayer.slot * 16;
+      const palInfo = palettes.find(p => p.slot === mLayer.slot);
+      if (!palInfo) continue;
+
+      // Find the matching tilemap layer and tileset from the Aseprite file
+      // Layers in the file are ordered the same as in manifestLayers
+      const tmData = ase.tilemaps[layerIdx];
+      if (!tmData) continue;
+
+      // Find tileset for this layer via layerDefs
+      const layerDef = ase.layerDefs[layerIdx];
+      const tilesetId = layerDef?.tilesetIndex ?? layerIdx;
+      const tileset = ase.tilesets[tilesetId];
+      if (!tileset || tileset.tiles.length === 0) continue;
+
+      // Build entries for this layer's tiles only
+      const layerEntries = tilesetEntries.filter(e => e.paletteSlot === mLayer.slot);
+      const origTilesetIdx = new Map<number, number>();
+      for (const entry of layerEntries) {
+        origTilesetIdx.set(entry.tileCode, entry.idx);
+      }
+
+      // indexToLocal for this layer: if mega index is in our slot, simple subtraction.
+      // If cross-slot (user drew with a color from another layer's palette range),
+      // find the nearest RGB match in our slot to preserve the intended visual color.
+      const indexToLocal = (megaIdx: number): number => {
+        // Transparent
+        const srcColor = ase.palette[megaIdx];
+        if (!srcColor || srcColor.a === 0) return 15;
+
+        // Fast path: mega index is in our slot
+        if (megaIdx >= indexOffset && megaIdx < indexOffset + 16) {
+          return megaIdx - indexOffset;
+        }
+
+        // Cross-slot: nearest RGB match in our slot's palette range
+        let bestLocal = 0;
+        let bestDist = Infinity;
+        for (let c = 0; c < 15; c++) { // skip pen 15 (transparent)
+          const tgtColor = ase.palette[indexOffset + c];
+          if (!tgtColor || tgtColor.a === 0) continue;
+          const dr = srcColor.r - tgtColor.r;
+          const dg = srcColor.g - tgtColor.g;
+          const db = srcColor.b - tgtColor.b;
+          const dist = dr * dr + dg * dg + db * db;
+          if (dist < bestDist) {
+            bestDist = dist;
+            bestLocal = c;
+          }
+        }
+        return bestLocal;
+      };
+
+      // First pass: detect modified tiles (same logic as single-layer)
+      const codeToTileIdx = new Map<number, number>();
+      if (grid) {
+        const { widthInTiles, heightInTiles, data: tmCells } = tmData;
+        for (let gy = 0; gy < Math.min(gridRows, heightInTiles); gy++) {
+          for (let gx = 0; gx < Math.min(gridCols, widthInTiles); gx++) {
+            const origCode = grid[gy * gridCols + gx];
+            if (origCode === undefined || origCode < 0) continue;
+            // Only process tiles belonging to this layer's palette slot
+            if (!origTilesetIdx.has(origCode)) continue;
+
+            const tmVal = tmCells[gy * widthInTiles + gx]!;
+            const currentTileIdx = tmVal & 0x1FFFFFFF;
+            if (currentTileIdx === 0 || currentTileIdx >= tileset.tiles.length) continue;
+
+            const origIdx = origTilesetIdx.get(origCode);
+            const existing = codeToTileIdx.get(origCode);
+
+            if (existing === undefined) {
+              codeToTileIdx.set(origCode, currentTileIdx);
+            } else if (currentTileIdx !== origIdx && existing === origIdx) {
+              codeToTileIdx.set(origCode, currentTileIdx);
+            }
+          }
+        }
+      }
+
+      console.log(`[ml-import] layer ${layerIdx} slot=${mLayer.slot} CPS1#${mLayer.palette}: tilesetTiles=${tileset.tiles.length} layerEntries=${layerEntries.length} gridMatches=${codeToTileIdx.size} tilemaps=${ase.tilemaps.length} layerDefs=${ase.layerDefs.length}`);
+      // Log first few tiles to check modified detection
+      let modCount = 0;
+      for (const [code, tIdx] of codeToTileIdx) {
+        const orig = origTilesetIdx.get(code);
+        if (tIdx !== orig && modCount < 5) {
+          console.log(`[ml-import]   MODIFIED: code=${code} tileset[${tIdx}] (orig=${orig})`);
+          modCount++;
+        }
+      }
+
+      // Second pass: write tiles to GFX ROM + track cross-slot palette overrides
+      // When a pixel is remapped from another slot, the target palette entry must
+      // be updated to show the source color (otherwise the pixel is invisible).
+      const layerPalOverrides = new Map<number, number>(); // localIdx → megaIdx
+      for (const [origCode, tileIdx] of codeToTileIdx) {
+        const tilePixels = tileset.tiles[tileIdx]!;
+        for (let ty = 0; ty < tileH; ty++) {
+          for (let tx = 0; tx < tileW; tx++) {
+            const megaIdx = tilePixels[ty * tileW + tx]!;
+            const localIdx = indexToLocal(megaIdx);
+            writePixelFn(gfxRom, origCode, tx, ty, localIdx);
+            // Track cross-slot: pixel from another slot remapped into ours
+            if (megaIdx > 0 && (megaIdx < indexOffset || megaIdx >= indexOffset + 16)) {
+              const srcColor = ase.palette[megaIdx];
+              if (srcColor && srcColor.a > 0) {
+                layerPalOverrides.set(localIdx, megaIdx);
+              }
+            }
+          }
+        }
+        tilesWritten++;
+      }
+
+      // Apply cross-slot palette overrides for this layer's CPS1 palette
+      if (layerPalOverrides.size > 0) {
+        const video = this.emulator.getVideo();
+        const bufs2 = this.emulator.getBusBuffers();
+        if (video && bufs2) {
+          const palBase = video.getPaletteBase();
+          for (const [localIdx, megaIdx] of layerPalOverrides) {
+            const ap = ase.palette[megaIdx]!;
+            writeColor(bufs2.vram, palBase, mLayer.palette, localIdx, ap.r, ap.g, ap.b);
+          }
+        }
+      }
+    }
+
+    // Sync palettes (same as single-layer)
+    let colorsChanged = 0;
+    if (ase.palette.length > 0) {
+      const video = this.emulator.getVideo();
+      const bufs2 = this.emulator.getBusBuffers();
+      if (video && bufs2) {
+        const palBase = video.getPaletteBase();
+        for (const palInfo of palettes) {
+          const cps1Pal = readPalette(bufs2.vram, palBase, palInfo.palette);
+          for (let c = 0; c < 16; c++) {
+            const megaIdx = palInfo.indexOffset + c;
+            if (megaIdx >= ase.palette.length) continue;
+            const ap = ase.palette[megaIdx]!;
+            const [or, og, ob] = cps1Pal[c] ?? [0, 0, 0];
+            if (ap.r !== or || ap.g !== og || ap.b !== ob) {
+              writeColor(bufs2.vram, palBase, palInfo.palette, c, ap.r, ap.g, ap.b);
+              colorsChanged++;
+            }
+          }
+        }
+      }
+    }
+
+    this.emulator.rerender();
+    const palMsg = colorsChanged > 0 ? `, ${colorsChanged} palette colors updated` : '';
+    showToast(`Multi-layer import: ${tilesWritten} tiles written to ROM${palMsg}`, true);
+  }
 
   // -- Pose PNG Export / Import --
 
@@ -3360,6 +3703,10 @@ export class SpriteEditorUI {
         if (!gfxRom) { showToast('No GFX ROM loaded', false); return; }
 
         // Route to scroll import
+        if (manifest.type === 'scroll_tilemap_multilayer') {
+          this.importScrollTilemapMultiLayer(ase, manifest, gfxRom);
+          return;
+        }
         if (manifest.type === 'scroll_tilemap') {
           this.importScrollTilemap(ase, manifest, gfxRom);
           return;

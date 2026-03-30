@@ -6,8 +6,22 @@
  */
 
 import type { PhotoLayer, LayerGroup } from './layer-model';
+import type { ScrollSet } from './scroll-capture';
 import { getTileStats } from './tile-allocator';
 import { setTooltip } from '../ui/tooltip';
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+export interface SpriteSetInfo {
+  groupIndex: number;
+  name: string;
+  poseCount: number;
+  preview: ImageData | null;
+  previewW: number;
+  previewH: number;
+}
 
 // ---------------------------------------------------------------------------
 // Callbacks
@@ -26,6 +40,10 @@ export interface LayerPanelCallbacks {
   onSpreadChange(value: number): void;
   onToggleRecSprites?(): void;
   onToggleRecScroll?(layerId: number): void;
+  onOpenSpriteSheet?(groupIdx: number): void;
+  onExportScrollSet?(set: ScrollSet): void;
+  onHighlightScrollSet?(set: ScrollSet): void;
+  onRenderScrollThumb?(set: ScrollSet): HTMLCanvasElement | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -107,6 +125,8 @@ export class LayerPanel {
     activeLayerIdx: number,
     gfxRom?: Uint8Array,
     hwLayerState?: { visible: Map<number, boolean>; grid: Map<number, boolean>; drawOrder: string },
+    scrollSets?: ScrollSet[],
+    spriteSets?: SpriteSetInfo[],
   ): void {
     this.content.innerHTML = '';
 
@@ -131,10 +151,11 @@ export class LayerPanel {
       this.memIndicator.textContent = `GFX ROM: ${stats16.free}/${stats16.total} tiles free (${pct}%)`;
     }
 
+    const firstSpriteGroupIdx = groups.findIndex(g => g.type === 'sprite');
     for (let gi = 0; gi < groups.length; gi++) {
       const group = groups[gi]!;
-      // Sprite groups with captures are shown in the captures panel, not here
-      if (group.type === 'sprite' && group.spriteCapture && group.spriteCapture.poses.length > 0) continue;
+      // Skip extra sprite groups (their captures are shown under the first one)
+      if (group.type === 'sprite' && gi !== firstSpriteGroupIdx && group.layers.length === 0) continue;
       const isActiveGroup = gi === activeGroupIdx;
 
       const groupEl = document.createElement('div');
@@ -246,7 +267,91 @@ export class LayerPanel {
 
       groupEl.appendChild(actions);
 
-      // Drop zone removed — editing happens in Aseprite
+      // Capture items for this group
+      const captureLayerId = group.layerId ?? (group.type === 'sprite' ? 0 : -1);
+      const captureList = document.createElement('div');
+      captureList.className = 'layer-capture-list';
+
+      // Scroll sets for this layer
+      if (scrollSets && captureLayerId > 0) {
+        const layerSets = scrollSets.filter(s => s.layerId === captureLayerId);
+        for (const set of layerSets) {
+          const card = document.createElement('div');
+          card.className = 'edit-capture-card';
+          setTooltip(card, 'Click to highlight tiles in game');
+          card.onclick = () => this.callbacks.onHighlightScrollSet?.(set);
+
+          const thumb = this.callbacks.onRenderScrollThumb?.(set);
+          if (thumb) {
+            thumb.className = 'edit-capture-thumb';
+          }
+          card.appendChild(thumb ?? document.createElement('div'));
+
+          const info = document.createElement('div');
+          info.className = 'edit-capture-info';
+          const nameEl = document.createElement('div');
+          nameEl.className = 'edit-capture-name';
+          nameEl.textContent = `Pal #${set.palette} · ${set.tiles.length} tiles`;
+          info.appendChild(nameEl);
+
+          const exportBtn = document.createElement('button');
+          exportBtn.className = 'ctrl-btn';
+          exportBtn.textContent = 'Export .aseprite';
+          exportBtn.style.fontSize = '10px';
+          exportBtn.style.padding = '2px 4px';
+          exportBtn.style.marginTop = '3px';
+          exportBtn.onclick = (e) => {
+            e.stopPropagation();
+            this.callbacks.onExportScrollSet?.(set);
+          };
+          info.appendChild(exportBtn);
+
+          card.appendChild(info);
+          captureList.appendChild(card);
+        }
+      }
+
+      // Sprite sets: show ALL under the first sprite group only
+      const isFirstSpriteGroup = group.type === 'sprite' && groups.findIndex(g => g.type === 'sprite') === gi;
+      if (spriteSets && isFirstSpriteGroup) {
+        for (const ss of spriteSets) {
+          const card = document.createElement('div');
+          card.className = 'edit-capture-card';
+          setTooltip(card, 'Open sprite sheet viewer');
+          card.onclick = () => this.callbacks.onOpenSpriteSheet?.(ss.groupIndex);
+
+          const thumb = document.createElement('canvas');
+          thumb.className = 'edit-capture-thumb';
+          if (ss.preview) {
+            thumb.width = ss.previewW;
+            thumb.height = ss.previewH;
+            const ctx = thumb.getContext('2d');
+            if (ctx) ctx.putImageData(ss.preview, 0, 0);
+          } else {
+            thumb.width = 16;
+            thumb.height = 16;
+          }
+          card.appendChild(thumb);
+
+          const info = document.createElement('div');
+          info.className = 'edit-capture-info';
+          const nameEl = document.createElement('div');
+          nameEl.className = 'edit-capture-name';
+          nameEl.textContent = ss.name;
+          info.appendChild(nameEl);
+          const countEl = document.createElement('div');
+          countEl.className = 'edit-capture-count';
+          countEl.textContent = `${ss.poseCount} pose${ss.poseCount !== 1 ? 's' : ''}`;
+          info.appendChild(countEl);
+
+          card.appendChild(info);
+          captureList.appendChild(card);
+        }
+      }
+
+      if (captureList.children.length > 0) {
+        groupEl.appendChild(captureList);
+      }
 
       this.content.appendChild(groupEl);
     }

@@ -23,6 +23,13 @@ export interface AsepriteTilesetData {
   tiles: Uint8Array[];
 }
 
+export interface AsepriteTilemapData {
+  layerIndex: number;
+  widthInTiles: number;
+  heightInTiles: number;
+  data: Uint32Array;
+}
+
 export interface AsepriteFile {
   width: number;
   height: number;
@@ -33,8 +40,12 @@ export interface AsepriteFile {
   frames: AsepriteFrameData[];
   /** Tilesets found in the file. */
   tilesets: AsepriteTilesetData[];
-  /** Tilemap data (if any): DWORD per cell, row-major. */
+  /** First tilemap data (backward compat). */
   tilemap: { widthInTiles: number; heightInTiles: number; data: Uint32Array } | null;
+  /** All tilemap cels, one per tilemap layer. */
+  tilemaps: AsepriteTilemapData[];
+  /** Layer definitions in order (index = layer index). */
+  layerDefs: Array<{ name: string; type: number; tilesetIndex?: number | undefined }>;
   /** First user data text found (our JSON manifest). */
   userDataText: string | null;
   manifest: any | null;
@@ -90,6 +101,8 @@ export function readAseprite(buffer: ArrayBuffer): AsepriteFile {
     frames: [],
     tilesets: [],
     tilemap: null,
+    tilemaps: [],
+    layerDefs: [],
     userDataText: null,
     manifest: null,
   };
@@ -189,8 +202,30 @@ export function readAseprite(buffer: ArrayBuffer): AsepriteFile {
             for (let i = 0; i < tmW * tmH; i++) {
               tmData[i] = tmView.getUint32(i * 4, true);
             }
-            result.tilemap = { widthInTiles: tmW, heightInTiles: tmH, data: tmData };
+            const tmEntry = { layerIndex, widthInTiles: tmW, heightInTiles: tmH, data: tmData };
+            if (!result.tilemap) {
+              result.tilemap = { widthInTiles: tmW, heightInTiles: tmH, data: tmData };
+            }
+            result.tilemaps.push(tmEntry);
           }
+          break;
+        }
+
+        case 0x2004: { // Layer
+          const layerFlags = readWord();
+          const layerType = readWord();
+          const childLevel = readWord();
+          skip(2); // default width
+          skip(2); // default height
+          skip(2); // blend mode
+          skip(1); // opacity
+          skip(3); // reserved
+          const layerName = readString();
+          let tilesetIdx: number | undefined;
+          if (layerType === 2) { // tilemap layer — has tileset index
+            tilesetIdx = readDword();
+          }
+          result.layerDefs.push({ name: layerName, type: layerType, tilesetIndex: tilesetIdx });
           break;
         }
 

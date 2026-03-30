@@ -455,6 +455,100 @@ export function writeAsepriteTilemap(opts: AsepriteTilemapOptions): Uint8Array {
   return file;
 }
 
+// ---------------------------------------------------------------------------
+// Multi-layer tilemap writer
+// ---------------------------------------------------------------------------
+
+export interface AsepriteLayerDef {
+  /** Layer name (e.g. "CPS1 #64") */
+  name: string;
+  /** Unique tiles for this layer (indexed pixels in mega-palette range). Tile 0 = empty is implicit. */
+  tiles: Uint8Array[];
+  /** Tilemap grid: row-major, 1-based tile index (0 = empty cell). Can include flip bits. */
+  tilemap: Uint32Array;
+}
+
+export interface AsepriteMultiLayerTilemapOptions {
+  width: number;
+  height: number;
+  tileW: number;
+  tileH: number;
+  palette: AsepritePaletteEntry[];
+  /** Layers ordered bottom-to-top (first layer = backmost). */
+  layers: AsepriteLayerDef[];
+  widthInTiles: number;
+  heightInTiles: number;
+  transparentIndex?: number;
+  manifest?: object;
+}
+
+export function writeAsepriteMultiLayerTilemap(opts: AsepriteMultiLayerTilemapOptions): Uint8Array {
+  const {
+    width, height, tileW, tileH, palette, layers,
+    widthInTiles, heightInTiles,
+    transparentIndex = 0,
+    manifest,
+  } = opts;
+
+  const chunks: Uint8Array[] = [];
+
+  // Color profile + palette (shared across all layers)
+  chunks.push(buildColorProfileChunk());
+  chunks.push(buildPaletteChunk(palette));
+
+  // Tilesets — one per layer (must come before layers in the file)
+  for (let i = 0; i < layers.length; i++) {
+    chunks.push(buildTilesetChunk(i, tileW, tileH, layers[i]!.tiles));
+  }
+
+  // Layers + user data + cels
+  for (let i = 0; i < layers.length; i++) {
+    const layer = layers[i]!;
+    chunks.push(buildTilemapLayerChunk(layer.name, i));
+    // Attach manifest as user data on the first layer only
+    if (i === 0 && manifest) {
+      chunks.push(buildUserDataChunk(JSON.stringify(manifest)));
+    }
+  }
+
+  // Cels (one per layer, same order as layers)
+  for (let i = 0; i < layers.length; i++) {
+    chunks.push(buildTilemapCelChunk(i, widthInTiles, heightInTiles, layers[i]!.tilemap));
+  }
+
+  const frameBuffer = buildFrame(chunks, 0);
+
+  // File header
+  const fileSize = 128 + frameBuffer.length;
+  const header = new BufWriter();
+  header.dword(fileSize);
+  header.word(0xA5E0);
+  header.word(1);                // 1 frame
+  header.word(width);
+  header.word(height);
+  header.word(8);                // indexed
+  header.dword(1);               // flags
+  header.word(0);                // speed
+  header.dword(0);
+  header.dword(0);
+  header.byte(transparentIndex);
+  header.zeros(3);
+  header.word(palette.length);
+  header.byte(1);                // pixel width
+  header.byte(1);                // pixel height
+  header.short(0);               // grid X
+  header.short(0);               // grid Y
+  header.word(tileW);            // grid width
+  header.word(tileH);            // grid height
+  header.zeros(84);
+
+  const headerBuf = header.toUint8Array();
+  const file = new Uint8Array(fileSize);
+  file.set(headerBuf, 0);
+  file.set(frameBuffer, 128);
+  return file;
+}
+
 export function downloadAseprite(data: Uint8Array, filename: string): void {
   const blob = new Blob([data.buffer as ArrayBuffer], { type: 'application/octet-stream' });
   const url = URL.createObjectURL(blob);

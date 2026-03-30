@@ -430,7 +430,10 @@
       }
       .layer-group-collapsed .layer-list,
       .layer-group-collapsed .layer-group-actions,
-      .layer-group-collapsed .layer-drop-zone { display: none; }
+      .layer-group-collapsed .layer-drop-zone,
+      .layer-group-collapsed .layer-capture-list { display: none; }
+
+      .layer-capture-list { display: flex; flex-direction: column; gap: 4px; padding: 4px 0 4px 8px; }
 
       .layer-group-header {
         font: 600 0.7rem var(--font-system); color: var(--color-text-muted);
@@ -1311,6 +1314,9 @@
         border-radius: var(--radius-sm);
       }
       .sprite-sheet-update-pal input { accent-color: var(--color-accent); }
+
+      /* Scroll sets list */
+      .edit-scroll-list { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; overflow-y: auto; }
 
       /* Captured Sprites section (inside right debug panel) */
       .edit-captures-section { margin-top: 18px; }
