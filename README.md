@@ -6,17 +6,24 @@
 
 ![ROMstudio — 3D exploded view of CPS1 layers](docs/demo.gif)
 
+## Studio (E)
+
+Capture → Aseprite → Import. Zero in-app editing.
+
+- **Sprite capture** — REC button records sprite poses during gameplay, auto-deduplication
+- **Scroll capture** — REC per scroll layer, accumulates tiles as you scroll
+- **Export .aseprite** — Indexed 8bpp with embedded ROM manifest for round-trip
+- **Import .aseprite** — Tiles written back to GFX ROM, immediate re-render
+- **Palette snapshot** — RGB values captured at recording time (no fade/flash artifacts)
+- **Layer panel** — HW layer toggles, REC buttons, sprite/scroll set cards, 3D exploded view
+
 ## Video (F2)
 
 Real-time hardware inspector — the game keeps running.
 
 - **Layer toggles** — show/hide each of the 4 hardware layers (Scroll 1/2/3, Sprites)
 - **3D exploded view** — separate layers in Z-space with CSS perspective, drag to rotate
-- **Flash** — highlight a single layer by dimming all others
-- **Palette viewer** — live grid of all 192 color palettes (6 pages × 32), hover for details
-- **Tile inspector** — click any pixel to identify which layer drew it
-- **Sprite list** — active sprites with tile code, position, palette, flip state
-- **Register viewer** — live CPS-A/CPS-B scroll offsets, layer order, enable states
+- **Tile viewer** — click any pixel to identify which layer drew it
 - **Frame-by-frame** — pause, step forward one frame at a time
 
 ## Audio (F3)
@@ -125,7 +132,7 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:5173` and drop a ROM ZIP onto the screen.
+Open `http://localhost:5173/play/` and drop a ROM ZIP onto the screen.
 
 For local ROM loading, place `.zip` files in `public/roms/` — they'll appear in the game selector.
 
@@ -140,11 +147,14 @@ For local ROM loading, place `.zip` files in `public/roms/` — they'll appear i
 | 1 | 1P Start |
 | P | Pause |
 | M | Mute |
+| E | Studio (capture/export) |
 | F1 | Config |
-| F2 | Debug mode |
+| F2 | Video panel |
+| F3 | Audio panel |
+| F4 | Synth (FM Patch Editor) |
 | F5 | Save state |
 | F8 | Load state |
-| Double-click | Fullscreen |
+| F | Fullscreen |
 | Escape | Close dialog |
 
 Gamepads supported via the Web Gamepad API. Configure in **Config > Joypad**.
@@ -212,6 +222,11 @@ src/
   audio/audio-panel.ts   Audio DAW panel (F3) — tracks + samples tabs
   audio/audio-viz.ts     SharedArrayBuffer bridge (Worker ↔ Main thread)
   audio/oki-codec.ts     OKI ADPCM encoder/decoder for sample editing
+  editor/sprite-editor-ui.ts  Tile viewer UI, overlay, palette
+  editor/sheet-viewer.ts      Fullscreen sprite sheet + scroll set viewer
+  editor/aseprite-io.ts       Aseprite import/export (sprites + scroll tilemaps)
+  editor/capture-session.ts   Sprite pose + scroll tile capture manager
+  editor/layer-panel.ts       Left sidebar (HW layers, REC, capture sets)
   emulator.ts            Main loop, frame scheduling
   save-state.ts          Save/load state to localStorage
   dip-switches.ts        DIP switch definitions (from MAME)

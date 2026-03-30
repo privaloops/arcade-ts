@@ -37,7 +37,7 @@ The first arcade game development platform — create, test, and ship physical c
 ### Phase 1 — ROMstudio (now)
 CPS1 emulator + inspection + ROM editing tools in the browser.
 
-**Status:** Working. Sprite editor, sample editor, palette viewer, audio DAW, ROM export.
+**Status:** Working. Aseprite round-trip workflow (capture → export → edit → import), sample editor, audio DAW, ROM export. In-app editing removed — Aseprite is the editor, ROMstudio is the bridge.
 
 **Goal:** Landing page on romstudio.app, capture GIFs, build community awareness.
 

@@ -98,17 +98,15 @@
 - [x] **FM Patch Editor** — Voice read/write + macro UI done, real-time playback deferred (Z80 conflict). Code in `fm-patch-editor.ts` + `cps1-sound-driver.ts`, Synth tab hidden ([#20](https://github.com/privaloops/arcade-ts/issues/20))
 - [ ] **FM real-time preview** — Requires Z80 music sequencer reverse-engineering to avoid TL/volume conflicts
 - [ ] **Mute/Solo ROM export** — Requires reverse-engineering CPS1 music sequence format (note commands per-track)
-- [x] **Sprite Analyzer** — Character grouping (palette + proximity), contour rouge, tracking, capture poses gameplay, galerie
-- [x] **Photo Import (calque)** — Drop photo → calque RGBA, resize bilinéaire, Atkinson dithering (image-q), déplacement/resize, merge
-- [x] **Multi-calques + panneau gauche** — LayerGroup par layer CPS1, panneau gauche avec visibility/quantize/delete/merge
-- [x] **Tile allocator + GFX ROM expansion** — Allocation de tiles privés pour scroll merge, expansion dynamique ROM, reverse bank mapper
-- [x] **Shared tile indicator** — Badge ×N sur les tiles partagées dans le sprite sheet viewer + warning toast à l'édition.
-- [ ] **Safe scroll edit mode** — Mode d'édition scroll qui n'écrit que sur les tiles refCount = 1 (pas de duplication, pas d'expansion ROM). Masque visuel : tiles éditables (refCount = 1) vs protégées (refCount > 1). La photo s'adapte aux zones éditables. ROM garde sa taille originale → 100% compatible MAME.
-- [x] **Recoloration costume (Nuances)** — Hue shift sur groupe de couleurs sélectionnées manuellement (Shift+click). Préserve saturation/luminosité. Fallback auto par hue ±30°. Reset palette.
-- [x] **Sauvegarde des éditions (.romstudio)** — JSON avec diffs sparse par région ROM (GFX, Program, OKI) + poses. Ctrl+S/O, drag & drop. Auto-save IndexedDB 2s debounce. Spec: `docs/spec-romstudio-save.md`
-- [ ] **Undo complet** — Actuellement seuls les pixel edits ont un undo (128 bytes/tile via pushUndo). Manque : `editPaletteColor` (écrit VRAM + program ROM sans undo), merge photo→tiles (écrit N tiles sans pushUndo). Aussi : groupement par stroke (1 drag = 1 undo), persistance de l'undo stack entre sessions.
-- [ ] **Déformation faciale (Face Mesh)** — MediaPipe Face Mesh pour générer des variantes de la photo importée (bouche ouverte, yeux plissés) adaptées à chaque pose du sprite
-- [ ] **Mobile Photo Booth** — QR code + caméra mobile + Vercel KV relay pour capturer une photo et l'envoyer au desktop
+- [x] **Sprite Analyzer** — Character grouping (palette + proximity), red contour overlay, tracking, pose capture, gallery
+- [x] **Tile allocator + GFX ROM expansion** — Private tile allocation for scroll merge, dynamic ROM expansion, reverse bank mapper
+- [x] **Shared tile indicator** — Badge ×N on shared tiles in sprite sheet viewer + warning toast on edit
+- [x] **Palette recoloring (Nuances)** — Hue shift on manually selected color group (Shift+click). Preserves saturation/luminosity. Auto-detect by hue ±30°. Reset palette.
+- [x] **Save/load (.romstudio)** — JSON with sparse ROM diffs (GFX, Program, OKI) + poses. Ctrl+S/O, drag & drop. Auto-save IndexedDB 2s debounce. Spec: `docs/spec-romstudio-save.md`
+- [x] ~~**Photo Import**~~ — Added then removed. Editing now happens exclusively in Aseprite.
+- [x] ~~**Multi-layer panel**~~ — Added then removed. Layer panel now manages HW layers, REC, and capture sets only.
+- [ ] **Full undo stack** — Currently only pixel edits have undo (128 bytes/tile via pushUndo). Missing: `editPaletteColor` (writes VRAM + program ROM without undo). Also: stroke grouping (1 drag = 1 undo), undo stack persistence across sessions.
+- [ ] **Safe scroll edit mode** — Edit mode that writes only to tiles with refCount = 1 (no duplication, no ROM expansion). Visual mask: editable tiles (refCount = 1) vs protected (refCount > 1). ROM keeps original size → 100% MAME compatible.
 
 ### YM2151 Sequencer (browser-first, world's first)
 

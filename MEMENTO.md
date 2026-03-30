@@ -23,7 +23,8 @@ Et l'idée folle : un renderer DOM où **chaque sprite est un `<div>`**, le jeu 
 | J5 | 21 mars 2026 | 1 (squashé) | QSound audio fonctionne ! Bug Z80 préfixe opcode trouvé via MAME debugger |
 | J6 | 25 mars 2026 | ~15 | Sprite Pixel Editor, audio timeline, FM Patch Editor, mic recording, palette ROM patching |
 | J7 | 26 mars 2026 | ~15 | Sprite Analyzer, Sprite Sheet Viewer, photo import scroll layers, UI overhaul |
-| **Total** | **7 jours** | **~130 commits** | **~22 000+ lignes TS+C, ~35K insertions source** |
+| J8 | 30 mars 2026 | ~20 | Le pivot Aseprite — audit, refactoring massif, suppression photo, palette snapshot, tests E2E |
+| **Total** | **8 jours** | **~150 commits** | **~22 000+ lignes TS+C** |
 
 ---
 
@@ -356,6 +357,93 @@ La fin de session est un marathon de polish UI :
 - **Layer panel open by default** — Le panneau de layers est visible au lancement avec bouton de fermeture.
 - **Hamburger menu** — "Video (F2)" toggle les deux colonnes, suppression de l'entree "Sprite Editor" redondante.
 - **F2/F3 shortcuts** — Fonctionnent maintenant sans ROM chargee (les panneaux sont independants de l'etat du jeu).
+
+---
+
+## Jour 8 — Le pivot Aseprite et l'audit (30 mars)
+
+### L'audit qui change tout
+
+La session commence par une demande inhabituelle : un audit complet du codebase. Structure, best practices, decoupe, testabilite. Trois agents d'exploration paralleles scannent ~31 000 lignes de source.
+
+Le diagnostic est sans appel :
+- **`sprite-editor-ui.ts` : 4 629 lignes** — le fichier le plus gros du projet. Une seule classe avec ~10 responsabilites distinctes, 12 methodes de plus de 100 lignes, zero test unitaire.
+- **`frame-state.ts`** duplique byte-for-byte 5 fonctions de `cps1-video.ts`
+- **`CHAR_SIZE_16 = 128`** defini 5 fois dans 5 fichiers differents
+- Constantes de timing (`PIXEL_CLOCK`, `Z80_CLOCK`) dupliquees entre `emulator.ts` et `audio-worker.ts`
+- Le type `manifest: any` se propage dans toute la chaine Aseprite
+
+### Le refactoring chirurgical
+
+L'approche : 5 extractions atomiques, chacune validee par build + 903 tests unitaires avant la suivante.
+
+1. **`aseprite-io.ts`** (541 LOC) — Import/export Aseprite. Le plus auto-contenu : zero state interne, pur I/O fichier. Extrait en premier pour valider la methode.
+
+2. **`capture-session.ts`** (222 LOC) — Logique de capture sprites + scroll. Une classe `CaptureManager` qui encapsule l'etat des sessions actives. Decouverte de dead code au passage : `toggleScrollCapture` etait declare mais jamais appele.
+
+3. **Dead code** (-320 LOC) — `importTilePng`, `processImportTilePng`, `exportCurrentTile`, `importImageOnCurrentTile` — quatre methodes d'import PNG tile-par-tile qui n'etaient appelees nulle part. Remplacees par le workflow Aseprite.
+
+4. **`sheet-viewer.ts`** (1 115 LOC) — Le plus gros morceau. Le sprite sheet viewer et le scroll set viewer partageaient beaucoup de code (lifecycle enter/exit, rendu de tiles, tile strip). Fusionnes dans un seul module `SheetViewer` avec une interface host. Le code de rendu de tile factorise dans `renderTileToImageData`.
+
+5. **`photo-layer-ops.ts`** (340 LOC) — Operations pures photo layer (quantize, merge, magic wand, composite). Extrait en fonctions standalone.
+
+**Resultat intermediaire** : 4 629 → 2 355 LOC. Le fichier est passable.
+
+### Le pivot : "Work in Aseprite, play in ROMstudio"
+
+Puis vient la revelation. L'utilisateur demande : "la drop zone photo, le capture panel, c'est elimine depuis longtemps, regarde l'historique". Le systeme photo layer — import, quantize Atkinson, merge sur tiles, magic wand, drag/resize layers — est du code mort. Le workflow a pivote vers Aseprite sans que la codebase suive.
+
+**Suppression massive** :
+- `photo-layer-ops.ts` (340 LOC) — supprime entierement
+- `photo-import.ts` (854 LOC) — supprime entierement
+- `magic-wand.test.ts` (245 LOC) — supprime entierement
+- `PhotoLayer` type, `createLayer`, champ `layers` sur `LayerGroup` — supprimes
+- Drag/resize layers sur l'overlay, head selector, quantize/merge buttons dans le sheet viewer — tout supprime
+- Callbacks layer panel (`onDropPhoto`, `onQuantizeLayer`, `onMergeGroup`, etc.) — supprimes
+
+**sprite-editor-ui.ts** : 2 355 → **1 454 LOC**. Reduction totale depuis le debut de la session : **-69%**.
+
+Le pivot est materialise dans le code : ROMstudio est un pont entre la ROM et Aseprite. On capture, on exporte, on edite dans Aseprite, on reimporte. Zero edition in-app.
+
+### La palette fantome
+
+Bug rapporte en live : les personnages de l'ecran de selection (Punisher) apparaissent avec des couleurs fausses — violacees, fadees. Le personnage est correct dans le jeu mais les cards et le viewer montrent une palette degradee.
+
+**Cause racine** : la palette RGB est lue depuis la VRAM au moment du rendu, pas au moment de la capture. Sur CPS1, les palettes VRAM sont dynamiques — le jeu les reecrit a chaque frame pour les effets de fade, flash, selection. Si le jeu est pause pendant un fade, ou si l'ecran a change entre la capture et le viewer, les couleurs sont fausses.
+
+**La discussion sur "la bonne palette"** est revelante. L'utilisateur pose la question : "au moment de la capture tu n'es pas plus sur de la palette que quand on prend celle de la VRAM, il n'y a pas de bonne palette". C'est vrai — un snapshot isole n'est pas plus fiable qu'un autre. Mais l'utilisateur tranche pragmatiquement : "il suffit de REC au bon moment et basta".
+
+**Fix scroll** : `captureScrollFrame` snapshote les 16 couleurs RGB lors de la premiere rencontre de chaque palette index. Le `ScrollSet` embarque le `capturedColors` utilise par le viewer et l'export Aseprite, avec fallback VRAM pour les anciennes captures.
+
+**Fix sprite** : meme approche — `CapturedPose.capturedColors` stocke la palette au moment de `capturePose`. Le sheet viewer, le tile grid, et l'export Aseprite utilisent cette palette snapshotee.
+
+### Les tests E2E : 226 echecs
+
+En voulant valider les changements, decouverte que les tests E2E Playwright sont entierement casses. Pas a cause du refactoring — ils l'etaient deja. La cause racine : `page.goto('/')` pointait vers la **landing page** (`index.html`) au lieu de l'app (`/play/index.html`). Les tests referençaient aussi des elements DOM supprimes depuis longtemps (hamburger menu, tool buttons, undo/redo).
+
+**Reecriture complete** : 16 fichiers de specs, ~115 tests. Chaque selecteur verifie contre le DOM actuel. Ajout d'une spec 16 dediee au workflow REC → cards → sheet → close (17 tests).
+
+Un bug subtil dans le helper `loadTestRom` : `waitForSelector('#drop-zone.hidden')` attendait un element **visible** — mais l'element avec `.hidden` a `display: none`. Fix : `state: 'attached'` au lieu de `state: 'visible'`.
+
+### L'auto-save : le prompt qui ment
+
+Bug UX : "Modifications non sauvegardees trouvees" s'affiche alors qu'il n'y a aucune modification. L'auto-save cree une entree IndexedDB vide au chargement du jeu (un `onModified` spurious). Le prompt s'affiche des qu'une entree existe, sans verifier le contenu.
+
+**Fix** : parser le JSON de l'auto-save avant d'afficher le prompt. Compter les diffs (graphics, program, OKI) et les poses. Si tout est vide, ne pas afficher. Sinon, montrer un resume : "3 tiles · 1 palette · 2 poses". Le wording passe de "Modifications non sauvegardees trouvees" a "Sauvegarde automatique trouvee".
+
+Aussi decouvert que l'import Aseprite ne triggait pas `onModified` → pas d'auto-save apres import. Corrige.
+
+### Le 3D qui ne tourne plus
+
+Bug mineur mais visible : le drag rotation du mode 3D explode ne fonctionne pas quand le jeu est en pause. `onDragMove` modifiait `rotateX`/`rotateY` mais ne rappelait pas `updateExplodedTransforms()`. Quand l'emulateur tourne, le render loop applique les transforms a chaque frame. En pause, rien ne se passe.
+
+**Fix** : une ligne — `this.updateExplodedTransforms()` a la fin de `onDragMove`.
+
+### Lecon du jour
+
+> La session la plus productive n'est pas celle ou on ecrit le plus de code — c'est celle ou on en supprime le plus. 4 629 → 1 454 lignes dans le fichier principal. ~3 200 lignes de dead code eliminees (photo layer, PNG import, magic wand). Et le produit est meilleur : un workflow clair (capture → Aseprite → import), des previews avec les bonnes couleurs, des tests qui passent.
+
+> Le pivot "editing happens in Aseprite" n'etait pas un choix architectural delibere. C'est un constat. Le code photo import etait mort depuis des jours, personne ne s'en servait. L'audit l'a revele. La suppression l'a officialise. Parfois la meilleure feature c'est celle qu'on enleve.
 - **Panel titles** — "Video" renomme "Tile Editor" pour le panneau droit, styles harmonises.
 - **HW layer checkboxes** remplaces par des icones oeil, coherents avec les toggles de sous-layers.
 
