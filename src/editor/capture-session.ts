@@ -87,7 +87,7 @@ export class CaptureManager {
   }
 
   /** Stop capture for a specific palette and save the group. */
-  stopCaptureForPalette(palette: number): void {
+  private stopCaptureForPalette(palette: number): void {
     const session = this.activeSessions.get(palette);
     if (!session) return;
     this.activeSessions.delete(palette);
@@ -96,7 +96,6 @@ export class CaptureManager {
       this.captureCounter++;
       const name = `Sprite #${this.captureCounter}`;
       this.layerGroups.push(createSpriteGroup(name, session.poses, palette));
-      this.onRefresh();
       showToast(`Captured ${session.poses.length} pose${session.poses.length !== 1 ? 's' : ''} → ${name}`, true);
     } else {
       showToast('No poses captured', false);
@@ -197,7 +196,6 @@ export class CaptureManager {
       this.scrollSessions.delete(layerId);
       const sets = buildScrollSets(session);
       this.scrollSets.push(...sets);
-      this.onRefresh();
       this.onRefresh();
       showToast(`Captured ${session.tileMap.size} tiles → ${sets.length} scroll set(s)`, true);
     } else {

@@ -743,60 +743,6 @@ export class SheetViewer {
     container.appendChild(main);
   }
 
-  private renderSheetGrid(): void {
-    const container = this.sheetContainer;
-    if (!container) return;
-    container.innerHTML = '';
-
-    const poses = this.host.activePoses;
-    const main = el('div', 'sprite-sheet-main');
-
-    const header = el('div', 'sprite-sheet-header');
-    const title = document.createElement('h3');
-    title.textContent = `${poses.length} captured pose${poses.length !== 1 ? 's' : ''}`;
-    header.appendChild(title);
-
-    const backBtn = el('button', 'sprite-sheet-back') as HTMLButtonElement;
-    backBtn.textContent = 'Close';
-    setTooltip(backBtn, 'Back to game — Escape');
-    backBtn.onclick = () => this.exitSpriteSheetMode();
-    header.appendChild(backBtn);
-    main.appendChild(header);
-
-    const grid = el('div', 'sprite-sheet-grid');
-
-    for (let i = 0; i < poses.length; i++) {
-      const pose = poses[i]!;
-      const cell = el('div', 'sprite-sheet-cell') as HTMLDivElement;
-      setTooltip(cell, 'Click to zoom into this pose');
-      if (i === this.sheetSelectedPose) cell.classList.add('selected');
-
-      cell.onclick = () => {
-        this.sheetSelectedPose = i;
-        this.selectPoseInSheet(i);
-      };
-
-      const cvs = document.createElement('canvas');
-      cvs.width = pose.w;
-      cvs.height = pose.h;
-      cvs.getContext('2d')!.putImageData(pose.preview, 0, 0);
-      cell.appendChild(cvs);
-
-      const idxBadge = el('div', 'pose-index');
-      idxBadge.textContent = `${i}`;
-      cell.appendChild(idxBadge);
-
-      const tileBadge = el('div', 'pose-tiles');
-      tileBadge.textContent = `${pose.tiles.length}t`;
-      cell.appendChild(tileBadge);
-
-      grid.appendChild(cell);
-    }
-
-    main.appendChild(grid);
-    container.appendChild(main);
-  }
-
   refreshAllPosePreviews(): void {
     const { host } = this;
     const ag = host.activeGroup;
@@ -1035,8 +981,8 @@ export class SheetViewer {
 
     const overlay = document.createElement('canvas');
     const gameRect = host.gameCanvas.getBoundingClientRect();
-    const scaleX = gameRect.width / 384;
-    const scaleY = gameRect.height / 224;
+    const scaleX = gameRect.width / SCREEN_WIDTH;
+    const scaleY = gameRect.height / SCREEN_HEIGHT;
     overlay.width = gameRect.width;
     overlay.height = gameRect.height;
     overlay.style.position = 'absolute';
@@ -1063,7 +1009,7 @@ export class SheetViewer {
       const screenX = ((absX - scrollX) % virtualW + virtualW) % virtualW;
       const screenY = ((absY - scrollY) % virtualH + virtualH) % virtualH;
 
-      if (screenX >= 384 || screenY >= 224) continue;
+      if (screenX >= SCREEN_WIDTH || screenY >= SCREEN_HEIGHT) continue;
       if (screenX + tileW <= 0 || screenY + tileH <= 0) continue;
 
       ctx.fillRect(screenX * scaleX, screenY * scaleY, tileW * scaleX, tileH * scaleY);

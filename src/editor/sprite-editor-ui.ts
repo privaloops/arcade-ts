@@ -19,8 +19,7 @@ import { findTileReferences } from './tile-refs';
 import type { Emulator } from '../emulator';
 import { pencilCursor, fillCursor, eyedropperCursor, eraserCursor, wandCursor } from './tool-cursors';
 import { showToast } from '../ui/toast';
-import type { AsepriteFile } from './aseprite-reader';
-import { exportSpriteAseprite, exportScrollAseprite, importAsepriteFile, importScrollTilemap as importScrollTilemapIO } from './aseprite-io';
+import { exportScrollAseprite, importAsepriteFile } from './aseprite-io';
 import { magicWandFill, compositeLayerOnto, quantizeSpritePhoto, mergeSpritePhoto, mergeAllLayers } from './photo-layer-ops';
 import { buildScrollSets, type ScrollSet } from './scroll-capture';
 import { CaptureManager } from './capture-session';
@@ -63,7 +62,6 @@ export class SpriteEditorUI {
   private capturePanel: HTMLDivElement | null = null;
   private captureGallery: HTMLDivElement | null = null;
   private captureStatus: HTMLDivElement | null = null;
-  private selectedPoseIndex = 0;
 
   // Capture manager (sprite + scroll capture sessions)
   private capture!: CaptureManager;
@@ -1786,7 +1784,6 @@ export class SpriteEditorUI {
     }
   }
 
-  // Sheet viewer methods moved to sheet-viewer.ts
 
   // -- Capture delegations --
 
@@ -1798,7 +1795,7 @@ export class SpriteEditorUI {
     this.capture.toggleScrollCaptureFromPanel(layerId);
   }
 
-  captureScrollTick(): void {
+  private captureScrollTick(): void {
     this.capture.captureScrollTick();
   }
 
@@ -1814,27 +1811,11 @@ export class SpriteEditorUI {
     this.capture.captureFrame();
   }
 
-  // -- SheetViewerHost methods below (quantizeSpritePhotoLayer, mergeSpritePhotoLayer) --
+
 
   /** Export a single scroll set as Aseprite tilemap (16 colors, 1 CPS1 palette). */
   private exportScrollSingle(set: ScrollSet): void {
     exportScrollAseprite(this.emulator, this.editor, set);
-  }
-
-  // -- Scroll Tilemap Import --
-
-  private importScrollTilemap(ase: AsepriteFile, manifest: any, gfxRom: Uint8Array): void {
-    importScrollTilemapIO(this.emulator, ase, manifest, gfxRom);
-  }
-
-  // importScrollImage removed — tilemap mode only
-  // importScrollTilemapMultiLayer removed — per-palette export only
-
-
-  /** Export all captured poses as a single .aseprite file with ROM manifest. */
-  private exportAseprite(): void {
-    const palette = this.activeGroup?.spriteCapture?.palette ?? 0;
-    exportSpriteAseprite(this.emulator, this.editor, this.activePoses, palette);
   }
 
   /** Import a .aseprite file: read manifest, write tiles back to GFX ROM, create sprite set. */
@@ -1842,7 +1823,6 @@ export class SpriteEditorUI {
     importAsepriteFile(this.emulator, this.editor, this.layerGroups, () => this.refreshLayerPanel());
   }
 
-  // importTilePng, processImportTilePng, exportCurrentTile removed — editing happens in Aseprite
 
   /** Quantize the active sprite photo layer. Optionally update palette from image colors. */
   quantizeSpritePhotoLayer(updatePalette: boolean): void {
@@ -1906,132 +1886,6 @@ export class SpriteEditorUI {
     showToast('Photo added — drag to position, then Quantize', true);
   }
 
-  /** Show the first captured pose in a large canvas with selection + pixel editing. */
-  /** Show/rebuild the layer editor canvas. Works for both sprite and scroll groups. */
-  private showHeadSelector(): void {
-    if (!this.headSection) return;
-    const group = this.activeGroup;
-    if (!group) return;
-
-    // Determine canvas dimensions
-    let canvasW: number;
-    let canvasH: number;
-    if (group.type === 'sprite') {
-      const pose = this.activePose;
-      if (!pose) return;
-      canvasW = pose.w;
-      canvasH = pose.h;
-    } else {
-      canvasW = SCREEN_WIDTH;
-      canvasH = SCREEN_HEIGHT;
-    }
-
-    this.headSection.style.display = '';
-    this.headSection.innerHTML = '';
-
-    this.headScale = Math.max(1, Math.floor(400 / Math.max(canvasW, canvasH)));
-    const scale = this.headScale;
-
-    const label = el('div', 'edit-section-label');
-    label.textContent = 'Select head area (click + drag), then drop a photo. After: use tools to edit pixels.';
-    this.headSection.appendChild(label);
-
-    const cvs = document.createElement('canvas');
-    cvs.width = canvasW * scale;
-    cvs.height = canvasH * scale;
-    cvs.className = 'edit-head-canvas edit-head-selectable';
-    this.headCanvas = cvs;
-    this.headCtx = cvs.getContext('2d')!;
-    this.headCtx.imageSmoothingEnabled = false;
-
-    this.drawHeadSelector();
-
-    let painting = false;
-
-    cvs.addEventListener('mousedown', (e) => {
-      const rect = cvs.getBoundingClientRect();
-      const px = Math.floor((e.clientX - rect.left) / scale);
-      const py = Math.floor((e.clientY - rect.top) / scale);
-
-      if (this.activeLayer) {
-        if (this.editor.tool === 'fill') {
-          this.magicWand(px, py);
-        } else {
-          painting = true;
-          this.headPixelAction(px, py);
-        }
-      }
-    });
-
-    cvs.addEventListener('mousemove', (e) => {
-      const rect = cvs.getBoundingClientRect();
-      const px = Math.floor((e.clientX - rect.left) / scale);
-      const py = Math.floor((e.clientY - rect.top) / scale);
-
-      if (painting) {
-        this.headPixelAction(px, py);
-      }
-    });
-
-    const stopAction = () => { painting = false; };
-    cvs.addEventListener('mouseup', stopAction);
-    cvs.addEventListener('mouseleave', stopAction);
-
-    this.headSection.appendChild(cvs);
-
-    // Merge button (hidden until layer exists)
-    const mergeBtn = el('button', 'ctrl-btn edit-merge-btn') as HTMLButtonElement;
-    const quantizeBtn = el('button', 'ctrl-btn edit-quantize-btn') as HTMLButtonElement;
-    quantizeBtn.textContent = 'Quantize';
-    setTooltip(quantizeBtn, 'Convert photo to palette colors (Atkinson dithering)');
-    quantizeBtn.style.display = 'none';
-    quantizeBtn.onclick = () => this.quantizeLayer();
-    this.headSection.appendChild(quantizeBtn);
-
-    mergeBtn.textContent = 'Merge Layer';
-    setTooltip(mergeBtn, 'Write pixels into GFX ROM — irreversible');
-    mergeBtn.style.display = 'none';
-    mergeBtn.onclick = () => { this.mergeAll(); mergeBtn.style.display = 'none'; quantizeBtn.style.display = 'none'; };
-    this.headSection.appendChild(mergeBtn);
-
-    this.quantizeBtn = quantizeBtn;
-
-    // Show merge button when layer is created
-    const origImport = this.importPhoto.bind(this);
-    const origSetup = this.setupDropZone.bind(this);
-    // We'll toggle visibility in drawHeadSelector instead
-
-    const info = el('div', 'edit-head-info');
-    info.textContent = 'Draw rectangle → drop photo → B:pencil X:eraser G:wand I:picker Shift+arrows:move';
-    this.headSection.appendChild(info);
-
-    // Keyboard handler for layer movement
-    const layerKeyHandler = (e: KeyboardEvent) => {
-      if (!this.activeLayer) return;
-      // Shift+arrows: move layer
-      if (e.shiftKey && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
-        e.preventDefault();
-        e.stopPropagation();
-        if (e.key === 'ArrowUp') this.activeLayer.offsetY--;
-        else if (e.key === 'ArrowDown') this.activeLayer.offsetY++;
-        else if (e.key === 'ArrowLeft') this.activeLayer.offsetX--;
-        else if (e.key === 'ArrowRight') this.activeLayer.offsetX++;
-        this.drawHeadSelector();
-      }
-      // +/- : resize layer
-      if (e.key === '+' || e.key === '=') {
-        e.preventDefault();
-        this.resizeLayer(1);
-      } else if (e.key === '-') {
-        e.preventDefault();
-        this.resizeLayer(-1);
-      }
-    };
-    document.addEventListener('keydown', layerKeyHandler, true);
-
-    // Store merge btn ref for visibility toggle
-    this.mergeBtn = mergeBtn;
-  }
 
 
   /**
@@ -2166,7 +2020,6 @@ export class SpriteEditorUI {
     }
   }
 
-  // compositeLayerOnto moved to photo-layer-ops.ts
 
   /** Re-read tiles from GFX ROM to update the pose preview after pixel edits. */
   private refreshHeadPreview(): void {
