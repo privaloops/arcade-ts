@@ -95,6 +95,7 @@ export class SpriteEditorUI {
   private scrollHighlightOverlay: HTMLCanvasElement | null = null;
   private highlightedScrollSet: ScrollSet | null = null;
   private scrollTickCounter = 0;
+  private activeScrollSet: ScrollSet | null = null;
 
   // Head editor
   private headSection: HTMLDivElement | null = null;
@@ -232,19 +233,7 @@ export class SpriteEditorUI {
 
     // Tile neighbors removed — editing happens in Aseprite now
 
-    // Import button (for .aseprite round-trip)
-    const importRow = el('div') as HTMLDivElement;
-    importRow.style.display = 'flex';
-    importRow.style.justifyContent = 'flex-end';
-    importRow.style.padding = '4px 0';
-    const importAseBtn = el('button', 'ctrl-btn') as HTMLButtonElement;
-    importAseBtn.textContent = 'Import .aseprite';
-    importAseBtn.style.fontSize = '10px';
-    importAseBtn.style.padding = '2px 6px';
-    setTooltip(importAseBtn, 'Import an edited .aseprite file back into the ROM');
-    importAseBtn.onclick = () => this.importAseprite();
-    importRow.appendChild(importAseBtn);
-    container.appendChild(importRow);
+    // Import button moved to layer panel (left sidebar)
 
     // Status bar (contextual hint at bottom)
     container.appendChild(createStatusBar());
@@ -472,10 +461,13 @@ export class SpriteEditorUI {
         this.exportScrollSingle(set);
       },
       onHighlightScrollSet: (set) => {
-        this.toggleScrollHighlight(set);
+        this.enterScrollSetMode(set);
       },
       onRenderScrollThumb: (set) => {
         return this.renderScrollSetThumbnail(set);
+      },
+      onImportAseprite: () => {
+        this.importAseprite();
       },
     });
   }
@@ -2101,6 +2093,174 @@ export class SpriteEditorUI {
     this.updateStatus();
   }
 
+  // ---------------------------------------------------------------------------
+  // Scroll Set Viewer (reuses sprite sheet viewer container)
+  // ---------------------------------------------------------------------------
+
+  private enterScrollSetMode(set: ScrollSet): void {
+    // Exit existing modes
+    if (this.spriteSheetMode) this.exitSpriteSheetMode();
+    if (this.sheetContainer) {
+      this.sheetContainer.remove();
+      this.sheetContainer = null;
+    }
+
+    this.activeScrollSet = set;
+    this.spriteSheetMode = true; // reuse the same flag for Escape handling
+
+    // Pause
+    this.wasPausedBeforeSheet = this.emulator.isPaused();
+    if (!this.wasPausedBeforeSheet) {
+      this.emulator.pause();
+      this.emulator.suspendAudio();
+    }
+
+    // Hide game
+    this.gameCanvas.style.display = 'none';
+    const emuBar = document.getElementById('emu-bar');
+    if (emuBar) emuBar.style.display = 'none';
+    if (this.overlay) this.overlay.style.display = 'none';
+
+    const container = document.createElement('div');
+    container.className = 'sprite-sheet-viewer';
+    this.sheetContainer = container;
+    document.body.appendChild(container);
+
+    this.renderScrollSetView();
+  }
+
+  private renderScrollSetView(): void {
+    const container = this.sheetContainer;
+    const set = this.activeScrollSet;
+    if (!container || !set) return;
+    container.innerHTML = '';
+
+    const gfxRom = this.editor.getGfxRom();
+    if (!gfxRom) return;
+    const video = this.emulator.getVideo();
+    if (!video) return;
+    const bufs = this.emulator.getBusBuffers();
+
+    const { tileW, tileH, palette: palIdx, tiles, layerId } = set;
+    const colors = readPalette(bufs.vram, video.getPaletteBase(), palIdx);
+
+    // No sidebar for scroll sets
+    const main = el('div', 'sprite-sheet-main');
+
+    // Header
+    const header = el('div', 'sprite-sheet-header');
+    const title = document.createElement('h3');
+    title.textContent = `${scrollLayerName(layerId)} · Palette #${palIdx} · ${tiles.length} tiles`;
+    header.appendChild(title);
+
+    const exportBtn = el('button', 'sprite-sheet-back') as HTMLButtonElement;
+    exportBtn.textContent = 'Export .aseprite';
+    setTooltip(exportBtn, 'Export as Aseprite tilemap (16 colors)');
+    exportBtn.onclick = () => this.exportScrollSingle(set);
+    header.appendChild(exportBtn);
+
+    const backBtn = el('button', 'sprite-sheet-back') as HTMLButtonElement;
+    backBtn.textContent = 'Close';
+    setTooltip(backBtn, 'Back to game — Escape');
+    backBtn.onclick = () => this.exitSpriteSheetMode();
+    header.appendChild(backBtn);
+    main.appendChild(header);
+
+    // Scroll reconstitution (assembled tiles on grid)
+    const zoomSection = el('div', 'sprite-sheet-zoom');
+
+    // Bounding box
+    let minCol = Infinity, minRow = Infinity, maxCol = -Infinity, maxRow = -Infinity;
+    for (const tile of tiles) {
+      if (tile.tileCol < minCol) minCol = tile.tileCol;
+      if (tile.tileRow < minRow) minRow = tile.tileRow;
+      if (tile.tileCol > maxCol) maxCol = tile.tileCol;
+      if (tile.tileRow > maxRow) maxRow = tile.tileRow;
+    }
+    const gridCols = maxCol - minCol + 1;
+    const gridRows = maxRow - minRow + 1;
+    const w = gridCols * tileW;
+    const h = gridRows * tileH;
+
+    const cssScale = Math.max(2, Math.min(4, Math.floor(800 / Math.max(w, h))));
+    const cvs = document.createElement('canvas');
+    cvs.width = w;
+    cvs.height = h;
+    cvs.style.width = `${w * cssScale}px`;
+    cvs.style.height = `${h * cssScale}px`;
+    cvs.style.imageRendering = 'pixelated';
+    const ctx = cvs.getContext('2d')!;
+
+    // Render all tiles
+    const imgData = ctx.createImageData(w, h);
+    const data = imgData.data;
+    for (const tile of tiles) {
+      const gx = tile.tileCol - minCol;
+      const gy = tile.tileRow - minRow;
+      const pixels = readTileFn(gfxRom, tile.tileCode, tile.tileW, tile.tileH, tile.charSize);
+      for (let ty = 0; ty < tileH; ty++) {
+        for (let tx = 0; tx < tileW; tx++) {
+          let lx = tx, ly = ty;
+          if (tile.flipX) lx = tileW - 1 - tx;
+          if (tile.flipY) ly = tileH - 1 - ty;
+          const colorIdx = pixels[ly * tileW + lx]!;
+          if (colorIdx === 15) continue;
+          const [r, g, b] = colors[colorIdx] ?? [0, 0, 0];
+          const px = gx * tileW + tx;
+          const py = gy * tileH + ty;
+          const off = (py * w + px) * 4;
+          data[off] = r;
+          data[off + 1] = g;
+          data[off + 2] = b;
+          data[off + 3] = 255;
+        }
+      }
+    }
+    ctx.putImageData(imgData, 0, 0);
+    zoomSection.appendChild(cvs);
+
+    // Tile strip below
+    const tilesLabel = el('div', 'edit-section-label');
+    tilesLabel.textContent = `Tiles (${tiles.length})`;
+    tilesLabel.style.marginTop = '12px';
+    zoomSection.appendChild(tilesLabel);
+
+    const tilesGrid = el('div', 'sprite-sheet-tiles');
+    const seenCodes = new Set<number>();
+    for (const tile of tiles) {
+      if (seenCodes.has(tile.tileCode)) continue;
+      seenCodes.add(tile.tileCode);
+
+      const tileCanvas = document.createElement('canvas');
+      tileCanvas.width = tileW;
+      tileCanvas.height = tileH;
+      tileCanvas.style.width = `${tileW * 2}px`;
+      tileCanvas.style.height = `${tileH * 2}px`;
+      tileCanvas.style.imageRendering = 'pixelated';
+      tileCanvas.style.border = '1px solid #333';
+      tileCanvas.style.cursor = 'pointer';
+      const tCtx = tileCanvas.getContext('2d')!;
+      const tImg = tCtx.createImageData(tileW, tileH);
+      const tData = tImg.data;
+      const pixels = readTileFn(gfxRom, tile.tileCode, tile.tileW, tile.tileH, tile.charSize);
+      for (let i = 0; i < tileW * tileH; i++) {
+        const colorIdx = pixels[i]!;
+        if (colorIdx === 15) continue;
+        const [r, g, b] = colors[colorIdx] ?? [0, 0, 0];
+        tData[i * 4] = r;
+        tData[i * 4 + 1] = g;
+        tData[i * 4 + 2] = b;
+        tData[i * 4 + 3] = 255;
+      }
+      tCtx.putImageData(tImg, 0, 0);
+      tilesGrid.appendChild(tileCanvas);
+    }
+    zoomSection.appendChild(tilesGrid);
+
+    main.appendChild(zoomSection);
+    container.appendChild(main);
+  }
+
   /** Render the pose grid view inside the sheet container. */
   private renderSheetGrid(): void {
     const container = this.sheetContainer;
@@ -2707,6 +2867,7 @@ export class SpriteEditorUI {
     }
 
     this.spriteSheetMode = false;
+    this.activeScrollSet = null;
     this.sheetZoomed = false;
     this.sheetSelectedTile = -1;
     this.sheetZoomCanvas = null;
@@ -3259,7 +3420,7 @@ export class SpriteEditorUI {
     }
 
     const tilesetToRom = new Map<number, { tileCode: number; charSize: number }>();
-    const charSize = tileW * tileH <= 64 ? 64 : tileW * tileH <= 128 ? 128 : 512;
+    const charSize = (tileW * tileH) / 2; // 4bpp: 8x8→32, 16x16→128, 32x32→512
     for (const entry of tilesetEntries) {
       tilesetToRom.set(entry.idx, { tileCode: entry.tileCode, charSize });
     }
@@ -3385,7 +3546,7 @@ export class SpriteEditorUI {
       showToast('No tileset mapping in manifest', false);
       return;
     }
-    const charSize = tileW * tileH <= 64 ? 64 : tileW * tileH <= 128 ? 128 : 512;
+    const charSize = (tileW * tileH) / 2; // 4bpp: 8x8→32, 16x16→128, 32x32→512
 
     // We need the grid and grid dimensions for modified-tile detection
     const grid = manifest.grid as number[];

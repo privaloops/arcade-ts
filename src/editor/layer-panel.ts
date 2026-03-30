@@ -44,6 +44,7 @@ export interface LayerPanelCallbacks {
   onExportScrollSet?(set: ScrollSet): void;
   onHighlightScrollSet?(set: ScrollSet): void;
   onRenderScrollThumb?(set: ScrollSet): HTMLCanvasElement | null;
+  onImportAseprite?(): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -129,6 +130,18 @@ export class LayerPanel {
     spriteSets?: SpriteSetInfo[],
   ): void {
     this.content.innerHTML = '';
+
+    // Import .aseprite button at the top
+    const importBtn = document.createElement('button');
+    importBtn.className = 'ctrl-btn';
+    importBtn.textContent = 'Import .aseprite';
+    importBtn.style.width = '100%';
+    importBtn.style.marginBottom = '8px';
+    importBtn.style.padding = '4px';
+    importBtn.style.fontSize = '11px';
+    setTooltip(importBtn, 'Import an edited .aseprite file back into the ROM');
+    importBtn.onclick = () => this.callbacks.onImportAseprite?.();
+    this.content.appendChild(importBtn);
 
     // Inject CSS for REC blinking dot (once)
     if (!document.getElementById('rec-dot-style')) {
@@ -293,18 +306,6 @@ export class LayerPanel {
           nameEl.className = 'edit-capture-name';
           nameEl.textContent = `Pal #${set.palette} · ${set.tiles.length} tiles`;
           info.appendChild(nameEl);
-
-          const exportBtn = document.createElement('button');
-          exportBtn.className = 'ctrl-btn';
-          exportBtn.textContent = 'Export .aseprite';
-          exportBtn.style.fontSize = '10px';
-          exportBtn.style.padding = '2px 4px';
-          exportBtn.style.marginTop = '3px';
-          exportBtn.onclick = (e) => {
-            e.stopPropagation();
-            this.callbacks.onExportScrollSet?.(set);
-          };
-          info.appendChild(exportBtn);
 
           card.appendChild(info);
           captureList.appendChild(card);
