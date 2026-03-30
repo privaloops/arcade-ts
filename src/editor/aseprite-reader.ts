@@ -48,7 +48,7 @@ export interface AsepriteFile {
   layerDefs: Array<{ name: string; type: number; tilesetIndex?: number | undefined }>;
   /** First user data text found (our JSON manifest). */
   userDataText: string | null;
-  manifest: any | null;
+  manifest: Record<string, unknown> | null;
 }
 
 export interface AsepriteFrameData {

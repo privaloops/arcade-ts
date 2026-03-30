@@ -21,6 +21,56 @@ import { showToast } from '../ui/toast';
 import { CHAR_SIZE_16 } from '../constants';
 
 // ---------------------------------------------------------------------------
+// Manifest types (embedded in .aseprite User Data as JSON)
+// ---------------------------------------------------------------------------
+
+export interface ManifestTileRef {
+  address: string;
+  x: number;
+  y: number;
+  flipX: boolean;
+  flipY: boolean;
+}
+
+export interface SpriteManifest {
+  game: string;
+  character: string;
+  palette: number;
+  frameSize: { w: number; h: number };
+  frames: Array<{ id: string; tiles: ManifestTileRef[] }>;
+}
+
+export interface ScrollTilesetEntry {
+  idx: number;
+  address: string;
+  tileCode: number;
+  paletteSlot: number;
+}
+
+export interface ScrollPaletteMapping {
+  palette: number;
+  slot: number;
+  indexOffset: number;
+}
+
+export interface ScrollManifest {
+  type: 'scroll_tilemap';
+  game: string;
+  layerId: number;
+  layerName: string;
+  palettes: ScrollPaletteMapping[];
+  tileW: number;
+  tileH: number;
+  gridOrigin: { col: number; row: number };
+  gridCols: number;
+  gridRows: number;
+  tileset: ScrollTilesetEntry[];
+  grid: number[];
+}
+
+export type AsepriteManifest = SpriteManifest | ScrollManifest;
+
+// ---------------------------------------------------------------------------
 // Sprite export
 // ---------------------------------------------------------------------------
 
@@ -91,7 +141,7 @@ export function exportSpriteAseprite(
     });
   }
 
-  const manifest = {
+  const manifest: SpriteManifest = {
     game: emulator.getGameName() || 'unknown',
     character: `palette_${palette}`,
     palette,
@@ -193,8 +243,8 @@ export function exportScrollAseprite(
     }
   }
 
-  const manifest = {
-    type: 'scroll_tilemap' as const,
+  const manifest: ScrollManifest = {
+    type: 'scroll_tilemap',
     game: emulator.getGameName() || 'unknown',
     layerId,
     layerName: scrollLayerName(layerId),
@@ -231,7 +281,7 @@ export function exportScrollAseprite(
 export function importScrollTilemap(
   emulator: Emulator,
   ase: AsepriteFile,
-  manifest: any,
+  manifest: ScrollManifest,
   gfxRom: Uint8Array,
 ): void {
   const tileset = ase.tilesets[0];
@@ -241,7 +291,7 @@ export function importScrollTilemap(
   }
 
   const { tileW, tileH } = manifest;
-  const palettes = manifest.palettes as Array<{ palette: number; slot: number; indexOffset: number }>;
+  const palettes = manifest.palettes;
   if (!palettes?.length) {
     showToast('No palette mapping in manifest', false);
     return;
@@ -257,7 +307,7 @@ export function importScrollTilemap(
     return megaIdx;
   };
 
-  const tilesetEntries = manifest.tileset as Array<{ idx: number; address: string; tileCode: number; paletteSlot: number }>;
+  const tilesetEntries = manifest.tileset;
   if (!tilesetEntries?.length) {
     showToast('No tileset mapping in manifest', false);
     return;
@@ -388,15 +438,17 @@ export function importAsepriteFile(
         return;
       }
 
-      const manifest = ase.manifest;
+      const raw = ase.manifest;
       const gfxRom = editor.getGfxRom();
       if (!gfxRom) { showToast('No GFX ROM loaded', false); return; }
 
       // Route to scroll import
-      if (manifest.type === 'scroll_tilemap') {
-        importScrollTilemap(emulator, ase, manifest, gfxRom);
+      if (raw.type === 'scroll_tilemap') {
+        importScrollTilemap(emulator, ase, raw as unknown as ScrollManifest, gfxRom);
         return;
       }
+
+      const manifest = raw as unknown as SpriteManifest;
 
       let tilesWritten = 0;
       let framesWritten = 0;
@@ -447,12 +499,12 @@ export function importAsepriteFile(
             const mf = manifest.frames[f];
             if (!mf?.tiles) continue;
 
-            const tiles = mf.tiles.map((t: any) => ({
-              relX: t.x as number,
-              relY: t.y as number,
-              mappedCode: Math.floor((typeof t.address === 'string' ? parseInt(t.address, 16) : t.address) / CHAR_SIZE_16),
-              flipX: t.flipX as boolean,
-              flipY: t.flipY as boolean,
+            const tiles = mf.tiles.map((t: ManifestTileRef) => ({
+              relX: t.x,
+              relY: t.y,
+              mappedCode: Math.floor(parseInt(t.address, 16) / CHAR_SIZE_16),
+              flipX: t.flipX,
+              flipY: t.flipY,
             }));
 
             const w = manifest.frameSize?.w ?? ase.width;
