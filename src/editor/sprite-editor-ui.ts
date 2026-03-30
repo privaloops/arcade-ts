@@ -10,17 +10,14 @@ import { SpriteEditor, type EditorTool } from './sprite-editor';
 import { SCREEN_WIDTH, SCREEN_HEIGHT } from '../constants';
 import { LAYER_OBJ, LAYER_SCROLL1, LAYER_SCROLL2, LAYER_SCROLL3, readWord } from '../video/cps1-video';
 import { readAllSprites, groupCharacter, assembleCharacter, type SpriteGroup as SpriteGroupData, type CapturedPose } from './sprite-analyzer';
-import { loadPhotoRgba, resizeRgba, quantizeWithDithering } from './photo-import';
-import { readPixel as readPixelFn } from './tile-encoder';
 import { readPalette, rgbToHsl, hslToRgb } from './palette-editor';
-import { createLayer, createSpriteGroup, createScrollGroup, type PhotoLayer, type LayerGroup } from './layer-model';
+import { createSpriteGroup, createScrollGroup, type LayerGroup } from './layer-model';
 import { LayerPanel } from './layer-panel';
 import { findTileReferences } from './tile-refs';
 import type { Emulator } from '../emulator';
 import { pencilCursor, fillCursor, eyedropperCursor, eraserCursor, wandCursor } from './tool-cursors';
 import { showToast } from '../ui/toast';
 import { exportScrollAseprite, importAsepriteFile } from './aseprite-io';
-import { magicWandFill, compositeLayerOnto, quantizeSpritePhoto, mergeSpritePhoto, mergeAllLayers } from './photo-layer-ops';
 import { buildScrollSets, type ScrollSet } from './scroll-capture';
 import { CaptureManager } from './capture-session';
 import { SheetViewer, type SheetViewerHost } from './sheet-viewer';
@@ -59,9 +56,6 @@ export class SpriteEditorUI {
   private tileCtx: CanvasRenderingContext2D | null = null;
   private paletteContainer: HTMLDivElement | null = null;
   private infoBar: HTMLDivElement | null = null;
-  private capturePanel: HTMLDivElement | null = null;
-  private captureGallery: HTMLDivElement | null = null;
-  private captureStatus: HTMLDivElement | null = null;
 
   // Capture manager (sprite + scroll capture sessions)
   private capture!: CaptureManager;
@@ -69,35 +63,15 @@ export class SpriteEditorUI {
   // Sheet viewer (fullscreen sprite sheet + scroll set viewer)
   private sheet!: SheetViewer;
 
-  // Head editor
-  private headSection: HTMLDivElement | null = null;
-  private headCanvas: HTMLCanvasElement | null = null;
-  private headCtx: CanvasRenderingContext2D | null = null;
-  private headScale = 1;
-  private mergeBtn: HTMLButtonElement | null = null;
-  private quantizeBtn: HTMLButtonElement | null = null;
-
   // Multi-layer system
   private layerGroups: LayerGroup[] = [];
   private activeGroupIndex = -1;
-  private activeLayerIndex = -1;
   private layerPanel: LayerPanel | null = null;
-  private draggingLayer = false;
-  private dragLastX = 0;
-  private dragLastY = 0;
-  private resizingLayer = false;
-  private resizeCorner = ''; // 'tl' | 'tr' | 'bl' | 'br'
-  private resizeStartW = 0;
-  private resizeStartH = 0;
-  private resizeStartX = 0;
-  private resizeStartY = 0;
 
   get activeGroup(): LayerGroup | undefined { return this.layerGroups[this.activeGroupIndex]; }
-  get activeLayer(): PhotoLayer | undefined { return this.activeGroup?.layers[this.activeLayerIndex]; }
   get activePoses(): CapturedPose[] { return this.activeGroup?.spriteCapture?.poses ?? []; }
   private get activePoseIndex(): number { return this.activeGroup?.spriteCapture?.selectedPoseIndex ?? 0; }
   get activePose(): CapturedPose | undefined { return this.activePoses[this.activePoseIndex]; }
-  private get hasLayers(): boolean { return (this.activeGroup?.layers.length ?? 0) > 0; }
 
   // State
   private painting = false;
@@ -308,7 +282,7 @@ export class SpriteEditorUI {
       createScrollGroup('Scroll 3', LAYER_SCROLL3),
     );
     if (!this.layerGroups.some(g => g.type === 'sprite')) {
-      this.layerGroups.push({ type: 'sprite', name: 'Sprites (OBJ)', layers: [] });
+      this.layerGroups.push({ type: 'sprite', name: 'Sprites (OBJ)' });
     }
     this.activeGroupIndex = 0;
     this.reorderGroupsByLayerOrder();
@@ -342,62 +316,6 @@ export class SpriteEditorUI {
   private ensureLayerPanel(): void {
     if (this.layerPanel) return;
     this.layerPanel = new LayerPanel({
-      onSelectLayer: (gi, li) => {
-        this.activeGroupIndex = gi;
-        this.activeLayerIndex = li;
-        this.drawHeadSelector();
-        this.refreshLayerPanel();
-      },
-      onToggleVisibility: (gi, li) => {
-        const layer = this.layerGroups[gi]?.layers[li];
-        if (layer) layer.visible = !layer.visible;
-        this.drawHeadSelector();
-        this.refreshLayerPanel();
-      },
-      onDeleteLayer: (gi, li) => {
-        const group = this.layerGroups[gi];
-        if (!group) return;
-        group.layers.splice(li, 1);
-        if (this.activeLayerIndex >= group.layers.length) {
-          this.activeLayerIndex = group.layers.length - 1;
-        }
-        this.drawHeadSelector();
-        this.refreshLayerPanel();
-      },
-      onQuantizeLayer: (gi, li) => {
-        this.activeGroupIndex = gi;
-        this.activeLayerIndex = li;
-        this.quantizeLayer();
-        this.refreshLayerPanel();
-      },
-      onReorderLayer: (gi, fromIdx, toIdx) => {
-        const group = this.layerGroups[gi];
-        if (!group) return;
-        const layers = group.layers;
-        if (fromIdx < 0 || fromIdx >= layers.length || toIdx < 0 || toIdx >= layers.length) return;
-        const [moved] = layers.splice(fromIdx, 1);
-        if (moved) layers.splice(toIdx, 0, moved);
-        // Update active layer index to follow the moved layer
-        if (this.activeGroupIndex === gi) {
-          if (this.activeLayerIndex === fromIdx) {
-            this.activeLayerIndex = toIdx;
-          } else if (fromIdx < this.activeLayerIndex && toIdx >= this.activeLayerIndex) {
-            this.activeLayerIndex--;
-          } else if (fromIdx > this.activeLayerIndex && toIdx <= this.activeLayerIndex) {
-            this.activeLayerIndex++;
-          }
-        }
-        this.refreshLayerPanel();
-      },
-      onMergeGroup: (gi) => {
-        this.activeGroupIndex = gi;
-        this.mergeAll();
-        this.refreshLayerPanel();
-      },
-      onDropPhoto: (gi, file) => {
-        this.activeGroupIndex = gi;
-        this.importPhoto(file);
-      },
       onToggleHwLayer: (layerId, visible) => {
         this.hwLayerVisible.set(layerId, visible);
         this._onHwLayerToggle?.(layerId, visible);
@@ -416,7 +334,6 @@ export class SpriteEditorUI {
       },
       onOpenSpriteSheet: (groupIdx) => {
         this.activeGroupIndex = groupIdx;
-        this.activeLayerIndex = -1;
         this.sheet.enterSpriteSheetMode();
       },
       onExportScrollSet: (set) => {
@@ -473,7 +390,7 @@ export class SpriteEditorUI {
       allScrollSets.push(...buildScrollSets(session));
     }
 
-    this.layerPanel?.refresh(this.layerGroups, this.activeGroupIndex, this.activeLayerIndex, gfxRom, hwState, allScrollSets, spriteSetsInfo);
+    this.layerPanel?.refresh(this.layerGroups, this.activeGroupIndex, -1, gfxRom, hwState, allScrollSets, spriteSetsInfo);
   }
 
 
@@ -490,7 +407,6 @@ export class SpriteEditorUI {
       }
       this.drawAllSpriteBounds();
       this.drawSelectedOverlay();
-      this.drawPhotoLayers();
       this.captureFrame();
       this.captureScrollTick();
       this.overlayRafId = requestAnimationFrame(loop);
@@ -513,91 +429,9 @@ export class SpriteEditorUI {
     cvs.addEventListener('click', this.boundOverlayClick);
     cvs.addEventListener('mouseleave', this.boundOverlayLeave);
 
-
-    // Layer interaction: Shift+click = select layer, corner handles = resize, click = drag
-    cvs.addEventListener('mousedown', (e) => {
-      const pos = this.screenCoordsFromEvent(e);
-      if (!pos) return;
-
-      // Shift+click: select the topmost layer under cursor (search ALL groups, world coords)
-      if (e.shiftKey) {
-        for (let gi = this.layerGroups.length - 1; gi >= 0; gi--) {
-          const group = this.layerGroups[gi]!;
-          const sc = this.getGroupScroll(group);
-          // Convert screen pos to world pos for this group
-          const wx = pos.x + sc.sx;
-          const wy = pos.y + sc.sy;
-          for (let i = group.layers.length - 1; i >= 0; i--) {
-            const l = group.layers[i]!;
-            if (!l.visible) continue;
-            if (wx >= l.offsetX && wx < l.offsetX + l.width
-                && wy >= l.offsetY && wy < l.offsetY + l.height) {
-              this.activeGroupIndex = gi;
-              this.activeLayerIndex = i;
-              this.refreshLayerPanel();
-              e.preventDefault();
-              e.stopPropagation();
-              return;
-            }
-          }
-        }
-        return;
-      }
-
-      const layer = this.activeLayer;
-      if (!layer) return;
-
-      // Convert screen coords to world coords for the active group
-      const agScroll = this.activeGroup ? this.getGroupScroll(this.activeGroup) : { sx: 0, sy: 0 };
-      const wx = pos.x + agScroll.sx;
-      const wy = pos.y + agScroll.sy;
-
-      // Check resize handles first (4 corners, tolerance of 5 game pixels)
-      const ht = 5;
-      const lx = layer.offsetX, ly = layer.offsetY;
-      const lw = layer.width, lh = layer.height;
-      const corners: [string, number, number][] = [
-        ['tl', lx, ly], ['tr', lx + lw, ly],
-        ['bl', lx, ly + lh], ['br', lx + lw, ly + lh],
-      ];
-      for (const [corner, cx, cy] of corners) {
-        if (Math.abs(wx - cx) <= ht && Math.abs(wy - cy) <= ht) {
-          this.resizingLayer = true;
-          this.resizeCorner = corner;
-          this.resizeStartW = lw;
-          this.resizeStartH = lh;
-          this.resizeStartX = wx;
-          this.resizeStartY = wy;
-          e.preventDefault();
-          e.stopPropagation();
-          return;
-        }
-      }
-
-      const inBounds = wx >= lx && wx < lx + lw && wy >= ly && wy < ly + lh;
-      if (!inBounds) return;
-
-      // Click on layer = drag to move (store world coords)
-      this.draggingLayer = true;
-      this.dragLastX = wx;
-      this.dragLastY = wy;
-      e.preventDefault();
-      e.stopPropagation();
-    });
-    cvs.addEventListener('mouseup', () => {
-      if (this.resizingLayer || this.draggingLayer) {
-        this.resizingLayer = false;
-        this.draggingLayer = false;
-        this.refreshLayerPanel();
-        // Suppress the click event that follows mouseup to prevent group switch
-        // Use capture phase to fire before the existing boundOverlayClick handler
-        cvs.addEventListener('click', (ev) => { ev.stopImmediatePropagation(); ev.preventDefault(); }, { once: true, capture: true });
-      }
-    });
-
     // Game canvas zoom/pan — middle-click or Space+click to pan
     cvs.addEventListener('mousedown', (e) => {
-      if (e.button === 1 || (this.spaceHeld && e.button === 0 && !this.activeLayer)) {
+      if (e.button === 1 || (this.spaceHeld && e.button === 0)) {
         if (this.gameZoom > 1) {
           this.gamePanning = true;
           this.gamePanStartX = e.clientX - this.gamePanX;
@@ -657,7 +491,6 @@ export class SpriteEditorUI {
     const wrapper = this.gameCanvas.parentElement;
     if (wrapper) {
       wrapper.appendChild(cvs);
-      this.createCapturePanel(wrapper);
     }
   }
 
@@ -706,25 +539,6 @@ export class SpriteEditorUI {
     if (wrapper) wrapper.style.overflow = '';
   }
 
-  private createCapturePanel(wrapper: HTMLElement): void {
-    // Floating panel (used for head/layer editor in photo import)
-    this.capturePanel = el('div', 'edit-analyzer-float') as HTMLDivElement;
-    this.capturePanel.style.display = 'none';
-
-    this.captureStatus = el('div', 'edit-analyzer-status') as HTMLDivElement;
-    this.capturePanel.appendChild(this.captureStatus);
-
-    this.captureGallery = el('div', 'edit-analyzer-gallery') as HTMLDivElement;
-    this.capturePanel.appendChild(this.captureGallery);
-
-    // Head/layer editor section (used by scroll layer photo import)
-    this.headSection = el('div', 'edit-head-section') as HTMLDivElement;
-    this.headSection.style.display = 'none';
-    this.capturePanel.appendChild(this.headSection);
-
-    wrapper.appendChild(this.capturePanel);
-  }
-
   private removeOverlay(): void {
     if (!this.overlay) return;
     this.overlay.removeEventListener('mousemove', this.boundOverlayMove);
@@ -734,8 +548,6 @@ export class SpriteEditorUI {
     this.overlay = null;
     this.overlayCtx = null;
     this.stopAllCaptures();
-    this.capturePanel?.remove();
-    this.capturePanel = null;
   }
 
 
@@ -777,58 +589,6 @@ export class SpriteEditorUI {
     const mousePos = this.screenCoordsFromEvent(e);
     if (mousePos) { this.lastMouseX = mousePos.x; this.lastMouseY = mousePos.y; }
 
-    // Handle layer corner resize (resizeStartX/Y are in world coords, deltas are the same)
-    if (this.resizingLayer && this.activeLayer) {
-      const pos = this.screenCoordsFromEvent(e);
-      if (pos) {
-        const agScroll = this.activeGroup ? this.getGroupScroll(this.activeGroup) : { sx: 0, sy: 0 };
-        const dx = (pos.x + agScroll.sx) - this.resizeStartX;
-        const dy = (pos.y + agScroll.sy) - this.resizeStartY;
-        // Use the larger delta to maintain aspect ratio
-        const delta = Math.abs(dx) > Math.abs(dy) ? dx : dy;
-        const sign = this.resizeCorner === 'tl' || this.resizeCorner === 'bl' ? -1 : 1;
-        const scaledDelta = delta * sign;
-
-        const newW = Math.max(4, this.resizeStartW + scaledDelta);
-        const newH = Math.max(4, Math.round(newW * this.resizeStartH / this.resizeStartW));
-
-        if (newW !== this.activeLayer.width) {
-          const newRgba = resizeRgba(this.activeLayer.rgbaOriginal, newW, newH);
-          // Anchor to the opposite corner
-          if (this.resizeCorner === 'tl') {
-            this.activeLayer.offsetX += this.activeLayer.width - newW;
-            this.activeLayer.offsetY += this.activeLayer.height - newH;
-          } else if (this.resizeCorner === 'tr') {
-            this.activeLayer.offsetY += this.activeLayer.height - newH;
-          } else if (this.resizeCorner === 'bl') {
-            this.activeLayer.offsetX += this.activeLayer.width - newW;
-          }
-          // br: offset stays
-          this.activeLayer.rgbaData = newRgba;
-          this.activeLayer.pixels = new Uint8Array(newW * newH);
-          this.activeLayer.width = newW;
-          this.activeLayer.height = newH;
-          this.activeLayer.quantized = false;
-        }
-      }
-      return;
-    }
-
-    // Handle layer dragging (world coords)
-    if (this.draggingLayer && this.activeLayer) {
-      const pos = this.screenCoordsFromEvent(e);
-      if (pos) {
-        const agScroll = this.activeGroup ? this.getGroupScroll(this.activeGroup) : { sx: 0, sy: 0 };
-        const wx = pos.x + agScroll.sx;
-        const wy = pos.y + agScroll.sy;
-        this.activeLayer.offsetX += wx - this.dragLastX;
-        this.activeLayer.offsetY += wy - this.dragLastY;
-        this.dragLastX = wx;
-        this.dragLastY = wy;
-      }
-      return;
-    }
-
     const pos = this.screenCoordsFromEvent(e);
     if (!pos) return;
 
@@ -860,18 +620,6 @@ export class SpriteEditorUI {
     if (!pos) return;
     this.lastMouseX = pos.x;
     this.lastMouseY = pos.y;
-
-    // If there's an active photo layer under the cursor, don't switch groups (world coords)
-    const layer = this.activeLayer;
-    if (layer) {
-      const agScroll = this.activeGroup ? this.getGroupScroll(this.activeGroup) : { sx: 0, sy: 0 };
-      const wx = pos.x + agScroll.sx;
-      const wy = pos.y + agScroll.sy;
-      if (wx >= layer.offsetX && wx < layer.offsetX + layer.width
-          && wy >= layer.offsetY && wy < layer.offsetY + layer.height) {
-        return;
-      }
-    }
 
     const info = this.editor.selectTileAt(pos.x, pos.y);
     if (info) {
@@ -928,107 +676,6 @@ export class SpriteEditorUI {
       ctx.setLineDash([3, 2]);
       ctx.strokeRect(tile.screenX + 0.5, tile.screenY + 0.5, tile.tileW - 1, tile.tileH - 1);
       ctx.setLineDash([]);
-    }
-  }
-
-  /** Apply tool on the active layer at game coordinates. Works on both RGBA and quantized. */
-  private overlayLayerAction(gx: number, gy: number): void {
-    const layer = this.activeLayer;
-    if (!layer) return;
-    const lx = gx - layer.offsetX;
-    const ly = gy - layer.offsetY;
-    if (lx < 0 || lx >= layer.width || ly < 0 || ly >= layer.height) return;
-
-    const tool = this.editor.tool;
-
-    if (layer.quantized) {
-      // Quantized mode: full tool support
-      if (tool === 'eyedropper') {
-        this.editor.setActiveColor(layer.pixels[ly * layer.width + lx]!);
-        this.refreshPalette();
-      } else if (tool === 'fill') {
-        this.magicWand(gx, gy);
-      } else {
-        const colorIndex = tool === 'eraser' ? 0 : this.editor.activeColorIndex;
-        layer.pixels[ly * layer.width + lx] = colorIndex;
-      }
-    } else {
-      // RGBA mode: eraser sets alpha to 0 (detour)
-      if (tool === 'eraser') {
-        const pi = (ly * layer.width + lx) * 4;
-        layer.rgbaData.data[pi + 3] = 0;
-      }
-    }
-  }
-
-  /** Draw all visible photo layers directly on the game overlay canvas. */
-  private drawPhotoLayers(): void {
-    if (!this.overlayCtx || !this.overlay) return;
-    const ctx = this.overlayCtx;
-
-    for (const group of this.layerGroups) {
-      for (const layer of group.layers) {
-        if (!layer.visible) continue;
-
-        // Create a temporary canvas with the layer's pixels
-        const tmpCvs = document.createElement('canvas');
-        tmpCvs.width = layer.width;
-        tmpCvs.height = layer.height;
-        const tmpCtx = tmpCvs.getContext('2d')!;
-
-        if (layer.quantized) {
-          // Draw indexed pixels using palette
-          const video = this.emulator.getVideo();
-          if (!video) continue;
-          const bufs = this.emulator.getBusBuffers();
-          const pageMap: Record<number, number> = { [LAYER_SCROLL1]: 32, [LAYER_SCROLL2]: 64, [LAYER_SCROLL3]: 96 };
-          const palIdx = group.spriteCapture?.palette ?? pageMap[group.layerId ?? 0] ?? 0;
-          const palette = readPalette(bufs.vram, video.getPaletteBase(), palIdx);
-          const img = new ImageData(layer.width, layer.height);
-          for (let i = 0; i < layer.pixels.length; i++) {
-            const idx = layer.pixels[i]!;
-            if (idx === 0) continue;
-            const [r, g, b] = palette[idx] ?? [0, 0, 0];
-            img.data[i * 4] = r;
-            img.data[i * 4 + 1] = g;
-            img.data[i * 4 + 2] = b;
-            img.data[i * 4 + 3] = 255;
-          }
-          tmpCtx.putImageData(img, 0, 0);
-        } else {
-          // Draw RGBA directly
-          tmpCtx.putImageData(layer.rgbaData, 0, 0);
-        }
-
-        // Draw on overlay at layer offset (world coords → screen coords for scroll groups)
-        const scroll = this.getGroupScroll(group);
-        const screenX = layer.offsetX - scroll.sx;
-        const screenY = layer.offsetY - scroll.sy;
-        ctx.imageSmoothingEnabled = false;
-        ctx.drawImage(tmpCvs, screenX, screenY);
-
-        // Draw selection outline + resize handles for active layer
-        if (layer === this.activeLayer) {
-          const lx = screenX;
-          const ly = screenY;
-          const lw = layer.width;
-          const lh = layer.height;
-
-          ctx.strokeStyle = 'rgba(0, 200, 255, 0.7)';
-          ctx.lineWidth = 1;
-          ctx.setLineDash([3, 3]);
-          ctx.strokeRect(lx - 0.5, ly - 0.5, lw + 1, lh + 1);
-          ctx.setLineDash([]);
-
-          // Resize handles (4 corners)
-          const hs = 3; // handle half-size in game pixels
-          ctx.fillStyle = 'rgba(0, 200, 255, 0.9)';
-          ctx.fillRect(lx - hs, ly - hs, hs * 2, hs * 2);           // top-left
-          ctx.fillRect(lx + lw - hs, ly - hs, hs * 2, hs * 2);      // top-right
-          ctx.fillRect(lx - hs, ly + lh - hs, hs * 2, hs * 2);      // bottom-left
-          ctx.fillRect(lx + lw - hs, ly + lh - hs, hs * 2, hs * 2); // bottom-right
-        }
-      }
     }
   }
 
@@ -1633,15 +1280,6 @@ export class SpriteEditorUI {
       setStatus('Up/Down: browse poses — Left/Right: browse tiles — Escape: back');
       return;
     }
-    if (this.hasLayers) {
-      const n = this.nuanceGroup.size;
-      if (n > 0) {
-        setStatus(`${n} color${n > 1 ? 's' : ''} selected for hue shifting`);
-      } else {
-        setStatus('Shift+Arrows: move layer — +/-: resize — Drop image to add');
-      }
-      return;
-    }
     setStatus('');
   }
 
@@ -1655,30 +1293,6 @@ export class SpriteEditorUI {
     if (this.sheet.spriteSheetMode) {
       this.sheet.handleSheetKey(e);
       return;
-    }
-
-    // Layer controls: Shift+arrows = move, +/- = resize
-    const layer = this.activeLayer;
-    if (layer) {
-      if (e.shiftKey && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
-        e.preventDefault();
-        e.stopPropagation();
-        if (e.key === 'ArrowUp') layer.offsetY--;
-        else if (e.key === 'ArrowDown') layer.offsetY++;
-        else if (e.key === 'ArrowLeft') layer.offsetX--;
-        else if (e.key === 'ArrowRight') layer.offsetX++;
-        return;
-      }
-      if (e.key === '+' || e.key === '=') {
-        e.preventDefault();
-        this.resizeLayer(1);
-        return;
-      }
-      if (e.key === '-') {
-        e.preventDefault();
-        this.resizeLayer(-1);
-        return;
-      }
     }
 
     switch (e.key) {
@@ -1821,374 +1435,6 @@ export class SpriteEditorUI {
   /** Import a .aseprite file: read manifest, write tiles back to GFX ROM, create sprite set. */
   private importAseprite(): void {
     importAsepriteFile(this.emulator, this.editor, this.layerGroups, () => this.refreshLayerPanel());
-  }
-
-
-  /** Quantize the active sprite photo layer. Optionally update palette from image colors. */
-  quantizeSpritePhotoLayer(updatePalette: boolean): void {
-    const group = this.activeGroup;
-    if (!group?.spriteCapture) return;
-    const layer = group.layers[this.activeLayerIndex];
-    if (!layer || layer.quantized) return;
-    quantizeSpritePhoto(this.emulator, layer, group.spriteCapture.palette, updatePalette);
-    this.sheet.refreshSheetAfterEdit();
-    showToast('Quantized with outline', true);
-  }
-
-  /** Merge the quantized sprite photo layer onto pose tiles (refCount = 1 only). */
-  mergeSpritePhotoLayer(): void {
-    const group = this.activeGroup;
-    if (!group?.spriteCapture) return;
-    const layer = group.layers[this.activeLayerIndex];
-    if (!layer?.quantized) return;
-    const pose = this.activePoses[this.sheet.sheetSelectedPose];
-    if (!pose) return;
-    const gfxRom = this.editor.getGfxRom();
-    if (!gfxRom) return;
-
-    const { written, skipped } = mergeSpritePhoto(this.emulator, gfxRom, layer, pose);
-
-    group.layers.splice(this.activeLayerIndex, 1);
-    this.activeLayerIndex = -1;
-    this.sheet.refreshSheetAfterEdit();
-    this.refreshLayerPanel();
-    this.emulator.rerender();
-
-    showToast(
-      skipped > 0
-        ? `Merged ${written} pixels (${skipped} skipped — shared tiles)`
-        : `Merged ${written} pixels`,
-      true,
-    );
-  }
-
-  /** Handle photo drop on the sprite sheet viewer. Creates a PhotoLayer for positioning. */
-  private async handleSpritePhotoDrop(file: File): Promise<void> {
-    const group = this.activeGroup;
-    if (!group?.spriteCapture) return;
-    const pose = this.activePoses[this.sheet.sheetSelectedPose];
-    if (!pose) return;
-
-    const rgba = await loadPhotoRgba(file, pose.w, pose.h);
-
-    // Create a photo layer centered on the pose
-    const newLayer = createLayer(
-      file.name,
-      rgba,
-      Math.round((pose.w - rgba.width) / 2),
-      Math.round((pose.h - rgba.height) / 2),
-    );
-    group.layers.push(newLayer);
-    this.activeLayerIndex = group.layers.length - 1;
-
-    // Re-render the zoomed view with the photo overlay
-    this.sheet.refreshSheetAfterEdit();
-    showToast('Photo added — drag to position, then Quantize', true);
-  }
-
-
-
-  /**
-   * Apply a pixel edit at (px, py) in sprite coordinates using the current tool.
-   * Writes to the GFX ROM tile that contains this pixel.
-   */
-  /**
-   * Edit a pixel on the photo layer (not the ROM).
-   * Eraser sets layer pixel to 0 → original tile shows through.
-   * Pencil paints on the layer. Eyedropper reads from composite.
-   */
-  private headPixelAction(px: number, py: number): void {
-    if (this.activePoses.length === 0 || !this.activeLayer) return;
-    const pose = this.activePose!;
-    if (px < 0 || py < 0 || px >= pose.w || py >= pose.h) return;
-
-    const layer = this.activeLayer;
-    const lx = px - layer.offsetX;
-    const ly = py - layer.offsetY;
-
-    const tool = this.editor.tool;
-
-    if (tool === 'eyedropper') {
-      // Read from layer first, then from tile if layer is transparent
-      if (lx >= 0 && lx < layer.width && ly >= 0 && ly < layer.height && layer.pixels[ly * layer.width + lx]! !== 0) {
-        this.editor.setActiveColor(layer.pixels[ly * layer.width + lx]!);
-      } else {
-        // Read from original tile
-        const gfxRom = this.editor.getGfxRom();
-        if (!gfxRom) return;
-        const tile = pose.tiles.find(t => px >= t.relX && px < t.relX + 16 && py >= t.relY && py < t.relY + 16);
-        if (tile) {
-          const localX = tile.flipX ? 15 - (px - tile.relX) : px - tile.relX;
-          const localY = tile.flipY ? 15 - (py - tile.relY) : py - tile.relY;
-          this.editor.setActiveColor(readPixelFn(gfxRom, tile.mappedCode, localX, localY));
-        }
-      }
-      this.refreshPalette();
-    } else if (lx >= 0 && lx < layer.width && ly >= 0 && ly < layer.height) {
-      // Edit layer pixel
-      const colorIndex = tool === 'eraser' ? 0 : this.editor.activeColorIndex;
-      layer.pixels[ly * layer.width + lx] = colorIndex;
-      this.drawHeadSelector();
-    }
-  }
-
-  /** Magic wand: flood fill on the layer, setting similar pixels to transparent. */
-  private magicWand(px: number, py: number): void {
-    if (!this.activeLayer) return;
-    magicWandFill(this.activeLayer, px, py);
-    this.drawHeadSelector();
-  }
-
-  /** Merge the photo layer into the GFX ROM tiles for all captured poses. */
-  /** Quantize the RGBA layer into palette indices using Atkinson dithering. */
-  private quantizeLayer(): void {
-    const layer = this.activeLayer;
-    if (!layer || layer.quantized) return;
-    const group = this.activeGroup;
-    if (!group) return;
-
-    const video = this.emulator.getVideo();
-    if (!video) return;
-    const bufs = this.emulator.getBusBuffers();
-
-    // Get palette index based on group type
-    let paletteIdx: number;
-    if (group.spriteCapture) {
-      paletteIdx = group.spriteCapture.palette;
-    } else {
-      // Scroll layers: use first palette of the scroll's page
-      // Page 1 (Scroll 1): palettes 32-63 → use 32
-      // Page 2 (Scroll 2): palettes 64-95 → use 64
-      // Page 3 (Scroll 3): palettes 96-127 → use 96
-      const pageMap: Record<number, number> = {
-        [LAYER_SCROLL1]: 32,
-        [LAYER_SCROLL2]: 64,
-        [LAYER_SCROLL3]: 96,
-      };
-      paletteIdx = pageMap[group.layerId ?? 0] ?? 0;
-    }
-
-    const palette = readPalette(bufs.vram, video.getPaletteBase(), paletteIdx);
-    layer.pixels = quantizeWithDithering(layer.rgbaData, palette);
-    layer.quantized = true;
-    this.refreshLayerPanel();
-    if (this.captureStatus) this.captureStatus.textContent = `Quantized!`;
-  }
-
-  /** Resize the photo layer proportionally from the ORIGINAL data (no compound artifacts). */
-  private resizeLayer(delta: number): void {
-    const layer = this.activeLayer;
-    if (!layer) return;
-
-    // Scale by ~10% per step
-    const factor = delta > 0 ? 1.1 : 0.9;
-    const newW = Math.max(4, Math.round(layer.width * factor));
-    const newH = Math.max(4, Math.round(layer.height * factor));
-    if (newW === layer.width && newH === layer.height) return;
-
-    // Resize from original RGBA (bilinear, lossless)
-    const newRgba = resizeRgba(layer.rgbaOriginal, newW, newH);
-
-    // Keep center in place
-    const cx = layer.offsetX + layer.width / 2;
-    const cy = layer.offsetY + layer.height / 2;
-    layer.offsetX = Math.round(cx - newW / 2);
-    layer.offsetY = Math.round(cy - newH / 2);
-    layer.rgbaData = newRgba;
-    layer.pixels = new Uint8Array(newW * newH);
-    layer.width = newW;
-    layer.height = newH;
-    layer.quantized = false; // reset quantization after resize
-    this.drawHeadSelector();
-  }
-
-  /** Merge all quantized layers in the active group into the GFX ROM. */
-  private mergeAll(): void {
-    const group = this.activeGroup;
-    if (!group) return;
-    const gfxRom = this.editor.getGfxRom();
-    if (!gfxRom) return;
-
-    const merged = mergeAllLayers(this.emulator, gfxRom, group, this.activePoses, (g) => this.getGroupScroll(g));
-
-    group.layers = group.layers.filter(l => !l.quantized);
-    this.activeLayerIndex = group.layers.length > 0 ? 0 : -1;
-    this.emulator.rerender();
-    this.refreshLayerPanel();
-    if (this.captureStatus) {
-      this.captureStatus.textContent = `Merged ${merged} layer${merged !== 1 ? 's' : ''}.`;
-    }
-  }
-
-
-  /** Re-read tiles from GFX ROM to update the pose preview after pixel edits. */
-  private refreshHeadPreview(): void {
-    const pose = this.activePose;
-    const ag = this.activeGroup;
-    if (!pose || !ag?.spriteCapture) return;
-    const video = this.emulator.getVideo();
-    if (!video) return;
-    const gfxRom = this.editor.getGfxRom();
-    if (!gfxRom) return;
-    const bufs = this.emulator.getBusBuffers();
-    const pal = ag.spriteCapture.palette;
-    const palette = readPalette(bufs.vram, video.getPaletteBase(), pal);
-    const sprGroup: SpriteGroupData = {
-      sprites: [], palette: pal,
-      bounds: { x: 0, y: 0, w: pose.w, h: pose.h },
-      tiles: pose.tiles,
-    };
-    pose.preview = assembleCharacter(gfxRom, sprGroup, palette);
-  }
-
-  private drawHeadSelector(): void {
-    const ctx = this.headCtx;
-    if (!ctx || !this.headCanvas) return;
-
-    const group = this.activeGroup;
-    if (!group) return;
-
-    const scale = this.headScale;
-    let w: number;
-    let h: number;
-    let composite: ImageData;
-
-    if (group.type === 'sprite') {
-      const pose = this.activePose;
-      if (!pose) return;
-      w = pose.w;
-      h = pose.h;
-      this.refreshHeadPreview();
-      composite = new ImageData(w, h);
-      composite.data.set(pose.preview.data);
-    } else {
-      // Scroll: black background (tiles would need tilemap reading — future)
-      w = SCREEN_WIDTH;
-      h = SCREEN_HEIGHT;
-      composite = new ImageData(w, h);
-    }
-
-    // Overlay all visible layers (bottom to top)
-    if (group) {
-      const video = this.emulator.getVideo();
-      const bufs = this.emulator.getBusBuffers();
-      const pal = group.spriteCapture
-        ? (video ? readPalette(bufs.vram, video.getPaletteBase(), group.spriteCapture.palette) : null)
-        : null;
-
-      for (const layer of group.layers) {
-        if (!layer.visible) continue;
-        compositeLayerOnto(composite, layer, w, h, pal);
-      }
-    }
-
-    // Draw composite scaled up
-    const tmpCvs = document.createElement('canvas');
-    tmpCvs.width = w;
-    tmpCvs.height = h;
-    tmpCvs.getContext('2d')!.putImageData(composite, 0, 0);
-
-    ctx.clearRect(0, 0, this.headCanvas.width, this.headCanvas.height);
-    ctx.drawImage(tmpCvs, 0, 0, w, h, 0, 0, w * scale, h * scale);
-
-
-    // Toggle button visibility
-    const layer = this.activeLayer;
-    const hasAnyQuantized = group?.layers.some(l => l.quantized) ?? false;
-    if (this.quantizeBtn) this.quantizeBtn.style.display = (layer && !layer.quantized) ? '' : 'none';
-    if (this.mergeBtn) this.mergeBtn.style.display = hasAnyQuantized ? '' : 'none';
-
-    // Layer outline (after photo drop)
-    if (this.activeLayer) {
-      ctx.strokeStyle = 'rgba(0, 200, 255, 0.5)';
-      ctx.lineWidth = 1;
-      ctx.setLineDash([3, 3]);
-      ctx.strokeRect(
-        this.activeLayer.offsetX * scale,
-        this.activeLayer.offsetY * scale,
-        this.activeLayer.width * scale,
-        this.activeLayer.height * scale,
-      );
-      ctx.setLineDash([]);
-    }
-  }
-
-  // -- Photo Import --
-
-  private setupDropZone(): void {
-    const panel = this.capturePanel;
-    if (!panel) return;
-
-    // Add drop hint
-    const dropHint = el('div', 'edit-drop-hint');
-    dropHint.textContent = 'Drop a photo here to apply on all poses';
-    panel.appendChild(dropHint);
-
-    panel.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      panel.classList.add('edit-drop-active');
-    });
-    panel.addEventListener('dragleave', () => {
-      panel.classList.remove('edit-drop-active');
-    });
-    panel.addEventListener('drop', (e) => {
-      e.preventDefault();
-      panel.classList.remove('edit-drop-active');
-      const file = (e as DragEvent).dataTransfer?.files[0];
-      if (file && file.type.startsWith('image/')) {
-        this.importPhoto(file);
-      }
-    });
-  }
-
-  private async importPhoto(file: File): Promise<void> {
-    const group = this.activeGroup;
-    if (!group) return;
-
-    // Determine max dimensions based on group type
-    let maxW: number;
-    let maxH: number;
-    let centerW: number;
-    let centerH: number;
-
-    if (group.type === 'sprite') {
-      const pose = this.activePose;
-      if (!pose) return;
-      maxW = pose.w;
-      maxH = Math.round(pose.h * 0.5);
-      centerW = pose.w;
-      centerH = pose.h;
-    } else {
-      // Scroll: use screen dimensions as bounds
-      maxW = SCREEN_WIDTH;
-      maxH = SCREEN_HEIGHT;
-      centerW = SCREEN_WIDTH;
-      centerH = SCREEN_HEIGHT;
-    }
-
-    this.captureStatus!.textContent = 'Loading photo...';
-
-    try {
-      const rgba = await loadPhotoRgba(file, maxW, maxH);
-
-      // Position in world coords (screen center + scroll offset for scroll groups)
-      const scroll = this.getGroupScroll(group);
-      const newLayer = createLayer(
-        file.name,
-        rgba,
-        Math.round((centerW - rgba.width) / 2) + scroll.sx,
-        Math.round((centerH - rgba.height) / 2) + scroll.sy,
-      );
-      group.layers.push(newLayer);
-      this.activeLayerIndex = group.layers.length - 1;
-      // Layers render directly on game overlay now — no need for floating editor
-      this.drawHeadSelector();
-
-      this.captureStatus!.textContent = `Photo loaded (${rgba.width}\u00D7${rgba.height}). Resize: +/\u2212. Move: Shift+arrows. Click "Quantize" when positioned.`;
-      this.refreshLayerPanel();
-    } catch (err) {
-      this.captureStatus!.textContent = `Error: ${err instanceof Error ? err.message : 'unknown'}`;
-    }
   }
 
 }

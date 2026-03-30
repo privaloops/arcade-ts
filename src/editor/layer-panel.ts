@@ -1,11 +1,9 @@
 /**
- * Layer Panel — left sidebar for managing photo layers.
- *
- * Groups layers by CPS1 target (Scroll 2/3, Sprite group).
- * Each layer shows name, visibility toggle, quantize/delete buttons.
+ * Layer Panel — left sidebar for managing CPS1 hardware layers,
+ * sprite/scroll captures, and Aseprite import.
  */
 
-import type { PhotoLayer, LayerGroup } from './layer-model';
+import type { LayerGroup } from './layer-model';
 import type { ScrollSet } from './scroll-capture';
 import { getTileStats } from './tile-allocator';
 import { setTooltip } from '../ui/tooltip';
@@ -28,13 +26,6 @@ export interface SpriteSetInfo {
 // ---------------------------------------------------------------------------
 
 export interface LayerPanelCallbacks {
-  onSelectLayer(groupIdx: number, layerIdx: number): void;
-  onToggleVisibility(groupIdx: number, layerIdx: number): void;
-  onDeleteLayer(groupIdx: number, layerIdx: number): void;
-  onQuantizeLayer(groupIdx: number, layerIdx: number): void;
-  onReorderLayer(groupIdx: number, fromIdx: number, toIdx: number): void;
-  onMergeGroup(groupIdx: number): void;
-  onDropPhoto(groupIdx: number, file: File): void;
   onToggleHwLayer(layerId: number, visible: boolean): void;
   onToggleGrid(layerId: number, visible: boolean): void;
   onSpreadChange(value: number): void;
@@ -123,7 +114,7 @@ export class LayerPanel {
   refresh(
     groups: LayerGroup[],
     activeGroupIdx: number,
-    activeLayerIdx: number,
+    _activeLayerIdx: number,
     gfxRom?: Uint8Array,
     hwLayerState?: { visible: Map<number, boolean>; grid: Map<number, boolean>; drawOrder: string },
     scrollSets?: ScrollSet[],
@@ -168,7 +159,7 @@ export class LayerPanel {
     for (let gi = 0; gi < groups.length; gi++) {
       const group = groups[gi]!;
       // Skip extra sprite groups (their captures are shown under the first one)
-      if (group.type === 'sprite' && gi !== firstSpriteGroupIdx && group.layers.length === 0) continue;
+      if (group.type === 'sprite' && gi !== firstSpriteGroupIdx) continue;
       const isActiveGroup = gi === activeGroupIdx;
 
       const groupEl = document.createElement('div');
@@ -249,36 +240,6 @@ export class LayerPanel {
       }
 
       groupEl.appendChild(groupHeader);
-
-      // Layer rows
-      const layerList = document.createElement('div');
-      layerList.className = 'layer-list';
-
-      for (let li = 0; li < group.layers.length; li++) {
-        const layer = group.layers[li]!;
-        const isActive = isActiveGroup && li === activeLayerIdx;
-        const row = this.createLayerRow(layer, gi, li, isActive);
-        layerList.appendChild(row);
-      }
-
-      groupEl.appendChild(layerList);
-
-      // Group actions
-      const actions = document.createElement('div');
-      actions.className = 'layer-group-actions';
-
-      // Merge button
-      const hasQuantized = group.layers.some(l => l.quantized);
-      if (hasQuantized) {
-        const mergeBtn = document.createElement('button');
-        mergeBtn.className = 'layer-btn layer-merge-btn';
-        mergeBtn.textContent = 'Merge All';
-        setTooltip(mergeBtn, 'Merge all quantized layers into ROM');
-        mergeBtn.onclick = () => this.callbacks.onMergeGroup(gi);
-        actions.appendChild(mergeBtn);
-      }
-
-      groupEl.appendChild(actions);
 
       // Capture items for this group
       const captureLayerId = group.layerId ?? (group.type === 'sprite' ? 0 : -1);
@@ -383,110 +344,5 @@ export class LayerPanel {
     slider.oninput = () => this.callbacks.onSpreadChange(parseInt(slider.value, 10));
     sec3d.appendChild(slider);
     this.content.appendChild(sec3d);
-  }
-
-  private createLayerRow(
-    layer: PhotoLayer,
-    groupIdx: number,
-    layerIdx: number,
-    isActive: boolean,
-  ): HTMLDivElement {
-    const row = document.createElement('div');
-    row.className = 'layer-row' + (isActive ? ' layer-row-active' : '');
-    row.draggable = true;
-    row.dataset['groupIdx'] = String(groupIdx);
-    row.dataset['layerIdx'] = String(layerIdx);
-
-    // Drag & drop reorder
-    row.addEventListener('dragstart', (e) => {
-      e.dataTransfer?.setData('text/plain', `${groupIdx}:${layerIdx}`);
-      row.classList.add('layer-row-dragging');
-    });
-    row.addEventListener('dragend', () => {
-      row.classList.remove('layer-row-dragging');
-    });
-    row.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      row.classList.add('layer-row-dragover');
-    });
-    row.addEventListener('dragleave', () => {
-      row.classList.remove('layer-row-dragover');
-    });
-    row.addEventListener('drop', (e) => {
-      e.preventDefault();
-      row.classList.remove('layer-row-dragover');
-      const data = e.dataTransfer?.getData('text/plain');
-      if (!data) return;
-      const [fromGi, fromLi] = data.split(':').map(Number);
-      const toGi = groupIdx;
-      const toLi = layerIdx;
-      if (fromGi === toGi && fromLi !== undefined && toLi !== undefined && fromLi !== toLi) {
-        this.callbacks.onReorderLayer(toGi!, fromLi, toLi);
-      }
-    });
-
-    // Click to select
-    setTooltip(row, 'Select this layer');
-    row.onclick = () => this.callbacks.onSelectLayer(groupIdx, layerIdx);
-
-    // Visibility toggle
-    const eye = document.createElement('button');
-    eye.className = 'layer-eye-btn';
-    eye.textContent = layer.visible ? '\u{1F441}' : '\u{1F441}\u{FE0F}\u{200D}\u{1F5E8}\u{FE0F}';
-    setTooltip(eye, 'Toggle layer visibility');
-    eye.style.opacity = layer.visible ? '1' : '0.3';
-    eye.onclick = (e) => { e.stopPropagation(); this.callbacks.onToggleVisibility(groupIdx, layerIdx); };
-    row.appendChild(eye);
-
-    // Thumbnail
-    const thumb = document.createElement('canvas');
-    thumb.className = 'layer-thumb';
-    thumb.width = 24;
-    thumb.height = 24;
-    const thumbCtx = thumb.getContext('2d')!;
-    thumbCtx.imageSmoothingEnabled = false;
-    // Draw a tiny preview
-    const tmpCvs = document.createElement('canvas');
-    tmpCvs.width = layer.width;
-    tmpCvs.height = layer.height;
-    tmpCvs.getContext('2d')!.putImageData(layer.rgbaData, 0, 0);
-    const fitScale = Math.min(24 / layer.width, 24 / layer.height);
-    const tw = layer.width * fitScale;
-    const th = layer.height * fitScale;
-    thumbCtx.drawImage(tmpCvs, 0, 0, layer.width, layer.height, (24 - tw) / 2, (24 - th) / 2, tw, th);
-    row.appendChild(thumb);
-
-    // Name
-    const name = document.createElement('span');
-    name.className = 'layer-name';
-    name.textContent = layer.name;
-    row.appendChild(name);
-
-    // Status badge
-    const badge = document.createElement('span');
-    badge.className = 'layer-badge';
-    badge.textContent = layer.quantized ? 'Q' : 'RGBA';
-    setTooltip(badge, layer.quantized ? 'Quantized — ready to merge into ROM' : 'Raw photo — quantize before merging');
-    row.appendChild(badge);
-
-    // Quantize button (only if not yet quantized)
-    if (!layer.quantized) {
-      const qBtn = document.createElement('button');
-      qBtn.className = 'layer-btn';
-      qBtn.textContent = 'Q';
-      setTooltip(qBtn, 'Quantize to palette colors');
-      qBtn.onclick = (e) => { e.stopPropagation(); this.callbacks.onQuantizeLayer(groupIdx, layerIdx); };
-      row.appendChild(qBtn);
-    }
-
-    // Delete button
-    const delBtn = document.createElement('button');
-    delBtn.className = 'layer-btn layer-del-btn';
-    delBtn.textContent = '\u00D7';
-    setTooltip(delBtn, 'Delete this layer');
-    delBtn.onclick = (e) => { e.stopPropagation(); this.callbacks.onDeleteLayer(groupIdx, layerIdx); };
-    row.appendChild(delBtn);
-
-    return row;
   }
 }

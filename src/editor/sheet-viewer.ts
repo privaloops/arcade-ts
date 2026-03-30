@@ -1,9 +1,8 @@
 /**
  * SheetViewer — fullscreen sprite sheet & scroll set viewer.
  *
- * Extracted from SpriteEditorUI to isolate the fullscreen viewer mode
- * (pose navigation, tile selection, scroll set reconstitution) from the
- * core editor overlay.
+ * Read-only viewer for captured poses and scroll sets.
+ * Editing happens in Aseprite via export/import.
  */
 
 import { SCREEN_WIDTH, SCREEN_HEIGHT } from '../constants';
@@ -11,15 +10,13 @@ import type { Emulator } from '../emulator';
 import type { SpriteEditor } from './sprite-editor';
 import type { CapturedPose, SpriteGroup as SpriteGroupData } from './sprite-analyzer';
 import type { ScrollSet } from './scroll-capture';
-import type { PhotoLayer, LayerGroup } from './layer-model';
+import type { LayerGroup } from './layer-model';
 import { assembleCharacter } from './sprite-analyzer';
 import { readPalette } from './palette-editor';
 import { readTile as readTileFn } from './tile-encoder';
 import { findTileReferences } from './tile-refs';
 import { scrollLayerName } from './scroll-capture';
 import { setTooltip } from '../ui/tooltip';
-import { resizeRgba } from './photo-import';
-import { showToast } from '../ui/toast';
 import { exportSpriteAseprite, exportScrollAseprite } from './aseprite-io';
 
 // ---------------------------------------------------------------------------
@@ -32,25 +29,18 @@ export interface SheetViewerHost {
   readonly gameCanvas: HTMLCanvasElement;
   overlay: HTMLCanvasElement | null;
 
-  // Layer group state (mutable — SheetViewer reads and writes)
   layerGroups: LayerGroup[];
   activeGroupIndex: number;
-  activeLayerIndex: number;
 
-  // Computed getters
   readonly activeGroup: LayerGroup | undefined;
-  readonly activeLayer: PhotoLayer | undefined;
   readonly activePoses: CapturedPose[];
   readonly activePose: CapturedPose | undefined;
 
-  // Callbacks
   refreshTileGrid(): void;
   refreshPalette(): void;
   refreshInfoBar(): void;
   refreshLayerPanel(): void;
   updateStatus(): void;
-  quantizeSpritePhotoLayer(updatePalette: boolean): void;
-  mergeSpritePhotoLayer(): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -129,39 +119,6 @@ export class SheetViewer {
   /** Forward tool shortcuts while in sheet zoomed view. */
   private handleToolShortcut(e: KeyboardEvent): void {
     const { host } = this;
-    const layer = host.activeGroup?.layers[host.activeLayerIndex];
-    if (layer) {
-      if (e.shiftKey && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
-        e.preventDefault();
-        if (e.key === 'ArrowUp') layer.offsetY--;
-        else if (e.key === 'ArrowDown') layer.offsetY++;
-        else if (e.key === 'ArrowLeft') layer.offsetX--;
-        else if (e.key === 'ArrowRight') layer.offsetX++;
-        this.renderSheetZoomedPose();
-        return;
-      }
-      if (e.key === '+' || e.key === '=') {
-        e.preventDefault();
-        const newW = layer.width + 1;
-        const newH = layer.height + 1;
-        layer.rgbaData = resizeRgba(layer.rgbaOriginal, newW, newH);
-        layer.width = newW;
-        layer.height = newH;
-        this.renderSheetZoomedPose();
-        return;
-      }
-      if (e.key === '-') {
-        e.preventDefault();
-        const newW = Math.max(4, layer.width - 1);
-        const newH = Math.max(4, layer.height - 1);
-        layer.rgbaData = resizeRgba(layer.rgbaOriginal, newW, newH);
-        layer.width = newW;
-        layer.height = newH;
-        this.renderSheetZoomedPose();
-        return;
-      }
-    }
-
     const { editor } = host;
     switch (e.key) {
       case 'b': case 'B': editor.setTool('pencil'); e.preventDefault(); break;
@@ -226,12 +183,6 @@ export class SheetViewer {
 
   exitSpriteSheetMode(): void {
     if (!this.spriteSheetMode) return;
-
-    const group = this.host.activeGroup;
-    if (group?.type === 'sprite' && group.layers.length > 0) {
-      group.layers.length = 0;
-      this.host.activeLayerIndex = -1;
-    }
 
     this.spriteSheetMode = false;
     this.activeScrollSet = null;
@@ -333,10 +284,8 @@ export class SheetViewer {
     ctx.imageSmoothingEnabled = false;
 
     const imgData = ctx.createImageData(w, h);
-    const data = imgData.data;
-
     for (const tile of tiles) {
-      renderTileToImageData(data, w, gfxRom, tile, tileW, tileH, colors, tile.tileCol - minCol, tile.tileRow - minRow);
+      renderTileToImageData(imgData.data, w, gfxRom, tile, tileW, tileH, colors, tile.tileCol - minCol, tile.tileRow - minRow);
     }
 
     ctx.putImageData(imgData, 0, 0);
@@ -437,51 +386,6 @@ export class SheetViewer {
     };
     header.appendChild(exportAseBtn);
 
-    // Sprite photo layer controls
-    const hasPhotoLayers = (host.activeGroup?.layers.length ?? 0) > 0;
-    if (hasPhotoLayers) {
-      const activeLayer = host.activeGroup?.layers[host.activeLayerIndex];
-      const isQuantized = activeLayer?.quantized ?? false;
-
-      if (!isQuantized) {
-        const updatePalLabel = el('label', 'sprite-sheet-update-pal') as HTMLLabelElement;
-        const updatePalCb = document.createElement('input');
-        updatePalCb.type = 'checkbox';
-        updatePalCb.id = 'update-palette-cb';
-        const updatePalText = document.createElement('span');
-        updatePalText.textContent = 'Update palette';
-        updatePalLabel.append(updatePalCb, updatePalText);
-        header.appendChild(updatePalLabel);
-
-        const quantizeBtn = el('button', 'sprite-sheet-back') as HTMLButtonElement;
-        quantizeBtn.textContent = 'Quantize';
-        quantizeBtn.onclick = () => {
-          host.quantizeSpritePhotoLayer(updatePalCb.checked);
-          this.renderSheetZoomedView();
-        };
-        header.appendChild(quantizeBtn);
-      } else {
-        const mergeBtn = el('button', 'sprite-sheet-back') as HTMLButtonElement;
-        mergeBtn.textContent = 'Merge';
-        mergeBtn.onclick = () => {
-          host.mergeSpritePhotoLayer();
-          this.renderSheetZoomedView();
-        };
-        header.appendChild(mergeBtn);
-      }
-
-      const removeBtn = el('button', 'sprite-sheet-back') as HTMLButtonElement;
-      removeBtn.textContent = 'Remove Photo';
-      removeBtn.onclick = () => {
-        if (host.activeGroup) {
-          host.activeGroup.layers.splice(host.activeLayerIndex, 1);
-          host.activeLayerIndex = -1;
-          this.renderSheetZoomedView();
-        }
-      };
-      header.appendChild(removeBtn);
-    }
-
     const backBtn = el('button', 'sprite-sheet-back') as HTMLButtonElement;
     backBtn.textContent = 'Close';
     setTooltip(backBtn, 'Back to game — Escape');
@@ -501,17 +405,26 @@ export class SheetViewer {
     this.sheetZoomCtx = zoomCvs.getContext('2d')!;
     this.sheetZoomCtx.imageSmoothingEnabled = false;
 
-    // Mouse interaction for photo layer drag/resize/tile select
-    this.bindZoomCanvasEvents(zoomCvs, cssScale, pose);
+    // Click to select tile
+    zoomCvs.addEventListener('click', (e) => {
+      const rect = zoomCvs.getBoundingClientRect();
+      const px = Math.floor((e.clientX - rect.left) / cssScale);
+      const py = Math.floor((e.clientY - rect.top) / cssScale);
+      const tileIdx = pose.tiles.findIndex(t =>
+        px >= t.relX && px < t.relX + 16 && py >= t.relY && py < t.relY + 16,
+      );
+      if (tileIdx !== -1) {
+        this.sheetSelectedTile = tileIdx;
+        this.selectSheetTile(tileIdx);
+      }
+    });
 
     this.renderSheetZoomedPose();
     zoomSection.appendChild(zoomCvs);
 
-    if (!hasPhotoLayers) {
-      const hint = el('div', 'edit-capture-hint') as HTMLDivElement;
-      hint.textContent = 'Export to Aseprite to edit';
-      zoomSection.appendChild(hint);
-    }
+    const hint = el('div', 'edit-capture-hint') as HTMLDivElement;
+    hint.textContent = 'Export to Aseprite to edit';
+    zoomSection.appendChild(hint);
 
     // Tile strip
     const tilesLabel = el('div', 'edit-section-label');
@@ -524,112 +437,6 @@ export class SheetViewer {
 
     main.appendChild(zoomSection);
     container.appendChild(main);
-  }
-
-  private bindZoomCanvasEvents(zoomCvs: HTMLCanvasElement, cssScale: number, pose: CapturedPose): void {
-    const { host } = this;
-    let draggingPhotoLayer = false;
-    let resizingPhotoLayer = false;
-    let resizeCorner = '';
-    let dragStartX = 0;
-    let dragStartY = 0;
-    let dragMoved = false;
-
-    zoomCvs.addEventListener('mousedown', (e) => {
-      const rect = zoomCvs.getBoundingClientRect();
-      const px = Math.floor((e.clientX - rect.left) / cssScale);
-      const py = Math.floor((e.clientY - rect.top) / cssScale);
-
-      const layer = host.activeGroup?.layers[host.activeLayerIndex];
-      if (layer) {
-        const lx = layer.offsetX, ly = layer.offsetY;
-        const lw = layer.width, lh = layer.height;
-        const ht = 3;
-
-        const corners: [string, number, number][] = [
-          ['tl', lx, ly], ['tr', lx + lw, ly],
-          ['bl', lx, ly + lh], ['br', lx + lw, ly + lh],
-        ];
-        for (const [corner, cx, cy] of corners) {
-          if (Math.abs(px - cx) <= ht && Math.abs(py - cy) <= ht) {
-            resizingPhotoLayer = true;
-            resizeCorner = corner;
-            dragStartX = px; dragStartY = py;
-            dragMoved = false;
-            e.preventDefault();
-            return;
-          }
-        }
-
-        if (px >= lx && px < lx + lw && py >= ly && py < ly + lh) {
-          draggingPhotoLayer = true;
-          dragStartX = px; dragStartY = py;
-          dragMoved = false;
-          e.preventDefault();
-          return;
-        }
-      }
-    });
-
-    const onMove = (e: MouseEvent) => {
-      const layer = host.activeGroup?.layers[host.activeLayerIndex];
-      if (!layer) return;
-      const rect = zoomCvs.getBoundingClientRect();
-      const px = Math.floor((e.clientX - rect.left) / cssScale);
-      const py = Math.floor((e.clientY - rect.top) / cssScale);
-      const dx = px - dragStartX;
-      const dy = py - dragStartY;
-      if (dx === 0 && dy === 0) return;
-      dragMoved = true;
-
-      if (resizingPhotoLayer) {
-        const delta = Math.abs(dx) > Math.abs(dy) ? dx : dy;
-        const sign = (resizeCorner === 'tl' || resizeCorner === 'bl') ? -1 : 1;
-        const origW = layer.rgbaOriginal.width;
-        const origH = layer.rgbaOriginal.height;
-        const newW = Math.max(4, layer.width + delta * sign);
-        const newH = Math.max(4, Math.round(newW * origH / origW));
-        if (resizeCorner.includes('l')) layer.offsetX += layer.width - newW;
-        if (resizeCorner.includes('t')) layer.offsetY += layer.height - newH;
-        layer.rgbaData = resizeRgba(layer.rgbaOriginal, newW, newH);
-        layer.width = newW;
-        layer.height = newH;
-      } else if (draggingPhotoLayer) {
-        layer.offsetX += dx;
-        layer.offsetY += dy;
-      } else {
-        return;
-      }
-      dragStartX = px; dragStartY = py;
-      this.renderSheetZoomedPose();
-    };
-
-    const onUp = (e: MouseEvent) => {
-      if (draggingPhotoLayer || resizingPhotoLayer) {
-        draggingPhotoLayer = false;
-        resizingPhotoLayer = false;
-        if (dragMoved) return;
-      }
-      const rect = zoomCvs.getBoundingClientRect();
-      const px = Math.floor((e.clientX - rect.left) / cssScale);
-      const py = Math.floor((e.clientY - rect.top) / cssScale);
-
-      const tileIdx = pose.tiles.findIndex(t =>
-        px >= t.relX && px < t.relX + 16 && py >= t.relY && py < t.relY + 16,
-      );
-      if (tileIdx !== -1) {
-        this.sheetSelectedTile = tileIdx;
-        this.selectSheetTile(tileIdx);
-      }
-    };
-
-    zoomCvs.addEventListener('mousedown', () => {
-      document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup', onUp, { once: true });
-    });
-    zoomCvs.addEventListener('mouseup', () => {
-      document.removeEventListener('mousemove', onMove);
-    });
   }
 
   private renderScrollSetView(): void {
@@ -799,60 +606,11 @@ export class SheetViewer {
     ctx.clearRect(0, 0, cvs.width, cvs.height);
     ctx.drawImage(tmp, 0, 0);
 
-    // Draw photo layers on top
-    const group = host.activeGroup;
-    if (group) {
-      for (const layer of group.layers) {
-        if (!layer.visible) continue;
-        const layerCvs = document.createElement('canvas');
-        layerCvs.width = layer.width;
-        layerCvs.height = layer.height;
-        const layerCtx = layerCvs.getContext('2d')!;
-        if (layer.quantized) {
-          const palArr = readPalette(bufs.vram, video.getPaletteBase(), pal);
-          const imgData = new ImageData(layer.width, layer.height);
-          for (let i = 0; i < layer.pixels.length; i++) {
-            const ci = layer.pixels[i]!;
-            if (ci === 0) continue;
-            const [r, g, b] = palArr[ci] ?? [0, 0, 0];
-            imgData.data[i * 4] = r;
-            imgData.data[i * 4 + 1] = g;
-            imgData.data[i * 4 + 2] = b;
-            imgData.data[i * 4 + 3] = 255;
-          }
-          layerCtx.putImageData(imgData, 0, 0);
-        } else {
-          layerCtx.putImageData(layer.rgbaData, 0, 0);
-        }
-        ctx.drawImage(layerCvs, layer.offsetX, layer.offsetY);
-      }
-    }
-
     // Tile grid overlay
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
     ctx.lineWidth = 0.5;
     for (const t of pose.tiles) {
       ctx.strokeRect(t.relX + 0.5, t.relY + 0.5, 15, 15);
-    }
-
-    // Active photo layer outline + resize handles
-    const activeLayer = group?.layers[host.activeLayerIndex];
-    if (activeLayer) {
-      const lx = activeLayer.offsetX, ly = activeLayer.offsetY;
-      const lw = activeLayer.width, lh = activeLayer.height;
-
-      ctx.strokeStyle = 'rgba(0, 200, 255, 0.7)';
-      ctx.lineWidth = 1;
-      ctx.setLineDash([3, 3]);
-      ctx.strokeRect(lx - 0.5, ly - 0.5, lw + 1, lh + 1);
-      ctx.setLineDash([]);
-
-      const hs = 2;
-      ctx.fillStyle = 'rgba(0, 200, 255, 0.9)';
-      ctx.fillRect(lx - hs, ly - hs, hs * 2, hs * 2);
-      ctx.fillRect(lx + lw - hs, ly - hs, hs * 2, hs * 2);
-      ctx.fillRect(lx - hs, ly + lh - hs, hs * 2, hs * 2);
-      ctx.fillRect(lx + lw - hs, ly + lh - hs, hs * 2, hs * 2);
     }
 
     // Selected tile highlight
@@ -936,7 +694,7 @@ export class SheetViewer {
         tileWrap.appendChild(badge);
       }
 
-      setTooltip(tileWrap, 'Click to edit this tile — Left/Right arrows');
+      setTooltip(tileWrap, 'Click to select this tile — Left/Right arrows');
       tileWrap.onclick = () => {
         this.sheetSelectedTile = i;
         this.selectSheetTile(i);
@@ -1028,7 +786,7 @@ function el(tag: string, className?: string): HTMLElement {
   return e;
 }
 
-/** Render a single tile into an ImageData data array (shared by scroll set view + thumbnail). */
+/** Render a single tile into an ImageData data array. */
 function renderTileToImageData(
   data: Uint8ClampedArray,
   imgWidth: number,

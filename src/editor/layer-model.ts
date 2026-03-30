@@ -1,5 +1,5 @@
 /**
- * Layer Model — pure data types for the multi-layer photo system.
+ * Layer Model — data types for the layer group system.
  * No DOM, no side effects.
  */
 
@@ -8,20 +8,6 @@ import type { CapturedPose } from './sprite-analyzer';
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-export interface PhotoLayer {
-  id: string;
-  name: string;
-  rgbaData: ImageData;       // current RGBA (may be resized)
-  rgbaOriginal: ImageData;   // original full-res for lossless resize
-  pixels: Uint8Array;        // palette indices (filled after quantize)
-  width: number;
-  height: number;
-  offsetX: number;
-  offsetY: number;
-  quantized: boolean;
-  visible: boolean;
-}
 
 export interface LayerGroup {
   type: 'scroll' | 'sprite';
@@ -34,39 +20,11 @@ export interface LayerGroup {
     palette: number;
     selectedPoseIndex: number;
   };
-  layers: PhotoLayer[];
 }
 
 // ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
-
-let nextId = 0;
-
-export function createLayer(
-  name: string,
-  rgba: ImageData,
-  offsetX: number,
-  offsetY: number,
-): PhotoLayer {
-  return {
-    id: `layer-${nextId++}`,
-    name,
-    rgbaData: rgba,
-    rgbaOriginal: new ImageData(
-      new Uint8ClampedArray(rgba.data),
-      rgba.width,
-      rgba.height,
-    ),
-    pixels: new Uint8Array(rgba.width * rgba.height),
-    width: rgba.width,
-    height: rgba.height,
-    offsetX,
-    offsetY,
-    quantized: false,
-    visible: true,
-  };
-}
 
 export function createSpriteGroup(
   name: string,
@@ -77,7 +35,6 @@ export function createSpriteGroup(
     type: 'sprite',
     name,
     spriteCapture: { poses, palette, selectedPoseIndex: 0 },
-    layers: [],
   };
 }
 
@@ -89,6 +46,5 @@ export function createScrollGroup(
     type: 'scroll',
     name,
     layerId,
-    layers: [],
   };
 }
