@@ -10,21 +10,19 @@ import { loadTestRom, waitForGameReady, getEmulatorState } from './helpers';
 
 test.describe('Phase 9 — Quit game', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/play/');
     await loadTestRom(page);
     await waitForGameReady(page);
   });
 
   test('9.1 quit — drop zone visible, controls hidden, emulator stopped', async ({ page }) => {
-    // Open hamburger to access quit button
-    await page.click('#hamburger-btn');
     await page.click('#quit-btn');
 
     // Drop zone should be visible (not hidden)
     await expect(page.locator('#drop-zone')).not.toHaveClass(/hidden/);
 
-    // Controls should be hidden (no "visible" class)
-    await expect(page.locator('#controls')).not.toHaveClass(/visible/);
+    // Emu bar should be hidden (no "visible" class)
+    await expect(page.locator('#emu-bar')).not.toHaveClass(/visible/);
 
     // Emulator should be stopped
     const state = await page.evaluate(() => {
@@ -40,7 +38,6 @@ test.describe('Phase 9 — Quit game', () => {
 
   test('9.2 after quit, re-load ROM — emulator running again', async ({ page }) => {
     // Quit
-    await page.click('#hamburger-btn');
     await page.click('#quit-btn');
     await expect(page.locator('#drop-zone')).not.toHaveClass(/hidden/);
 

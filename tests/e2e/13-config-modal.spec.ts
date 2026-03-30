@@ -10,7 +10,7 @@ import { loadTestRom, waitForGameReady } from './helpers';
 
 test.describe('Phase 13 — Config modal', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/play/');
     await loadTestRom(page);
     await waitForGameReady(page);
   });
@@ -65,7 +65,6 @@ test.describe('Phase 13 — Config modal', () => {
     await expect(overlay).toHaveClass(/open/);
 
     // Click on the overlay itself (outside the modal content)
-    // The overlay is the full-screen background; clicking at the edge hits it
     await overlay.click({ position: { x: 5, y: 5 } });
     await expect(overlay).not.toHaveClass(/open/);
   });

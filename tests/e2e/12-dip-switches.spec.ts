@@ -10,7 +10,7 @@ import { loadTestRom, waitForGameReady } from './helpers';
 
 test.describe('Phase 12 — DIP switches', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/play/');
     await loadTestRom(page);
     await waitForGameReady(page);
     // Open config modal > DIP tab

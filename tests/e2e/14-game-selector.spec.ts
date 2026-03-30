@@ -10,7 +10,7 @@ import { test, expect } from '@playwright/test';
 
 test.describe('Phase 14 — Game selector', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/play/');
   });
 
   test('14.1 game select dropdown exists with options', async ({ page }) => {
