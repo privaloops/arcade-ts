@@ -439,6 +439,7 @@ export class DebugRenderer {
     const dy = e.clientY - this.dragStartY;
     this.rotateY = this.dragStartRotY + dx * 0.3;
     this.rotateX = Math.max(-60, Math.min(60, this.dragStartRotX - dy * 0.3));
+    this.updateExplodedTransforms();
   };
 
   private onDragEnd = (): void => {
