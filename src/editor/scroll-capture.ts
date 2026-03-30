@@ -9,6 +9,7 @@
 import type { CPS1Video } from '../video/cps1-video';
 import { LAYER_SCROLL1, LAYER_SCROLL2, LAYER_SCROLL3 } from '../video/cps1-video';
 import { SCREEN_WIDTH, SCREEN_HEIGHT } from '../constants';
+import { readPalette } from './palette-editor';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -43,6 +44,8 @@ export interface ScrollSet {
   tiles: ScrollTile[];
   tileW: number;
   tileH: number;
+  /** Palette RGB snapshot captured at recording time (16 entries, [R,G,B]). */
+  capturedColors?: Array<[number, number, number]>;
 }
 
 export interface ScrollCaptureSession {
@@ -51,6 +54,8 @@ export interface ScrollCaptureSession {
   tileMap: Map<string, ScrollTile>;
   tileW: number;
   tileH: number;
+  /** Palette RGB snapshots keyed by palette index, captured at first encounter. */
+  paletteSnapshots: Map<number, Array<[number, number, number]>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -64,6 +69,7 @@ export function createScrollSession(layerId: number): ScrollCaptureSession {
     tileMap: new Map(),
     tileW,
     tileH: tileW,
+    paletteSnapshots: new Map(),
   };
 }
 
@@ -74,6 +80,8 @@ export function createScrollSession(layerId: number): ScrollCaptureSession {
 export function captureScrollFrame(
   session: ScrollCaptureSession,
   video: CPS1Video,
+  vram?: Uint8Array,
+  paletteBase?: number,
 ): number {
   const { layerId, tileW, tileH } = session;
   let newTiles = 0;
@@ -89,6 +97,11 @@ export function captureScrollFrame(
 
       const info = video.inspectScrollAt(px, py, layerId, true);
       if (!info || info.tileCode === -1) continue;
+
+      // Snapshot palette RGB on first encounter of this palette index
+      if (vram && paletteBase !== undefined && !session.paletteSnapshots.has(info.paletteIndex)) {
+        session.paletteSnapshots.set(info.paletteIndex, readPalette(vram, paletteBase, info.paletteIndex));
+      }
 
       // Absolute position = screen position + scroll, snapped to tile grid
       const absX = Math.floor((sx + scrollX) / tileW) * tileW;
@@ -131,7 +144,10 @@ export function buildScrollSets(session: ScrollCaptureSession): ScrollSet[] {
   const sets: ScrollSet[] = [];
   for (const [palette, tiles] of byPalette) {
     if (tiles.length === 0) continue;
-    sets.push({ layerId: session.layerId, palette, tiles, tileW: session.tileW, tileH: session.tileH });
+    const capturedColors = session.paletteSnapshots.get(palette);
+    const set: ScrollSet = { layerId: session.layerId, palette, tiles, tileW: session.tileW, tileH: session.tileH };
+    if (capturedColors) set.capturedColors = capturedColors;
+    sets.push(set);
   }
 
   sets.sort((a, b) => a.palette - b.palette);

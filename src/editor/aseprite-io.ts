@@ -180,10 +180,10 @@ export function exportScrollAseprite(
   if (!video) return;
   const bufs = emulator.getBusBuffers();
 
-  const { tileW, tileH, layerId, palette: palIdx } = set;
+  const { tileW, tileH, layerId, palette: palIdx, capturedColors } = set;
 
-  // Read the 16-color CPS1 palette
-  const colors = readPalette(bufs.vram, video.getPaletteBase(), palIdx);
+  // Use palette captured at recording time, or fallback to current VRAM
+  const colors = capturedColors ?? readPalette(bufs.vram, video.getPaletteBase(), palIdx);
   const asePalette: AsepritePaletteEntry[] = [];
   for (let c = 0; c < 16; c++) {
     const [r, g, b] = colors[c] ?? [0, 0, 0];

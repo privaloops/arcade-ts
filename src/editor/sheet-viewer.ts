@@ -259,10 +259,10 @@ export class SheetViewer {
     if (!video) return null;
     const bufs = host.emulator.getBusBuffers();
 
-    const { tileW, tileH, palette: palIdx, tiles } = set;
+    const { tileW, tileH, palette: palIdx, tiles, capturedColors } = set;
     if (tiles.length === 0) return null;
 
-    const colors = readPalette(bufs.vram, video.getPaletteBase(), palIdx);
+    const colors = capturedColors ?? readPalette(bufs.vram, video.getPaletteBase(), palIdx);
 
     let minCol = Infinity, minRow = Infinity, maxCol = -Infinity, maxRow = -Infinity;
     for (const tile of tiles) {
@@ -452,8 +452,8 @@ export class SheetViewer {
     if (!video) return;
     const bufs = host.emulator.getBusBuffers();
 
-    const { tileW, tileH, palette: palIdx, tiles, layerId } = set;
-    const colors = readPalette(bufs.vram, video.getPaletteBase(), palIdx);
+    const { tileW, tileH, palette: palIdx, tiles, layerId, capturedColors } = set;
+    const colors = capturedColors ?? readPalette(bufs.vram, video.getPaletteBase(), palIdx);
 
     const main = el('div', 'sprite-sheet-main');
 

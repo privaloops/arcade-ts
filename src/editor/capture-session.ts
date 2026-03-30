@@ -209,8 +209,10 @@ export class CaptureManager {
   captureScrollTick(): void {
     const video = this.emulator.getVideo();
     if (!video) return;
+    const bufs = this.emulator.getBusBuffers();
+    const paletteBase = video.getPaletteBase();
     for (const session of this.scrollSessions.values()) {
-      captureScrollFrame(session, video);
+      captureScrollFrame(session, video, bufs.vram, paletteBase);
     }
     if (this.scrollSessions.size > 0 && ++this.scrollTickCounter >= 60) {
       this.scrollTickCounter = 0;
