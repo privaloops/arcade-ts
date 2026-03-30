@@ -7,7 +7,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Changed
-- **Refactor `sprite-editor-ui.ts`** — Split from 4629 LOC into 5 focused modules: `aseprite-io.ts` (import/export), `capture-session.ts` (pose/scroll capture), `sheet-viewer.ts` (fullscreen viewer), `photo-layer-ops.ts` (quantize/merge/composite). Main file reduced to ~2200 LOC. Dead code removed (~450 LOC)
+- **Refactor `sprite-editor-ui.ts`** — Split from 4629 LOC into focused modules: `aseprite-io.ts`, `capture-session.ts`, `sheet-viewer.ts`. Removed entire photo layer system (~3000 LOC). Main file reduced to ~1450 LOC
+- **Deduplicate `frame-state.ts`** — Replace private copies of tilemap scan, readWord, gfxromBankMapper with imports from cps1-video.ts
+- **Centralize constants** — `CHAR_SIZE_16`, `PIXEL_CLOCK`, `Z80_CLOCK`, `CPS_HTOTAL`, `CPS_VTOTAL`, `FRAME_RATE` moved to constants.ts (single source of truth)
+- **Type Aseprite manifest** — Replace `manifest: any` with `SpriteManifest` / `ScrollManifest` typed interfaces
+
+### Removed
+- Photo layer system (import/quantize/merge/magic wand) — editing happens exclusively in Aseprite
+- `photo-import.ts`, `photo-layer-ops.ts`, `magic-wand.test.ts`
 
 ### Added
 - **`.romstudio` save/load** — JSON save format with sparse ROM diffs (GFX, Program, OKI) + captured poses. Ctrl+S / Ctrl+O, drag & drop support. Auto-save to IndexedDB with 2s debounce, restore prompt on reload

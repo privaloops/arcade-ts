@@ -12,6 +12,7 @@ import {
   readWord,
   type GfxRange,
 } from '../video/cps1-video';
+import { CHAR_SIZE_16 } from '../constants';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -28,7 +29,6 @@ export interface TileReference {
 // ---------------------------------------------------------------------------
 
 const OBJ_SIZE = 0x0800;
-const CHAR_SIZE_16 = 128;
 
 // ---------------------------------------------------------------------------
 // findTileReferences

@@ -8,6 +8,11 @@
 
 import type { CpsBConfig, GfxMapperConfig } from '../memory/rom-loader';
 import { SCREEN_WIDTH, SCREEN_HEIGHT } from '../constants';
+import {
+  readWord, tilemap0Scan, tilemap1Scan, tilemap2Scan,
+  gfxromBankMapper, type GfxRange,
+  GFXTYPE_SPRITES, GFXTYPE_SCROLL1, GFXTYPE_SCROLL2, GFXTYPE_SCROLL3,
+} from './cps1-video';
 
 // ---------------------------------------------------------------------------
 // Public interfaces
@@ -86,80 +91,9 @@ const DEFAULT_ENABLE_SCROLL1 = 0x08;
 const DEFAULT_ENABLE_SCROLL2 = 0x10;
 const DEFAULT_ENABLE_SCROLL3 = 0x20;
 
-const GFXTYPE_SPRITES = 1;
-const GFXTYPE_SCROLL1 = 2;
-const GFXTYPE_SCROLL2 = 4;
-const GFXTYPE_SCROLL3 = 8;
-
-// ---------------------------------------------------------------------------
-// Tilemap scan functions (from MAME)
-// ---------------------------------------------------------------------------
-
-function tilemap0Scan(col: number, row: number): number {
-  return (row & 0x1f) + ((col & 0x3f) << 5) + ((row & 0x20) << 6);
-}
-
-function tilemap1Scan(col: number, row: number): number {
-  return (row & 0x0f) + ((col & 0x3f) << 4) + ((row & 0x30) << 6);
-}
-
-function tilemap2Scan(col: number, row: number): number {
-  return (row & 0x07) + ((col & 0x3f) << 3) + ((row & 0x38) << 6);
-}
-
-// ---------------------------------------------------------------------------
-// GFX ROM bank mapper (from MAME)
-// ---------------------------------------------------------------------------
-
-interface GfxRange {
-  type: number;
-  start: number;
-  end: number;
-  bank: number;
-}
-
-function gfxromBankMapper(
-  type: number, code: number,
-  mapperTable: GfxRange[], bankSizes: number[], bankBases: number[],
-): number {
-  let shift = 0;
-  switch (type) {
-    case GFXTYPE_SPRITES: shift = 1; break;
-    case GFXTYPE_SCROLL1: shift = 0; break;
-    case GFXTYPE_SCROLL2: shift = 1; break;
-    case GFXTYPE_SCROLL3: shift = 3; break;
-  }
-  const shiftedCode = code << shift;
-  let hasRangeForType = false;
-  for (let i = 0; i < mapperTable.length; i++) {
-    const range = mapperTable[i]!;
-    if (range.type & type) {
-      hasRangeForType = true;
-      if (shiftedCode >= range.start && shiftedCode <= range.end) {
-        const bankSize = bankSizes[range.bank]!;
-        return (bankBases[range.bank]! + (shiftedCode & (bankSize - 1))) >> shift;
-      }
-    }
-  }
-  // Sprites always fall back to bank 0; scroll layers without any
-  // range for their type also fall back. Otherwise skip (-1).
-  if (!hasRangeForType || type === GFXTYPE_SPRITES) {
-    const bankSize0 = bankSizes[0]!;
-    if (bankSize0 > 0) {
-      return (bankBases[0]! + (shiftedCode & (bankSize0 - 1))) >> shift;
-    }
-  }
-  return -1;
-}
-
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function readWord(data: Uint8Array, offset: number): number {
-  if (offset + 1 >= data.length) return 0;
-  return (data[offset]! << 8) | data[offset + 1]!;
-}
 
 function vramBaseOffset(cpsaRegs: Uint8Array, regOffset: number, boundary: number): number {
   const regValue = readWord(cpsaRegs, regOffset);

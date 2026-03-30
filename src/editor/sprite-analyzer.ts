@@ -9,6 +9,7 @@
 import { readTile } from './tile-encoder';
 import { gfxromBankMapper, GFXTYPE_SPRITES } from '../video/cps1-video';
 import type { CPS1Video } from '../video/cps1-video';
+import { CHAR_SIZE_16 } from '../constants';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -56,7 +57,6 @@ export interface CapturedPose {
 // Constants
 // ---------------------------------------------------------------------------
 
-const CHAR_SIZE_16 = 128;
 const CPS_HBEND = 64;
 const CPS_VBEND = 16;
 

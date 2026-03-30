@@ -9,7 +9,8 @@
  *   - Each 4-byte group encodes 8 pixels in 4bpp planar format (MSB-first)
  */
 
-const CHAR_SIZE_16 = 128;
+import { CHAR_SIZE_16 } from '../constants';
+
 const ROW_STRIDE_8 = 8;    // row stride for 8x8 and 16x16 tiles
 const ROW_STRIDE_32 = 16;  // row stride for 32x32 tiles
 

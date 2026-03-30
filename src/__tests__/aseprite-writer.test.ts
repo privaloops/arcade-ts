@@ -254,8 +254,8 @@ describe('aseprite-writer', () => {
 
     // Manifest
     expect(ase.manifest).not.toBeNull();
-    expect(ase.manifest.game).toBe('ff1');
-    expect(ase.manifest.character).toBe('cody');
+    expect(ase.manifest!.game).toBe('ff1');
+    expect(ase.manifest!.character).toBe('cody');
 
     // Frame durations
     expect(ase.frames[0]!.duration).toBe(100);

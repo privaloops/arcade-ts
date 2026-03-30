@@ -1,4 +1,5 @@
 import type { CpsBConfig, GfxMapperConfig } from '../memory/rom-loader';
+import { CHAR_SIZE_16 } from '../constants';
 
 /**
  * CPS1 Video — CPS-A / CPS-B Graphics Decoder
@@ -223,7 +224,6 @@ export function gfxromBankMapper(type: number, code: number, mapperTable: GfxRan
 
 /** Char sizes for each tile dimension */
 const CHAR_SIZE_8 = 64;    // 8x8:   64 bytes
-const CHAR_SIZE_16 = 128;  // 16x16: 128 bytes
 const CHAR_SIZE_32 = 512;  // 32x32: 512 bytes
 
 /** Row stride in bytes */

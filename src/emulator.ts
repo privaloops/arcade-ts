@@ -18,7 +18,7 @@ import { Bus } from "./memory/bus";
 import { Z80Bus } from "./memory/z80-bus";
 import { Z80BusQSound } from "./memory/z80-bus-qsound";
 import { Renderer } from "./video/renderer";
-import { FRAMEBUFFER_SIZE, YM2151_SAMPLE_RATE, OKI6295_SAMPLE_RATE, QSOUND_SAMPLE_RATE as QS_RATE } from "./constants";
+import { FRAMEBUFFER_SIZE, YM2151_SAMPLE_RATE, OKI6295_SAMPLE_RATE, QSOUND_SAMPLE_RATE as QS_RATE, Z80_CLOCK, PIXEL_CLOCK, CPS_HTOTAL, CPS_VTOTAL, FRAME_RATE } from "./constants";
 import { WebGLRenderer } from "./video/renderer-webgl";
 import { CPS1Video } from "./video/cps1-video";
 import type { RendererInterface } from "./types";
@@ -50,12 +50,7 @@ import { type SaveState, saveToSlot, loadFromSlot, bufToB64, b64ToBuf, SAVE_STAT
 //
 
 const M68K_CLOCK = 10_000_000;        // 10 MHz
-const Z80_CLOCK = 3_579_545;          // 3.579545 MHz
-const PIXEL_CLOCK = 8_000_000;        // 8 MHz
-const CPS_HTOTAL = 512;
-const CPS_VTOTAL = 262;
 const CPS_VBLANK_LINE = 240;          // VBlank asserted at this scanline
-const FRAME_RATE = PIXEL_CLOCK / (CPS_HTOTAL * CPS_VTOTAL); // ~59.637 Hz
 const M68K_CYCLES_PER_FRAME = Math.round(M68K_CLOCK / FRAME_RATE); // ~167 700
 const M68K_CYCLES_PER_SCANLINE = Math.round(M68K_CYCLES_PER_FRAME / CPS_VTOTAL); // ~640
 const Z80_CYCLES_PER_FRAME = Math.round(Z80_CLOCK / FRAME_RATE);   // ~60 040

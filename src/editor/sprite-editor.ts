@@ -9,6 +9,7 @@
 import { writePixel, writeScrollPixel, readPixel, readScrollPixel, readTile } from './tile-encoder';
 import { readPalette, writeColor, encodeColor } from './palette-editor';
 import { gfxromBankMapper, GFXTYPE_SPRITES, LAYER_OBJ, LAYER_SCROLL1, LAYER_SCROLL2, LAYER_SCROLL3 } from '../video/cps1-video';
+import { CHAR_SIZE_16 } from '../constants';
 import type { SpriteInspectResult, ScrollInspectResult } from '../video/cps1-video';
 import type { Emulator } from '../emulator';
 
@@ -55,7 +56,6 @@ export interface TileContext {
 // ---------------------------------------------------------------------------
 
 const MAX_UNDO = 100;
-const CHAR_SIZE_16 = 128;
 
 export class SpriteEditor {
   private readonly emulator: Emulator;
