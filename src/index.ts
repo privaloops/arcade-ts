@@ -20,7 +20,7 @@ import { getRendererMode, setupDomRenderer, initRendererToggle } from "./ui/rend
 import { initControlsBar, toggleFullscreen, toggleDebug, toggleAudio, toggleSpriteEditor } from "./ui/controls-bar";
 import { initShortcuts } from "./ui/shortcuts";
 import { exportSaveFile, parseSaveFile, applySaveFile } from "./editor/romstudio-save";
-import { hasAutoSave, loadAutoSave, clearAutoSave, scheduleAutoSave } from "./editor/romstudio-autosave";
+import { loadAutoSave, clearAutoSave, scheduleAutoSave } from "./editor/romstudio-autosave";
 import { showToast } from "./ui/toast";
 import { setTooltip } from "./ui/tooltip";
 
@@ -190,13 +190,34 @@ function onRomLoaded(gameName: string): void {
   const romStore = emulator.getRomStore();
   if (romStore) romStore.onModified = triggerAutoSave;
 
-  hasAutoSave(gameName).then(has => {
-    if (!has || romStudioApplied) return;
-    // Show restore prompt as a persistent toast
+  loadAutoSave(gameName).then(json => {
+    if (!json || romStudioApplied) return;
+
+    // Parse to build a summary of what's in the save
+    const result = parseSaveFile(json);
+    if ('error' in result) return;
+
+    const { diffs, poses } = result.data;
+    const gfxCount = diffs.graphics?.length ?? 0;
+    const progCount = diffs.program?.length ?? 0;
+    const okiCount = diffs.oki?.length ?? 0;
+    const poseCount = poses?.length ?? 0;
+    const totalDiffs = gfxCount + progCount + okiCount + poseCount;
+    if (totalDiffs === 0) return;
+
+    // Build human-readable summary
+    const parts: string[] = [];
+    if (gfxCount > 0) parts.push(`${gfxCount} tile${gfxCount > 1 ? 's' : ''}`);
+    if (progCount > 0) parts.push(`${progCount} palette${progCount > 1 ? 's' : ''}`);
+    if (okiCount > 0) parts.push(`${okiCount} sample${okiCount > 1 ? 's' : ''}`);
+    if (poseCount > 0) parts.push(`${poseCount} pose${poseCount > 1 ? 's' : ''}`);
+    const summary = parts.join(' · ');
+
     const toast = document.createElement('div');
     toast.className = 'smp-toast autosave-prompt';
     toast.innerHTML = `
       <span>Sauvegarde automatique trouvée.</span>
+      <span class="autosave-summary">${summary}</span>
       <button class="restore-btn">Restaurer</button>
       <button class="ignore-btn">Ignorer</button>
     `;
@@ -204,20 +225,15 @@ function onRomLoaded(gameName: string): void {
 
     toast.querySelector('.restore-btn')!.addEventListener('click', () => {
       toast.remove();
-      loadAutoSave(gameName).then(json => {
-        if (!json) return;
-        const romStore = emulator.getRomStore();
-        if (!romStore) return;
-        const result = parseSaveFile(json);
-        if ('error' in result) { showToast(result.error, false); return; }
-        const applyResult = applySaveFile(result.data, romStore, emulator.getVram(), emulator.getPaletteBase());
-        if ('error' in applyResult) { showToast(applyResult.error, false); return; }
-        const editorUI = debugPanel?.getSpriteEditorUI();
-        if (editorUI) editorUI.restorePoses(applyResult.poses);
-        saveCreatedAt = result.data.createdAt;
-        emulator.rerender();
-        showToast('Session restaurée depuis auto-save', true);
-      }).catch(() => showToast('Erreur de restauration', false));
+      const romStore = emulator.getRomStore();
+      if (!romStore) return;
+      const applyResult = applySaveFile(result.data, romStore, emulator.getVram(), emulator.getPaletteBase());
+      if ('error' in applyResult) { showToast(applyResult.error, false); return; }
+      const editorUI = debugPanel?.getSpriteEditorUI();
+      if (editorUI) editorUI.restorePoses(applyResult.poses);
+      saveCreatedAt = result.data.createdAt;
+      emulator.rerender();
+      showToast('Session restaurée depuis auto-save', true);
     });
 
     toast.querySelector('.ignore-btn')!.addEventListener('click', () => {

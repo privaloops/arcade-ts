@@ -835,6 +835,7 @@
         background: var(--color-surface-alt); color: var(--color-text); cursor: pointer; font-size: 0.75rem;
       }
       .smp-toast.autosave-prompt .restore-btn { background: var(--color-success-bg); color: var(--color-success); border-color: var(--color-success); }
+      .autosave-summary { font-size: 0.7rem; color: var(--color-text-dim); }
       @keyframes toastIn { from { opacity: 0; transform: translateX(-50%) translateY(10px); } }
       @keyframes toastOut { to { opacity: 0; transform: translateX(-50%) translateY(-10px); } }
 

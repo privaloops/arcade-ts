@@ -403,6 +403,7 @@ export function importScrollTilemap(
     }
   }
   emulator.rerender();
+  emulator.getRomStore()?.onModified?.();
   const palMsg = colorsChanged > 0 ? `, ${colorsChanged} palette colors updated` : '';
   showToast(`Scroll import: ${tilesWritten} unique tiles written to ROM${palMsg}`, true);
 }
@@ -484,8 +485,9 @@ export function importAsepriteFile(
         framesWritten++;
       }
 
-      // Force re-render
+      // Force re-render + trigger auto-save
       emulator.rerender();
+      emulator.getRomStore()?.onModified?.();
 
       // Create sprite set from imported frames
       if (manifest.frames?.length > 0 && manifest.palette !== undefined) {
