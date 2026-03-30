@@ -7,13 +7,12 @@ import { loadTestRom, waitForGameReady } from './helpers';
 
 test.describe('Phase 6 — Export & Save states', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/play/');
     await loadTestRom(page);
     await waitForGameReady(page);
   });
 
   test('6.1 export ROM triggers download', async ({ page }) => {
-    await page.click('#hamburger-btn');
     const [download] = await Promise.all([
       page.waitForEvent('download'),
       page.click('#export-btn'),

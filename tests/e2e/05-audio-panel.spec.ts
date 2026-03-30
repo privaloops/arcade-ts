@@ -7,18 +7,18 @@ import { loadTestRom, waitForGameReady } from './helpers';
 
 test.describe('Phase 5 — Audio panel', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/play/');
     await loadTestRom(page);
     await waitForGameReady(page);
   });
 
   test('5.1 panel toggles with F3', async ({ page }) => {
     // Audio panel is open by default
-    await expect(page.locator('.aud-panel')).toHaveClass(/open/);
+    await expect(page.locator('#aud-panel')).toHaveClass(/open/);
     await page.keyboard.press('F3');
-    await expect(page.locator('.aud-panel')).not.toHaveClass(/open/);
+    await expect(page.locator('#aud-panel')).not.toHaveClass(/open/);
     await page.keyboard.press('F3');
-    await expect(page.locator('.aud-panel')).toHaveClass(/open/);
+    await expect(page.locator('#aud-panel')).toHaveClass(/open/);
   });
 
   test('5.2 tracks tab active by default', async ({ page }) => {

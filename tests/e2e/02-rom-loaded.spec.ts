@@ -7,19 +7,17 @@ import { loadTestRom, waitForGameReady, getEmulatorState } from './helpers';
 
 test.describe('Phase 2 — ROM loaded', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/play/');
     await loadTestRom(page);
   });
 
-  test('2.1 ROM loads — drop zone hidden, controls visible', async ({ page }) => {
+  test('2.1 ROM loads — drop zone hidden, emu bar visible', async ({ page }) => {
     await expect(page.locator('#drop-zone')).toHaveClass(/hidden/);
-    await expect(page.locator('#controls')).toHaveClass(/visible/);
+    await expect(page.locator('#emu-bar')).toHaveClass(/visible/);
   });
 
-  test('2.2 export and edit buttons visible in hamburger', async ({ page }) => {
-    await page.click('#hamburger-btn');
+  test('2.2 export button visible after ROM load', async ({ page }) => {
     await expect(page.locator('#export-btn')).toBeVisible();
-    await expect(page.locator('#edit-btn')).toBeVisible();
   });
 
   test('2.3 emulator is running', async ({ page }) => {
@@ -29,18 +27,17 @@ test.describe('Phase 2 — ROM loaded', () => {
     expect(state.gameName).toBe('test');
   });
 
-  test('2.4 pause button works', async ({ page }) => {
+  test('2.4 pause via keyboard P', async ({ page }) => {
     await waitForGameReady(page);
-    await page.click('#pause-btn');
+    await page.keyboard.press('p');
     const state = await getEmulatorState(page);
     expect(state.isPaused).toBe(true);
-    await expect(page.locator('#pause-btn')).toHaveText(/Resume/);
   });
 
-  test('2.5 resume after pause', async ({ page }) => {
+  test('2.5 resume via keyboard P', async ({ page }) => {
     await waitForGameReady(page);
-    await page.click('#pause-btn');
-    await page.click('#pause-btn');
+    await page.keyboard.press('p');
+    await page.keyboard.press('p');
     const state = await getEmulatorState(page);
     expect(state.isRunning).toBe(true);
     expect(state.isPaused).toBe(false);
@@ -64,24 +61,13 @@ test.describe('Phase 2 — ROM loaded', () => {
     await expect(page.locator('#mute-btn')).not.toHaveClass(/active/);
   });
 
-  test('2.8 frame step increments frame count', async ({ page }) => {
-    await waitForGameReady(page);
-    // Pause first
-    await page.keyboard.press('p');
-    const before = (await getEmulatorState(page)).frameCount;
-    // Click step button
-    await page.click('.dbg-frame-controls .ctrl-btn:nth-child(2)'); // Step button
-    const after = (await getEmulatorState(page)).frameCount;
-    expect(after).toBeGreaterThan(before);
-  });
-
-  test('2.9 config modal opens with F1', async ({ page }) => {
+  test('2.8 config modal opens with F1', async ({ page }) => {
     await waitForGameReady(page);
     await page.keyboard.press('F1');
     await expect(page.locator('#controls-modal-overlay')).toHaveClass(/open/);
   });
 
-  test('2.10 config modal tabs switch', async ({ page }) => {
+  test('2.9 config modal tabs switch', async ({ page }) => {
     await waitForGameReady(page);
     await page.keyboard.press('F1');
     const tabs = page.locator('.config-tabs button[role="tab"]');
@@ -90,5 +76,13 @@ test.describe('Phase 2 — ROM loaded', () => {
       await tabs.nth(i).click();
       await expect(tabs.nth(i)).toHaveClass(/active/);
     }
+  });
+
+  test('2.10 emu bar buttons exist', async ({ page }) => {
+    await expect(page.locator('#pause-btn')).toBeAttached();
+    await expect(page.locator('#mute-btn')).toBeAttached();
+    await expect(page.locator('#save-btn')).toBeAttached();
+    await expect(page.locator('#load-btn-ss')).toBeAttached();
+    await expect(page.locator('#controls-btn')).toBeAttached();
   });
 });

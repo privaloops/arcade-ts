@@ -7,7 +7,7 @@ import { loadTestRom, waitForGameReady, getEmulatorState } from './helpers';
 
 test.describe('Phase 7 — Keyboard shortcuts', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/play/');
     await loadTestRom(page);
     await waitForGameReady(page);
   });
@@ -32,15 +32,15 @@ test.describe('Phase 7 — Keyboard shortcuts', () => {
   });
 
   test('7.4 F2 toggles video panel', async ({ page }) => {
-    await expect(page.locator('.dbg-panel')).toHaveClass(/open/);
+    await expect(page.locator('#dbg-panel')).toHaveClass(/open/);
     await page.keyboard.press('F2');
-    await expect(page.locator('.dbg-panel')).not.toHaveClass(/open/);
+    await expect(page.locator('#dbg-panel')).not.toHaveClass(/open/);
   });
 
   test('7.5 F3 toggles audio panel', async ({ page }) => {
-    await expect(page.locator('.aud-panel')).toHaveClass(/open/);
+    await expect(page.locator('#aud-panel')).toHaveClass(/open/);
     await page.keyboard.press('F3');
-    await expect(page.locator('.aud-panel')).not.toHaveClass(/open/);
+    await expect(page.locator('#aud-panel')).not.toHaveClass(/open/);
   });
 
   test('7.6 F5 opens save state modal', async ({ page }) => {
@@ -63,9 +63,9 @@ test.describe('Phase 7 — Keyboard shortcuts', () => {
   test('7.9 E opens video panel (sprite editor)', async ({ page }) => {
     // Close panel first
     await page.keyboard.press('F2');
-    await expect(page.locator('.dbg-panel')).not.toHaveClass(/open/);
+    await expect(page.locator('#dbg-panel')).not.toHaveClass(/open/);
     // E should reopen it
     await page.keyboard.press('e');
-    await expect(page.locator('.dbg-panel')).toHaveClass(/open/);
+    await expect(page.locator('#dbg-panel')).toHaveClass(/open/);
   });
 });

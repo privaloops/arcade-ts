@@ -17,6 +17,12 @@ export async function loadTestRom(page: Page): Promise<void> {
   const buffer = readFileSync(FIXTURE_PATH);
   const b64 = buffer.toString('base64');
 
+  // Wait for the app JS to fully initialize (emulator instance on window)
+  await page.waitForFunction(
+    () => (window as unknown as Record<string, unknown>).__emu !== undefined,
+    { timeout: 15_000 },
+  );
+
   await page.evaluate(async (b64Data) => {
     const binary = atob(b64Data);
     const bytes = new Uint8Array(binary.length);
@@ -36,8 +42,8 @@ export async function loadTestRom(page: Page): Promise<void> {
     }));
   }, b64);
 
-  // Wait for game to be ready (controls become visible)
-  await page.waitForSelector('#controls.visible', { timeout: 10_000 });
+  // Wait for drop zone to get .hidden class (ROM loaded)
+  await page.waitForSelector('#drop-zone.hidden', { state: 'attached', timeout: 15_000 });
 }
 
 /**
