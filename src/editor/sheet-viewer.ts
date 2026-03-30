@@ -560,9 +560,11 @@ export class SheetViewer {
     if (!gfxRom) return;
     const bufs = host.emulator.getBusBuffers();
     const pal = ag.spriteCapture.palette;
-    const palette = readPalette(bufs.vram, video.getPaletteBase(), pal);
+    // Fallback palette from VRAM (for poses without snapshot)
+    const vramPalette = readPalette(bufs.vram, video.getPaletteBase(), pal);
 
     for (const pose of ag.spriteCapture.poses) {
+      const palette = pose.capturedColors ?? vramPalette;
       const sprGroup: SpriteGroupData = {
         sprites: [], palette: pal,
         bounds: { x: 0, y: 0, w: pose.w, h: pose.h },
@@ -589,7 +591,7 @@ export class SheetViewer {
     const bufs = host.emulator.getBusBuffers();
     const ag = host.activeGroup;
     const pal = ag?.spriteCapture?.palette ?? 0;
-    const palette = readPalette(bufs.vram, video.getPaletteBase(), pal);
+    const palette = pose.capturedColors ?? readPalette(bufs.vram, video.getPaletteBase(), pal);
 
     const sprGroup: SpriteGroupData = {
       sprites: [], palette: pal,
@@ -646,7 +648,7 @@ export class SheetViewer {
     if (!video) return;
     const bufs = host.emulator.getBusBuffers();
     const paletteIdx = host.activeGroup?.spriteCapture?.palette ?? 0;
-    const palette = readPalette(bufs.vram, video.getPaletteBase(), paletteIdx);
+    const palette = pose.capturedColors ?? readPalette(bufs.vram, video.getPaletteBase(), paletteIdx);
 
     const objBuf = video.getObjBuffer();
     const vram = bufs.vram;

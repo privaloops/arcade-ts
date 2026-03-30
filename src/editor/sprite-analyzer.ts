@@ -51,6 +51,8 @@ export interface CapturedPose {
   palette: number;
   /** Preview image */
   preview: ImageData;
+  /** Palette RGB snapshot at capture time (16 entries). */
+  capturedColors?: Array<[number, number, number]>;
 }
 
 // ---------------------------------------------------------------------------
@@ -234,6 +236,7 @@ export function capturePose(
     h: group.bounds.h,
     palette: group.palette,
     preview: assembleCharacter(gfxRom, group, palette),
+    capturedColors: palette.map(([r, g, b]) => [r, g, b] as [number, number, number]),
   };
 }
 

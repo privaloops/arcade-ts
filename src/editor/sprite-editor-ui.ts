@@ -333,6 +333,7 @@ export class SpriteEditorUI {
         this.toggleScrollCaptureFromPanel(layerId);
       },
       onOpenSpriteSheet: (groupIdx) => {
+        if (groupIdx < 0) return; // live session, not yet in layerGroups
         this.activeGroupIndex = groupIdx;
         this.sheet.enterSpriteSheetMode();
       },
@@ -378,6 +379,19 @@ export class SpriteEditorUI {
         groupIndex: gi,
         name: group.name,
         poseCount: group.spriteCapture.poses.length,
+        preview: pose.preview,
+        previewW: pose.w,
+        previewH: pose.h,
+      });
+    }
+    // Include live sprite captures (sessions still recording)
+    for (const [palette, session] of this.capture.activeSessions) {
+      if (session.poses.length === 0) continue;
+      const pose = session.poses[0]!;
+      spriteSetsInfo.push({
+        groupIndex: -1, // not yet in layerGroups
+        name: `Recording (pal ${palette})`,
+        poseCount: session.poses.length,
         preview: pose.preview,
         previewW: pose.w,
         previewH: pose.h,

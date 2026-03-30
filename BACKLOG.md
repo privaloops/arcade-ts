@@ -574,3 +574,7 @@ Type GB Studio mais pour CPS1. Éditeur visuel pour créer des jeux CPS1 jouable
 - [ ] **GitHub Pages** as alternative hosting (with service worker for COOP/COEP headers)
 - [ ] **PWA** — Offline support via service worker
 - [ ] **CI** — Run tests on PR
+
+## Aseprite Export
+
+- [ ] **Multi-palette per-frame Aseprite export** (Low priority) — Export sprite/scroll captures with multiple palette variations in a single .aseprite file. Each frame can have its own palette (Aseprite supports per-frame palette chunks). This allows capturing all visual states of a character (normal, selected/flashing, faded) in one file. Requires changes to `aseprite-writer.ts` (per-frame palette chunks), `aseprite-reader.ts` (read per-frame palettes on import), and the capture system (accumulate palette variations over time). Lower priority since users can already capture at the right moment to get the desired palette.

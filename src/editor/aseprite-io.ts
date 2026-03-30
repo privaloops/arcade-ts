@@ -88,10 +88,9 @@ export function exportSpriteAseprite(
   const video = emulator.getVideo();
   if (!video) return;
   const bufs = emulator.getBusBuffers();
-  const cps1Palette = readPalette(bufs.vram, video.getPaletteBase(), palette);
-
-  // Use the first pose dimensions as the canvas size
+  // Use captured palette from first pose, fallback to VRAM
   const pose0 = poses[0]!;
+  const cps1Palette = pose0.capturedColors ?? readPalette(bufs.vram, video.getPaletteBase(), palette);
   const frameW = pose0.w;
   const frameH = pose0.h;
 
@@ -551,7 +550,7 @@ export function importAsepriteFile(
                 byPalette.set(pose.palette, list);
               }
               for (const [pal, groupPoses] of byPalette) {
-                layerGroups.push(createSpriteGroup(`Restored (pal ${pal})`, groupPoses, pal));
+                layerGroups.push(createSpriteGroup(`Imported (pal ${pal})`, groupPoses, pal));
               }
             }
             onRefresh();
