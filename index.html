@@ -3,9 +3,9 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="ROMstudio — CPS1 arcade studio in the browser. Play, inspect, modify, and export your own ROM. Zero install." />
+    <meta name="description" content="ROMstudio — CPS1 arcade studio in the browser. Capture sprites and backgrounds, edit in Aseprite, export MAME-compatible ROMs." />
     <meta property="og:title" content="ROMstudio — CPS1 Arcade Studio" />
-    <meta property="og:description" content="Play, inspect, modify, and export your own CPS1 arcade ROM. Hardware X-Ray, audio DAW, sprite editor — all in TypeScript, in the browser." />
+    <meta property="og:description" content="The first browser-based CPS1 ROM studio. Capture sprites and backgrounds, edit in Aseprite, export MAME-compatible ROMs." />
     <meta property="og:type" content="website" />
     <title>ROMstudio — CPS1 Arcade Studio</title>
     <link rel="stylesheet" href="/src/styles/landing.css" />
@@ -13,25 +13,67 @@
   <body>
     <nav class="nav">
       <span class="nav-logo">ROMstudio</span>
-      <a href="/play/" class="nav-cta">Launch App</a>
+      <div class="nav-links">
+        <a href="#features" class="nav-link">Features</a>
+        <a href="#workflow" class="nav-link">How it Works</a>
+        <a href="#roadmap" class="nav-link">Roadmap</a>
+      </div>
+      <div class="nav-right">
+        <a href="https://github.com/privaloops/cps1-web" class="nav-github" aria-label="GitHub">
+          <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+          </svg>
+        </a>
+        <a href="/play/" class="nav-cta">Launch App</a>
+      </div>
     </nav>
 
     <section class="hero">
       <h1>ROMstudio</h1>
-      <p class="hero-tagline">Play, modify on-the-fly, and export MAME-compatible CPS1 ROMs — in the browser.</p>
-      <a href="/play/" class="btn-primary">Launch App</a>
+      <p class="hero-tagline">Work in Aseprite, play in ROMstudio.</p>
+      <p class="hero-sub">The first browser-based CPS1 ROM studio. Capture sprites and backgrounds, edit in Aseprite, export MAME-compatible ROMs.</p>
+      <div class="hero-ctas">
+        <a href="/play/" class="btn-primary">Launch App</a>
+        <a href="#workflow" class="btn-secondary">See How It Works</a>
+      </div>
+      <span class="hero-badge">MAME-compatible export</span>
       <div class="hero-media">
-        <img src="/images/hero-3d.gif" alt="3D exploded view — see how the hardware draws each frame" class="hero-gif" />
+        <img src="/images/hero-3d.gif" alt="3D exploded view" class="hero-gif" />
+      </div>
+    </section>
+
+    <section class="workflow" id="workflow">
+      <h2>From ROM to Aseprite and back</h2>
+      <p class="section-subtitle">Three steps. No toolchain. No install.</p>
+      <div class="workflow-steps">
+        <div class="workflow-step">
+          <span class="step-number">1</span>
+          <h3>Capture</h3>
+          <p>Play the game — ROMstudio auto-captures every sprite pose and scroll tile. Click REC, play, stop.</p>
+          <div class="step-media" data-label="REC + live pose capture"></div>
+        </div>
+        <div class="workflow-step">
+          <span class="step-number">2</span>
+          <h3>Edit in Aseprite</h3>
+          <p>Export .aseprite files with embedded ROM metadata. Indexed 8bpp, 16-color CPS1 palettes, tilemaps — all preserved.</p>
+          <div class="step-media" data-label="Aseprite with CPS1 sprites"></div>
+        </div>
+        <div class="workflow-step">
+          <span class="step-number">3</span>
+          <h3>Import & Play</h3>
+          <p>Import back — tiles patched into GFX ROM instantly. See your edits in the running game. Export a MAME-compatible ZIP.</p>
+          <div class="step-media" data-label="modified game running"></div>
+        </div>
       </div>
     </section>
 
     <section class="features" id="features">
-      <h2>Features</h2>
+      <h2>A complete arcade studio</h2>
 
       <div class="feature feature--reverse">
         <div class="feature-text">
-          <h3>Hardware X-Ray</h3>
-          <p>Separate the 4 hardware layers in 3D space. See exactly how the CPS-A/CPS-B ASICs compose each frame — scroll planes, sprites, priority, palette — all in real time while the game runs.</p>
+          <h3>X-Ray Mode</h3>
+          <p>Separate the 4 layers in 3D. See how the CPS-A/CPS-B ASICs compose each frame — scroll planes, sprites, priority, palette — all in real time.</p>
         </div>
         <div class="feature-media">
           <div class="gif-placeholder" data-label="3D exploded view"></div>
@@ -40,48 +82,28 @@
 
       <div class="feature">
         <div class="feature-text">
-          <h3>Live Sprite Editor</h3>
-          <p>Click any sprite on screen to edit it pixel by pixel — see your changes live in the running game. Capture poses, browse animation frames, import images onto any tile. Export your modded ROM as a MAME-compatible ZIP and share it.</p>
+          <h3>Audio Studio</h3>
+          <p>8 FM channels (YM2151), 4 ADPCM voices (OKI), QSound surround — browse every sound, mute/solo channels, replace samples by drag-and-drop. Record from your mic.</p>
         </div>
         <div class="feature-media">
-          <div class="gif-placeholder" data-label="sprite editor — paint and see the game change"></div>
+          <div class="gif-placeholder" data-label="audio DAW panel"></div>
         </div>
       </div>
 
       <div class="feature feature--reverse">
         <div class="feature-text">
-          <h3>Photo Import</h3>
-          <p>Drop any image onto the game background. The engine auto-quantizes it to the CPS1 16-color palette with Atkinson dithering. Your photo becomes part of the game — put your face on an in-game wall.</p>
+          <h3>MAME-Compatible Export</h3>
+          <p>Export your modded ROM as a standard ZIP. Sprites, tiles, palettes, samples — everything included. Runs in MAME, FBNeo, or any compatible emulator. No vendor lock-in.</p>
         </div>
         <div class="feature-media">
-          <div class="gif-placeholder" data-label="photo import on scroll background"></div>
-        </div>
-      </div>
-
-      <div class="feature">
-        <div class="feature-text">
-          <h3>Palette Swap</h3>
-          <p>Click any color in the live palette grid to change it instantly. Give Guy a pink outfit, turn the sky red, recolor any character or background — the game updates in real time.</p>
-        </div>
-        <div class="feature-media">
-          <div class="gif-placeholder" data-label="palette swap — instant recolor"></div>
-        </div>
-      </div>
-
-      <div class="feature feature--reverse">
-        <div class="feature-text">
-          <h3>Sample Browser</h3>
-          <p>Browse and replace every sound effect in the ROM. Drag a WAV file to swap any ADPCM sample — hear it instantly in-game. Export and import full sample sets as ZIP.</p>
-        </div>
-        <div class="feature-media">
-          <div class="gif-placeholder" data-label="sample browser — drag WAV to replace"></div>
+          <div class="gif-placeholder" data-label="ROM export flow"></div>
         </div>
       </div>
     </section>
 
     <section class="architecture">
-      <h2>Under the Hood</h2>
-      <p class="arch-intro">Every component written from scratch in TypeScript. No emulation library — just code and hardware docs.</p>
+      <h2>Built from scratch. Every byte.</h2>
+      <p class="arch-intro">No emulation library. TypeScript + WebGL2 + WASM.</p>
       <div class="arch-grid">
         <div class="arch-card">
           <span class="arch-label">Main CPU</span>
@@ -115,13 +137,80 @@
         </div>
       </div>
       <div class="arch-perf">
-        <p><strong>~33% CPU</strong> on a modern machine — M68K ~25%, Z80+audio ~8%, video ~3%</p>
+        <p><strong>~33% CPU</strong> on a modern machine</p>
+        <p class="arch-stats">41 game definitions. 245 games catalogued. Zero dependencies.</p>
       </div>
+    </section>
+
+    <section class="roadmap" id="roadmap">
+      <h2>Where this is going</h2>
+      <div class="timeline">
+        <div class="timeline-item timeline-item--now">
+          <span class="timeline-dot"></span>
+          <div class="timeline-content">
+            <div class="timeline-header">
+              <h3>ROMstudio</h3>
+              <span class="timeline-badge timeline-badge--now">Now</span>
+            </div>
+            <p>Browser CPS1 studio + Aseprite workflow</p>
+          </div>
+        </div>
+        <div class="timeline-item">
+          <span class="timeline-dot"></span>
+          <div class="timeline-content">
+            <div class="timeline-header">
+              <h3>CPS1 SDK</h3>
+              <span class="timeline-badge timeline-badge--next">Next</span>
+            </div>
+            <p>Write games in C targeting CPS1 hardware</p>
+          </div>
+        </div>
+        <div class="timeline-item">
+          <span class="timeline-dot"></span>
+          <div class="timeline-content">
+            <div class="timeline-header">
+              <h3>Visual Editor</h3>
+              <span class="timeline-badge timeline-badge--planned">Planned</span>
+            </div>
+            <p>GB Studio for CPS1 — no-code game creation</p>
+          </div>
+        </div>
+        <div class="timeline-item">
+          <span class="timeline-dot"></span>
+          <div class="timeline-content">
+            <div class="timeline-header">
+              <h3>Neo Geo</h3>
+              <span class="timeline-badge timeline-badge--planned">Planned</span>
+            </div>
+            <p>MVS/AES — same architecture, huge community</p>
+          </div>
+        </div>
+        <div class="timeline-item">
+          <span class="timeline-dot"></span>
+          <div class="timeline-content">
+            <div class="timeline-header">
+              <h3>Cartridges</h3>
+              <span class="timeline-badge timeline-badge--planned">Planned</span>
+            </div>
+            <p>Browser to physical arcade cartridge</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="cta-final">
+      <h2>Ready to mod some arcade ROMs?</h2>
+      <div class="cta-final-buttons">
+        <a href="/play/" class="btn-primary">Launch App</a>
+        <a href="https://github.com/privaloops/cps1-web" class="btn-secondary">Star on GitHub</a>
+      </div>
+      <p class="cta-final-note">Bring your own legally obtained MAME ROM sets.</p>
     </section>
 
     <footer class="footer">
       <p>No ROMs included — provide your own legally obtained MAME ROM sets.</p>
       <p class="footer-tech">Built with TypeScript + WebGL2 + WASM</p>
+      <a href="https://github.com/privaloops/cps1-web" class="footer-github">GitHub</a>
     </footer>
 
     <script type="module" src="/src/landing.ts"></script>
