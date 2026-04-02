@@ -236,6 +236,11 @@ body {
   flex-direction: column;
   align-items: center;
   text-align: center;
+  flex: 1;
+}
+
+.workflow-step .step-media {
+  margin-top: auto;
 }
 
 .step-number {
