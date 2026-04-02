@@ -1,0 +1,61 @@
+name: Audit Test Coverage
+
+on:
+  schedule:
+    - cron: "0 9 * * 2" # Every Tuesday at 9 AM UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  id-token: write
+
+jobs:
+  audit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            You are auditing the test coverage of this CPS1 arcade emulator project.
+
+            Steps:
+            1. Run `npm test` to verify all tests pass
+            2. List all source files in src/ and compare with test files in src/__tests__/
+            3. Identify modules with NO tests at all
+            4. For modules WITH tests, check if critical paths are covered:
+               - Edge cases (empty input, overflow, boundary values)
+               - Error paths
+               - Core logic branches
+
+            Focus areas (high-value targets):
+            - src/cpu/ (m68000.ts, z80.ts) — instruction coverage
+            - src/video/ (cps1-video.ts) — decode paths
+            - src/memory/ (bus.ts, z80-bus.ts) — address mapping
+            - src/audio/ — codec correctness
+            - src/editor/ — roundtrip integrity
+
+            Output rules:
+            - Rank untested modules by risk (critical path vs. UI helper)
+            - For each gap, suggest what specific tests would add the most value
+            - Maximum 10 findings
+
+            If gaps found:
+            - Create a GitHub Issue titled "Test coverage gaps — <date>"
+            - Include a prioritized list with suggested test descriptions
+
+            If coverage is solid:
+            - Do nothing.
+          claude_args: |
+            --max-turns 8
+            --model claude-sonnet-4-6

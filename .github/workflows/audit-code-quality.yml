@@ -1,0 +1,50 @@
+name: Audit Code Quality
+
+on:
+  schedule:
+    - cron: "0 9 * * 1" # Every Monday at 9 AM UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  id-token: write
+
+jobs:
+  audit-code-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            You are auditing the code quality of this CPS1 arcade emulator project (TypeScript strict).
+
+            Analyze the codebase for:
+            1. **Dead code**: unused exports, unreachable branches, commented-out blocks
+            2. **Complexity**: functions over 100 lines, deeply nested logic (>3 levels), God objects
+            3. **Duplication**: copy-pasted logic that should be factored
+            4. **Type safety**: `any` casts, type assertions that bypass checks, missing strict checks
+            5. **Architecture**: circular dependencies, misplaced responsibilities, tight coupling
+
+            Scope: focus on src/ directory. Ignore test files, WASM files, and vendor code.
+
+            Output rules:
+            - Only report genuine issues, not style preferences
+            - Each finding must include: file path, line range, severity (High/Medium/Low), and a concrete fix suggestion
+            - Group findings by category
+
+            If issues found:
+            - Create a GitHub Issue titled "Code quality audit — <date>"
+            - Use markdown with collapsible sections per category
+            - Maximum 15 findings (prioritize by severity)
+
+            If no significant issues found:
+            - Do nothing. Do not create empty issues.
+          claude_args: |
+            --max-turns 10
+            --model claude-opus-4-6

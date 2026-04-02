@@ -1,0 +1,58 @@
+name: Audit Dependencies
+
+on:
+  schedule:
+    - cron: "0 0 * * 0" # Every Sunday at midnight UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write
+
+jobs:
+  audit-deps:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            You are auditing the dependencies of this TypeScript project.
+
+            Steps:
+            1. Run `npm audit` and capture output
+            2. Run `npm outdated` and capture output
+            3. Analyze findings:
+               - Critical/High vulnerabilities → must fix
+               - Major version bumps → report only (do not upgrade)
+               - Minor/patch updates with no breaking changes → safe to update
+
+            Rules:
+            - Only update dependencies if `npm test` and `npm run build` pass after the update
+            - Do NOT update major versions (breaking changes require manual review)
+            - Group related updates in a single commit
+
+            If safe updates exist:
+            - Apply them, verify tests pass, and create a PR titled "chore: update dependencies (automated audit)"
+            - PR body must list each updated package with old → new version
+
+            If only vulnerabilities with no safe fix exist:
+            - Create a GitHub Issue titled "Security: vulnerable dependencies found"
+            - List each vulnerability with severity and affected package
+
+            If everything is up to date and secure:
+            - Do nothing. Do not create empty PRs or issues.
+          claude_args: |
+            --max-turns 10
+            --model claude-sonnet-4-6
