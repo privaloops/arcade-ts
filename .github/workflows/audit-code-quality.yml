@@ -22,6 +22,8 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt: |
+            IMPORTANT: You are running in autonomous CI mode. Do NOT wait for user validation. Do NOT follow mdma workflow steps. Execute the full task end-to-end silently.
+
             You are auditing the code quality of this CPS1 arcade emulator project (TypeScript strict).
 
             Analyze the codebase for:
@@ -46,6 +48,6 @@ jobs:
             If no significant issues found:
             - Do nothing. Do not create empty issues.
           claude_args: |
-            --max-turns 10
+            --max-turns 25
             --model claude-opus-4-6
             --allowedTools Bash,Read,Edit,Write,Glob,Grep

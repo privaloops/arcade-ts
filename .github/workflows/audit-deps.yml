@@ -28,6 +28,8 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt: |
+            IMPORTANT: You are running in autonomous CI mode. Do NOT wait for user validation. Do NOT follow mdma workflow steps. Execute the full task end-to-end silently.
+
             You are auditing the dependencies of this TypeScript project.
 
             Steps:
@@ -54,6 +56,6 @@ jobs:
             If everything is up to date and secure:
             - Do nothing. Do not create empty PRs or issues.
           claude_args: |
-            --max-turns 10
+            --max-turns 25
             --model claude-sonnet-4-6
             --allowedTools Bash,Read,Edit,Write,Glob,Grep
