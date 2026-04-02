@@ -100,7 +100,6 @@ export class SpriteEditorUI {
   private gamePanStartX = 0;
   private gamePanStartY = 0;
   private spaceHeld = false;
-  private _savedTile: import('./sprite-editor').TileContext | null = null;
   private gridLayers: Map<number, boolean> = new Map();
   private hwLayerVisible: Map<number, boolean> = new Map();
   private _isInteractionBlocked: (() => boolean) | null = null;
@@ -238,11 +237,6 @@ export class SpriteEditorUI {
 
   activate(): void {
     this.editor.activate();
-    // Restore tile selection from before deactivate
-    if (this._savedTile) {
-      this.editor.restoreSelection(this._savedTile);
-      this._savedTile = null;
-    }
     this.createOverlay();
     document.body.classList.add('edit-active');
     document.addEventListener('keydown', this.boundKeyHandler);
@@ -258,10 +252,7 @@ export class SpriteEditorUI {
 
   deactivate(): void {
     if (this.sheet.spriteSheetMode) this.sheet.exitSpriteSheetMode();
-    // Preserve tile selection across deactivate/activate
-    const savedTile = this.editor.currentTile;
     this.editor.deactivate();
-    this._savedTile = savedTile;
     cancelAnimationFrame(this.overlayRafId);
     document.body.classList.remove('edit-active');
     this.removeOverlay();
