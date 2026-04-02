@@ -141,6 +141,24 @@ export function initShortcuts(deps: ShortcutsDeps): void {
       return;
     }
 
+    // F9 = screenshot canvas (requires preserveDrawingBuffer in renderer-webgl.ts)
+    if (e.code === "F9") {
+      e.preventDefault();
+      const canvas = canvasWrapper.querySelector("canvas");
+      if (!canvas) return;
+      canvas.toBlob((blob) => {
+        if (!blob) return;
+        const name = emulator.getGameName() || "screenshot";
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = `${name}_capture.png`;
+        a.click();
+        URL.revokeObjectURL(a.href);
+        setStatus("Screenshot saved");
+      });
+      return;
+    }
+
     // Remaining shortcuts require a game running or paused
     if (!emulator.isRunning() && !emulator.isPaused()) return;
 

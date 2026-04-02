@@ -18,7 +18,10 @@ export default defineConfig({
     timeout: 10_000,
   },
   projects: [
-    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    { name: 'chromium', use: {
+      ...devices['Desktop Chrome'],
+      launchOptions: { args: ['--autoplay-policy=no-user-gesture-required'] },
+    } },
     { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
   ],
 });

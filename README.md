@@ -120,6 +120,7 @@ These 8 games load but have bugs (graphics glitches, crashes, or missing feature
 | Carrier Air Wing | `cawing` | Not working |
 | Forgotten Worlds | `forgottn` | Not working |
 | Ganbare! Marine Kun | `ganbare` | Not working |
+| King of Dragons | `kod` | Crashes on stage load |
 | Mega Bomberman | `mbombrd` | Not working |
 | Pang! 3 | `pang3` | Not working |
 | Pnickies / Monster | `pmonster` | Not working |

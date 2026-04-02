@@ -24,6 +24,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **OKI codec** — ADPCM encode/decode, sample replace in ROM, encoder/decoder roundtrip tests
 - **Aseprite import integration tests** — 7 tests with real .aseprite fixtures (scroll tilemap pixel-for-pixel + sprite import)
 - **E2E tests** — 16 Playwright spec files (~115 tests), Chromium + Firefox
+- **Game matrix tests** — Automated boot (title screen snapshot) + audio check for all 29 ROMs in public/roms/
+- **Screenshot (F9)** — Capture canvas as `<romName>_capture.png`
+- **Release script** — `npm run release` : unit tests → build → E2E → game matrix → version bump → changelog → git tag → GitHub pre-release
 
 ### Changed
 - **Refactor `sprite-editor-ui.ts`** — Split from 4629 to ~1450 LOC into: `aseprite-io.ts`, `capture-session.ts`, `sheet-viewer.ts`
@@ -41,6 +44,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Transparent pen** — CPS1 uses pen 15 (not 0) for transparency
 - **Scroll 2 tile inspector** — Accounts for per-row X scroll offset
 - **E2E tests** — Fixed page.goto URL (/play/), rewritten for current DOM
+- **Sprite editor overlay** — Removed stale tile selection restore on editor toggle (red dashed square appearing without user click)
 
 ### Removed
 - **Photo layer system** — import/quantize/merge/magic wand removed entirely. Editing happens exclusively in Aseprite

@@ -19,7 +19,7 @@ export class WebGLRenderer implements RendererInterface {
     canvas.width = SCREEN_WIDTH;
     canvas.height = SCREEN_HEIGHT;
 
-    const gl = canvas.getContext('webgl2', { alpha: false, antialias: false });
+    const gl = canvas.getContext('webgl2', { alpha: false, antialias: false, preserveDrawingBuffer: true });
     if (!gl) throw new Error('WebGL2 not available');
 
     this.canvas = canvas;

@@ -58,25 +58,25 @@
 
 ## M68000 CPU — Tom Harte test failures
 
-- [ ] **ADDX.b/MOVE.b/MOVEA with -(A7)/(A7)+** — 68000 forces A7 even: decrement/increment by 2 for byte ops on A7
-- [ ] **DIVS** — Incorrect flags (N, Z, V, C) on signed division. 9 vectors fail.
-- [ ] **DIVU** — Incorrect flags on unsigned division. 10 vectors fail.
-- [ ] **MULS** — Incorrect flags on signed multiplication. 11 vectors fail.
-- [ ] **MULU** — Incorrect flags on unsigned multiplication. 11 vectors fail.
-- [ ] **DBcc** — SSP/PC incorrect on some edge cases
+- [x] **ADDX.b/MOVE.b/MOVEA with -(A7)/(A7)+** — Fixed: A7 even alignment handled
+- [x] **DIVS** — Fixed: overflow flags correct (N/Z undefined per spec)
+- [x] **DIVU** — Fixed: overflow flags correct
+- [x] **MULS** — Fixed: flags correct
+- [x] **MULU** — Fixed: flags correct
+- [x] **DBcc** — Fixed: counter wrap correct
 
 ## Z80 — Tom Harte test failures
 
-- [ ] **SCF/CCF** — Undocumented flag bits 3, 5
-- [ ] **BIT b,(HL)** — Undocumented flag bits 3, 5
-- [ ] **Block I/O (INIR, OTIR, etc.)** — Complex flag calculation not implemented
+- [ ] **SCF/CCF** — Q register never cleared by non-flag-modifying instructions (latent bug: NOP between two SCF gives wrong bits 3/5)
+- [ ] **BIT b,(HL)** — WZ register never written (always 0 after reset), bits 3/5 always wrong
+- [x] **Block I/O (INIR, OTIR, etc.)** — Fixed: full undocumented PV/H/bits-3-5 via adjustRepeatIOFlags
 
 ## Video
 
 - [ ] **Row scroll on scroll1/scroll3** — Only scroll2 supports row scroll currently
 - [ ] **Column scroll** — Not implemented
 - [ ] **Star field** — Background effect used by some games (1941)
-- [ ] **P2 buttons 4-6** — May not work on some games (needs testing)
+- [x] **P2 buttons 4-6** — Implemented (P2: G/H/N, CPS-B reg 0x36)
 
 ## Audio
 
@@ -86,17 +86,17 @@
 - [x] **Debt-based audio timing** — 4ms tick + frame debt accumulator, fixes Firefox audio lag
 - [x] **Audio timeline ruler** — Frame-synced ruler with minor/major ticks, FPS display
 - [x] **Timeline scroll sync** — Scroll tied to frameCount, stops on pause, reversed direction
-- [ ] **Audio worker state on save/load** — Music resumes but YM2151 envelope state may be slightly off
+- [x] **Audio worker state on save/load** — Implemented (Z80 + YM2151 heap snapshot via postMessage)
 - [ ] **OKI sample crackling** — Slight crackling on some OKI samples, may need better interpolation
 - [ ] **Volume per channel** — Allow user to adjust YM2151 / OKI / QSound balance
-- [ ] **Audio timeline frame grid** — Vertical grid lines on FM/OKI timelines aligned to frames
+- [x] **Audio timeline frame grid** — Implemented (frame ticks + per-channel FM timeline)
 
 ## ROM Editor
 
 - [x] **RomStore** — Central mutable ROM manager with ZIP export ([#22](https://github.com/privaloops/arcade-ts/issues/22))
 - [x] **Sprite Pixel Editor** — WYSIWYG sprite editing with palette & tile tools ([#27](https://github.com/privaloops/arcade-ts/issues/27))
 - [x] **FM Patch Editor** — Voice read/write + macro UI done, real-time playback deferred (Z80 conflict). Code in `fm-patch-editor.ts` + `cps1-sound-driver.ts`, Synth tab hidden ([#20](https://github.com/privaloops/arcade-ts/issues/20))
-- [ ] **FM real-time preview** — Requires Z80 music sequencer reverse-engineering to avoid TL/volume conflicts
+- [ ] **FM real-time preview** — Bouton "Test" existe (playTestNote), mais pas de preview live pendant l'édition des paramètres
 - [ ] **Mute/Solo ROM export** — Requires reverse-engineering CPS1 music sequence format (note commands per-track)
 - [x] **Sprite Analyzer** — Character grouping (palette + proximity), red contour overlay, tracking, pose capture, gallery
 - [x] **Tile allocator + GFX ROM expansion** — Private tile allocation for scroll merge, dynamic ROM expansion, reverse bank mapper
@@ -105,8 +105,7 @@
 - [x] **Save/load (.romstudio)** — JSON with sparse ROM diffs (GFX, Program, OKI) + poses. Ctrl+S/O, drag & drop. Auto-save IndexedDB 2s debounce. Spec: `docs/spec-romstudio-save.md`
 - [x] ~~**Photo Import**~~ — Added then removed. Editing now happens exclusively in Aseprite.
 - [x] ~~**Multi-layer panel**~~ — Added then removed. Layer panel now manages HW layers, REC, and capture sets only.
-- [ ] **Full undo stack** — Currently only pixel edits have undo (128 bytes/tile via pushUndo). Missing: `editPaletteColor` (writes VRAM + program ROM without undo). Also: stroke grouping (1 drag = 1 undo), undo stack persistence across sessions.
-- [ ] **Safe scroll edit mode** — Edit mode that writes only to tiles with refCount = 1 (no duplication, no ROM expansion). Visual mask: editable tiles (refCount = 1) vs protected (refCount > 1). ROM keeps original size → 100% MAME compatible.
+- [ ] **Full undo stack** — Tile pixel undo/redo fonctionne (100 entries). Manque : undo palette, stroke grouping (1 drag = 1 undo), persistance cross-session.
 
 ### YM2151 Sequencer (browser-first, world's first)
 
@@ -450,6 +449,7 @@ Integration tests (`tests/e2e/daw.spec.ts` — Playwright):
 - [ ] **Screenshot button** — Save current frame as PNG
 - [ ] **Rewind** — Save N frames in circular buffer, hold button to rewind
 - [ ] **Sprite highlight colors** — Unique color per detected multi-tile sprite to distinguish overlapping characters
+- [ ] **Sprite grouping improvements** — L'auto-grouping actuel (palette + proximité spatiale) échoue sur les jeux denses (Magic Sword, etc.) où tout se touche. Deux axes : (1) Réduire les faux positifs en combinant 4 critères : palette commune + proximité réduite (0px) + tile codes proches dans la ROM + index OBJ consécutifs. (2) Fallback sélection manuelle pour les cas où aucune heuristique ne peut résoudre l'ambiguïté (aucun signal technique ne relie les tiles d'un "sprite" — c'est une intention graphique, pas un concept hardware CPS1).
 
 ## Platform expansion
 
@@ -570,8 +570,8 @@ Type GB Studio mais pour CPS1. Éditeur visuel pour créer des jeux CPS1 jouable
 ## Infrastructure
 
 - [ ] **GitHub Pages** as alternative hosting (with service worker for COOP/COEP headers)
-- [ ] **PWA** — Offline support via service worker
-- [ ] **CI** — Run tests on PR
+- [ ] **PWA** — manifest.json existe, manque le service worker pour offline/installable
+- [x] **CI** — GitHub Actions (.github/workflows/ci.yml) : npm ci → test → build sur push/PR main
 
 ## Aseprite Export
 
