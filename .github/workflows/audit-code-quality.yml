@@ -11,43 +11,100 @@ permissions:
   id-token: write
 
 jobs:
-  audit-code-quality:
+  collect:
+    runs-on: ubuntu-latest
+    outputs:
+      tsc_errors: ${{ steps.data.outputs.tsc_errors }}
+      any_casts: ${{ steps.data.outputs.any_casts }}
+      large_files: ${{ steps.data.outputs.large_files }}
+      todo_fixme: ${{ steps.data.outputs.todo_fixme }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Collect code quality data
+        id: data
+        run: |
+          # TypeScript strict errors
+          {
+            echo 'tsc_errors<<TSC_EOF'
+            npx tsc --noEmit 2>&1 | tail -50 || true
+            echo 'TSC_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+          # any casts and type assertions
+          {
+            echo 'any_casts<<ANY_EOF'
+            grep -rn "as any\|: any\|<any>" src/ --include="*.ts" | head -50 || true
+            echo 'ANY_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+          # Files over 500 lines
+          {
+            echo 'large_files<<LARGE_EOF'
+            find src/ -name "*.ts" -exec wc -l {} + | sort -rn | head -20
+            echo 'LARGE_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+          # TODO/FIXME/HACK
+          {
+            echo 'todo_fixme<<TODO_EOF'
+            grep -rn "TODO\|FIXME\|HACK\|XXX" src/ --include="*.ts" | head -30 || true
+            echo 'TODO_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+  analyze:
+    needs: collect
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt: |
-            IMPORTANT: You are running in autonomous CI mode. Do NOT wait for user validation. Do NOT follow mdma workflow steps. Execute the full task end-to-end silently.
+            IMPORTANT: You are running in autonomous CI mode. Do NOT wait for user validation. Do NOT follow any workflow steps from CLAUDE.md. Just execute the task below and stop.
 
-            You are auditing the code quality of this CPS1 arcade emulator project (TypeScript strict).
+            You are auditing the code quality of a CPS1 arcade emulator (TypeScript strict).
+            Here is pre-collected data from the codebase:
 
-            Analyze the codebase for:
-            1. **Dead code**: unused exports, unreachable branches, commented-out blocks
-            2. **Complexity**: functions over 100 lines, deeply nested logic (>3 levels), God objects
-            3. **Duplication**: copy-pasted logic that should be factored
-            4. **Type safety**: `any` casts, type assertions that bypass checks, missing strict checks
-            5. **Architecture**: circular dependencies, misplaced responsibilities, tight coupling
+            ## TypeScript errors (`tsc --noEmit`)
+            ```
+            ${{ needs.collect.outputs.tsc_errors }}
+            ```
 
-            Scope: focus on src/ directory. Ignore test files, WASM files, and vendor code.
+            ## `any` casts and type assertions
+            ```
+            ${{ needs.collect.outputs.any_casts }}
+            ```
 
-            Output rules:
-            - Only report genuine issues, not style preferences
-            - Each finding must include: file path, line range, severity (High/Medium/Low), and a concrete fix suggestion
-            - Group findings by category
+            ## Largest files (line count)
+            ```
+            ${{ needs.collect.outputs.large_files }}
+            ```
 
-            If issues found:
-            - Create a GitHub Issue titled "Code quality audit — <date>"
-            - Use markdown with collapsible sections per category
-            - Maximum 15 findings (prioritize by severity)
+            ## TODO / FIXME / HACK markers
+            ```
+            ${{ needs.collect.outputs.todo_fixme }}
+            ```
 
-            If no significant issues found:
-            - Do nothing. Do not create empty issues.
+            Analyze these results. Only report genuine issues, not style preferences.
+            For each finding: file path, severity (High/Medium/Low), concrete suggestion.
+            Maximum 15 findings, prioritized by severity.
+
+            If significant issues found:
+            - Create a GitHub Issue titled "Code quality audit — $(date +%Y-%m-%d)"
+            - Use markdown with sections per category
+
+            If nothing notable:
+            - Do nothing.
           claude_args: |
-            --max-turns 25
-            --model claude-opus-4-6
-            --allowedTools Bash,Read,Edit,Write,Glob,Grep
+            --max-turns 5
+            --model claude-sonnet-4-6
+            --allowedTools Bash,Read,Glob,Grep

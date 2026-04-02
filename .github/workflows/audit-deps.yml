@@ -12,7 +12,40 @@ permissions:
   id-token: write
 
 jobs:
-  audit-deps:
+  collect:
+    runs-on: ubuntu-latest
+    outputs:
+      audit: ${{ steps.data.outputs.audit }}
+      outdated: ${{ steps.data.outputs.outdated }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Collect dependency data
+        id: data
+        run: |
+          npm audit --json > /tmp/audit.json 2>&1 || true
+          npm outdated --json > /tmp/outdated.json 2>&1 || true
+          {
+            echo 'audit<<AUDIT_EOF'
+            cat /tmp/audit.json
+            echo 'AUDIT_EOF'
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo 'outdated<<OUTDATED_EOF'
+            cat /tmp/outdated.json
+            echo 'OUTDATED_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+  analyze:
+    needs: collect
+    if: needs.collect.outputs.audit != '{}' || needs.collect.outputs.outdated != '{}'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,34 +61,33 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt: |
-            IMPORTANT: You are running in autonomous CI mode. Do NOT wait for user validation. Do NOT follow mdma workflow steps. Execute the full task end-to-end silently.
+            IMPORTANT: You are running in autonomous CI mode. Do NOT wait for user validation. Do NOT follow any workflow steps from CLAUDE.md. Just execute the task below and stop.
 
-            You are auditing the dependencies of this TypeScript project.
+            Here is the output of `npm audit --json`:
+            ```json
+            ${{ needs.collect.outputs.audit }}
+            ```
 
-            Steps:
-            1. Run `npm audit` and capture output
-            2. Run `npm outdated` and capture output
-            3. Analyze findings:
-               - Critical/High vulnerabilities → must fix
-               - Major version bumps → report only (do not upgrade)
-               - Minor/patch updates with no breaking changes → safe to update
+            Here is the output of `npm outdated --json`:
+            ```json
+            ${{ needs.collect.outputs.outdated }}
+            ```
 
-            Rules:
-            - Only update dependencies if `npm test` and `npm run build` pass after the update
-            - Do NOT update major versions (breaking changes require manual review)
-            - Group related updates in a single commit
+            Analyze these results and take action:
 
-            If safe updates exist:
-            - Apply them, verify tests pass, and create a PR titled "chore: update dependencies (automated audit)"
-            - PR body must list each updated package with old → new version
+            1. If there are minor/patch updates with no breaking changes:
+               - Run `npm update` to apply safe updates
+               - Verify with `npm test` and `npm run build`
+               - If tests pass, create a PR titled "chore: update dependencies (automated audit)"
+               - PR body: list each package with old → new version
 
-            If only vulnerabilities with no safe fix exist:
-            - Create a GitHub Issue titled "Security: vulnerable dependencies found"
-            - List each vulnerability with severity and affected package
+            2. If there are only major version bumps or vulnerabilities with no auto-fix:
+               - Create a GitHub Issue titled "Dependencies: audit findings — $(date +%Y-%m-%d)"
+               - List each finding with severity and affected package
 
-            If everything is up to date and secure:
-            - Do nothing. Do not create empty PRs or issues.
+            3. If everything is up to date and secure (both outputs are empty `{}`):
+               - Do nothing. Do not create empty PRs or issues.
           claude_args: |
-            --max-turns 25
+            --max-turns 5
             --model claude-sonnet-4-6
             --allowedTools Bash,Read,Edit,Write,Glob,Grep
