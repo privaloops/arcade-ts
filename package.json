@@ -10,7 +10,9 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:e2e:chromium": "playwright test --project=chromium",
-    "test:e2e:firefox": "playwright test --project=firefox"
+    "test:e2e:firefox": "playwright test --project=firefox",
+    "test:matrix": "playwright test tests/e2e/game-matrix.spec.ts --project=chromium",
+    "release": "bash scripts/release.sh"
   },
   "keywords": [],
   "author": "",
