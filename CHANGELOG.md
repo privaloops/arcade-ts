@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 - **Unit tests for 10 untested modules** — rom-loader, game-defs, z80-bus-qsound, sprite-analyzer, tile-allocator, scroll-capture, resampler, capture-session, save-state, sprite-editor (+103 tests, 1016 total)
+- **Game matrix Level 3** — automated sprite & scroll REC on all 29 ROMs, PNG export to `test-results/sprite-rec/` for manual review
 
 ## [1.0.0-beta.1] - 2026-04-02
 

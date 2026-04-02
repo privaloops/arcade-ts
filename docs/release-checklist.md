@@ -4,26 +4,26 @@
 
 Test automatisé en 3 niveaux via Playwright (`tests/e2e/game-matrix.spec.ts`).
 
-### Niveau 1 — Boot (automatique)
+### Niveau 1 — Boot (automatique) ✅
 
 Pour chaque ROM dans `public/roms/` :
-- [ ] Charger la ROM, attendre l'écran titre
-- [ ] Screenshot vs image de référence (`toHaveScreenshot()`)
-- [ ] Pass/fail automatique
+- [x] Charger la ROM, attendre l'écran titre
+- [x] Screenshot vs image de référence (`toHaveScreenshot()`)
+- [x] Pass/fail automatique
 
-### Niveau 2 — Audio (automatique)
+### Niveau 2 — Audio (automatique) ✅
 
 Après coin + start + quelques secondes de gameplay :
-- [ ] Ouvrir le panneau audio (F3)
-- [ ] Screenshot de la timeline FM
-- [ ] Vérifier que les canaux FM ont des animations (barres non vides = audio actif)
+- [x] Ouvrir le panneau audio (F3)
+- [x] Screenshot de la timeline FM
+- [x] Vérifier que les canaux FM ont des animations (barres non vides = audio actif)
 
-### Niveau 3 — Sprites REC (semi-automatique)
+### Niveau 3 — Sprites & Scroll REC (semi-automatique) ✅
 
-- [ ] Coin + start + spam inputs random pendant 15-20 secondes
-- [ ] Activer REC sprites automatiquement
-- [ ] Exporter les sprites capturés en PNG dans `test-output/<rom>/`
-- [ ] **Review manuelle** des 41 dossiers (seul moyen fiable de juger la qualité des captures)
+- [x] Coin + start + spam inputs random (~80 seconds to skip intros)
+- [x] Activer REC sur tous les layers (Sprites + BG1/BG2/BG3) automatiquement
+- [x] Exporter les captures en PNG dans `test-results/sprite-rec/<rom>/`
+- [ ] **Review manuelle** des 29 dossiers (766 captures: 179 sprites + 587 scrolls)
 
 ### Post-test
 
