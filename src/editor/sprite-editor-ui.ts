@@ -230,6 +230,7 @@ export class SpriteEditorUI {
     this.capture.stopAllCaptures();
     this.layerGroups.length = 0;
     this.activeGroupIndex = -1;
+    this.emulator.getVideo()?.clearPaletteOverrides();
     this.hiddenSpritePalettes.clear();
     this.emulator.getVideo()?.setHiddenSpritePalettes(null);
     if (this.spritePaletteContainer) {

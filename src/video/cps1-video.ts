@@ -1414,4 +1414,42 @@ export class CPS1Video {
   setHiddenSpritePalettes(hidden: Set<number> | null): void {
     this.hiddenSpritePalettes = hidden;
   }
+
+  // -- Palette overrides (persist imported palette colors across rounds) --
+
+  /** Palette overrides: Map<paletteIndex, Map<colorIndex, uint16_cps1_word>> */
+  private paletteOverrides: Map<number, Map<number, number>> | null = null;
+
+  /** Set a palette color override (applied every frame before rendering). */
+  setPaletteOverride(paletteIndex: number, colorIndex: number, word: number): void {
+    if (!this.paletteOverrides) this.paletteOverrides = new Map();
+    let pal = this.paletteOverrides.get(paletteIndex);
+    if (!pal) { pal = new Map(); this.paletteOverrides.set(paletteIndex, pal); }
+    pal.set(colorIndex, word);
+  }
+
+  /** Clear all palette overrides. */
+  clearPaletteOverrides(): void {
+    this.paletteOverrides = null;
+  }
+
+  /** Get all palette overrides (for save/restore). */
+  getPaletteOverrides(): Map<number, Map<number, number>> | null {
+    return this.paletteOverrides;
+  }
+
+  /** Apply palette overrides to VRAM (called by emulator before each frame). */
+  applyPaletteOverrides(): void {
+    if (!this.paletteOverrides) return;
+    const base = this.getPaletteBase();
+    const maxOff = this.vram.length - 1;
+    for (const [palIdx, colors] of this.paletteOverrides) {
+      for (const [colIdx, word] of colors) {
+        const off = base + palIdx * 32 + colIdx * 2;
+        if (off + 1 > maxOff) continue;
+        this.vram[off] = (word >> 8) & 0xFF;
+        this.vram[off + 1] = word & 0xFF;
+      }
+    }
+  }
 }

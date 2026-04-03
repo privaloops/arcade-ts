@@ -135,3 +135,29 @@ describe('writeColor + readPalette roundtrip', () => {
     expect(b).toBe(0);
   });
 });
+
+describe('palette override persistence', () => {
+  it('override re-applied after VRAM is overwritten simulates 68K palette reset', () => {
+    const vram = new Uint8Array(0x30000);
+    const base = 0x8000;
+    const palIdx = 3;
+
+    // User imports aseprite with modified red color
+    writeColor(vram, base, palIdx, 0, 255, 0, 0);
+    const overrideWord = encodeColor(255, 0, 0);
+
+    // Simulate 68K overwriting palette (game loads next round)
+    writeColor(vram, base, palIdx, 0, 0, 255, 0); // 68K writes green
+    const afterReset = readPalette(vram, base, palIdx);
+    expect(afterReset[0]![1]).toBe(255); // green
+
+    // Re-apply override (what CPS1Video.applyPaletteOverrides does)
+    const off = base + palIdx * 32;
+    vram[off] = (overrideWord >> 8) & 0xFF;
+    vram[off + 1] = overrideWord & 0xFF;
+
+    const afterOverride = readPalette(vram, base, palIdx);
+    expect(afterOverride[0]![0]).toBe(255); // red restored
+    expect(afterOverride[0]![1]).toBe(0);   // green gone
+  });
+});

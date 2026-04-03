@@ -29,6 +29,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Capture resumption** — Re-clicking a sprite whose palette was already captured resumes the existing group instead of creating a new one. New poses append live to the same card
 - **Palette panel sprite cards + REC** — Captured sprite cards moved from left panel to right palette panel, grouped under their palette. Each palette has a REC button to start/stop capture directly
 - **Large manifest import fix** — .aseprite files with manifests >65535 bytes (UINT16 overflow) now import correctly
+- **Palette import from .aseprite** — Importing a .aseprite with modified palette colors applies them as VRAM overrides that persist across rounds (re-applied every frame)
 - **Autosave disabled** — Manual .romstudio save only (Ctrl+S). Autosave was triggering restore prompts with empty saves
 - **Grouping tolerance reduced** — Sprite adjacency tolerance lowered from 20px to 4px to avoid merging distinct characters
 

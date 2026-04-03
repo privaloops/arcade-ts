@@ -891,6 +891,9 @@ export class Emulator {
   }
 
   private renderFrame(): void {
+    // Apply palette overrides before any rendering path
+    this.video?.applyPaletteOverrides();
+
     if (this._customRenderCallback) {
       this._customRenderCallback();
       return;

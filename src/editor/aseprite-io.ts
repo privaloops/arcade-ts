@@ -11,7 +11,7 @@ import type { ScrollSet } from './scroll-capture';
 import type { LayerGroup } from './layer-model';
 import type { AsepriteFile } from './aseprite-reader';
 import { assembleCharacter } from './sprite-analyzer';
-import { readPalette, writeColor } from './palette-editor';
+import { readPalette, writeColor, encodeColor } from './palette-editor';
 import { readTile as readTileFn, writePixel as writePixelFn } from './tile-encoder';
 import { writeAseprite, writeAsepriteTilemap, downloadAseprite, type AsepriteFrame, type AsepritePaletteEntry } from './aseprite-writer';
 import { readAseprite } from './aseprite-reader';
@@ -582,6 +582,32 @@ export function importAsepriteFile(
           tilesWritten++;
         }
         framesWritten++;
+      }
+
+      // Import palette colors: write to VRAM + set overrides for persistence
+      if (manifest.palette !== undefined && ase.palette.length > 0) {
+        const video = emulator.getVideo();
+        const bufs = emulator.getBusBuffers();
+        if (video && bufs) {
+          const paletteBase = video.getPaletteBase();
+          const palIdx = manifest.palette;
+          const currentPal = readPalette(bufs.vram, paletteBase, palIdx);
+          let colorsChanged = 0;
+          for (let i = 0; i < Math.min(ase.palette.length, 16); i++) {
+            const entry = ase.palette[i]!;
+            const [cr, cg, cb] = currentPal[i] ?? [0, 0, 0];
+            // Only override colors that actually changed
+            if (entry.r !== cr || entry.g !== cg || entry.b !== cb) {
+              const word = encodeColor(entry.r, entry.g, entry.b);
+              video.setPaletteOverride(palIdx, i, word);
+              writeColor(bufs.vram, paletteBase, palIdx, i, entry.r, entry.g, entry.b);
+              colorsChanged++;
+            }
+          }
+          if (colorsChanged > 0) {
+            showToast(`${colorsChanged} palette color${colorsChanged !== 1 ? 's' : ''} overridden`, true);
+          }
+        }
       }
 
       // Force re-render + trigger auto-save
