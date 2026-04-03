@@ -14,7 +14,7 @@
 
 **Fix:** `poseHash()` now filters `group.tiles` by `group.palette` before hashing. Adjacent tiles from other palettes are irrelevant to pose identity.
 
-**Key insight:** CPS1 characters are multi-palette by design, but pose identity should be per-palette. The grouping correctly includes all adjacent tiles (needed for rendering), but the hash must only consider the target palette.
+**Key insight:** CPS1 characters are multi-palette by design, but pose identity should be per-palette. Since Aseprite is strictly one palette per indexed file (no per-layer/per-tile palette), multi-palette grouping was carrying dead weight. The solution is mono-palette grouping at capture time — simpler, cleaner, and eliminates a whole class of parasites.
 
 ## Session April 2-3
 

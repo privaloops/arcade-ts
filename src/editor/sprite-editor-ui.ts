@@ -121,7 +121,7 @@ export class SpriteEditorUI {
     this.emulator = emulator;
     this.gameCanvas = canvas;
     this.editor = new SpriteEditor(emulator);
-    this.capture = new CaptureManager(emulator, this.editor, this.layerGroups, () => this.refreshLayerPanel(), () => this.hiddenSpritePalettes);
+    this.capture = new CaptureManager(emulator, this.editor, this.layerGroups, () => this.refreshLayerPanel());
     this.sheet = new SheetViewer(this as unknown as SheetViewerHost);
 
     this.boundKeyHandler = (e) => this.handleKey(e);
@@ -426,8 +426,9 @@ export class SpriteEditorUI {
         previewH: pose.h,
       });
     }
-    // Include live sprite captures (sessions still recording)
+    // Include live sprite captures (new sessions only, not resumed ones)
     for (const [palette, session] of this.capture.activeSessions) {
+      if (session.resumeTarget) continue; // poses are in the existing group already
       if (session.poses.length === 0) continue;
       const pose = session.poses[0]!;
       spriteSetsInfo.push({
@@ -781,18 +782,15 @@ export class SpriteEditorUI {
 
     // Red bounds + REC indicator for sprites being captured
     if (this.capture.activeSessions.size > 0) {
-      const rawSprites = readAllSprites(video);
-      // Filter out hidden palettes so REC bounds match what's actually captured
-      const allSprites = this.hiddenSpritePalettes.size > 0
-        ? rawSprites.filter(s => !this.hiddenSpritePalettes.has(s.palette))
-        : rawSprites;
+      const recSprites = readAllSprites(video);
       const visited = new Set<number>();
       ctx.lineWidth = 2;
       ctx.strokeStyle = 'rgba(255, 50, 80, 0.8)';
-      for (const sprite of allSprites) {
+      for (const sprite of recSprites) {
         if (!this.capture.activeSessions.has(sprite.palette)) continue;
         if (visited.has(sprite.uid)) continue;
-        const group = groupCharacter(allSprites, sprite.index);
+        // Mono-palette grouping matches capture behavior
+        const group = groupCharacter(recSprites, sprite.index, sprite.palette);
         if (!group) continue;
         for (const s of group.sprites) visited.add(s.uid);
 

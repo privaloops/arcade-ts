@@ -146,16 +146,21 @@ export function readAllSprites(video: CPS1Video): ObjSprite[] {
 
 /**
  * Find all sprites that belong to the same character as the clicked sprite.
- * Groups by: same palette AND bounding boxes touch or overlap (within tolerance).
+ * Groups by spatial adjacency (within tolerance).
+ * @param filterPalette — if set, only include sprites of this palette in the
+ *   flood-fill. Produces a mono-palette group (cleaner captures, no parasites).
  */
-export function groupCharacter(allSprites: ObjSprite[], clickedIndex: number): SpriteGroup | null {
+export function groupCharacter(allSprites: ObjSprite[], clickedIndex: number, filterPalette?: number): SpriteGroup | null {
   const clicked = allSprites.find(s => s.index === clickedIndex);
   if (!clicked) return null;
 
   const palette = clicked.palette;
+  if (filterPalette !== undefined && clicked.palette !== filterPalette) return null;
 
-  // Flood-fill: find all spatially adjacent sprites regardless of palette.
-  // CPS1 characters often span multiple palettes (body, horse, weapon).
+  const candidates = filterPalette !== undefined
+    ? allSprites.filter(s => s.palette === filterPalette)
+    : allSprites;
+
   const TOLERANCE = 4;
   const inGroup = new Set<number>();
   const queue = [clicked];
@@ -163,7 +168,7 @@ export function groupCharacter(allSprites: ObjSprite[], clickedIndex: number): S
 
   while (queue.length > 0) {
     const current = queue.pop()!;
-    for (const candidate of allSprites) {
+    for (const candidate of candidates) {
       if (inGroup.has(candidate.uid)) continue;
       if (tilesAdjacent(current, candidate, TOLERANCE)) {
         inGroup.add(candidate.uid);
@@ -172,7 +177,7 @@ export function groupCharacter(allSprites: ObjSprite[], clickedIndex: number): S
     }
   }
 
-  const grouped = allSprites.filter(s => inGroup.has(s.uid));
+  const grouped = candidates.filter(s => inGroup.has(s.uid));
 
   // Compute bounding box
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -201,67 +206,12 @@ export function groupCharacter(allSprites: ObjSprite[], clickedIndex: number): S
   };
 }
 
-// ---------------------------------------------------------------------------
-// Step 2b: Track character across frames + capture poses
-// ---------------------------------------------------------------------------
-
-/**
- * Find the character group in the current frame that best matches
- * a previously identified character (by palette + closest center position).
- */
-export function trackCharacter(
-  video: CPS1Video,
-  palette: number,
-  prevCenterX: number,
-  prevCenterY: number,
-): SpriteGroup | null {
-  const allSprites = readAllSprites(video);
-  const samePalette = allSprites.filter(s => s.palette === palette);
-  if (samePalette.length === 0) return null;
-
-  // Build all connected groups for this palette
-  const visited = new Set<number>();
-  const groups: SpriteGroup[] = [];
-
-  for (const sprite of samePalette) {
-    if (visited.has(sprite.uid)) continue;
-
-    const group = groupCharacter(allSprites, sprite.index);
-    if (!group) continue;
-
-    for (const s of group.sprites) visited.add(s.uid);
-    groups.push(group);
-  }
-
-  if (groups.length === 0) return null;
-
-  // Pick the group whose center is closest to the previous center
-  let bestGroup: SpriteGroup | null = null;
-  let bestDist = Infinity;
-
-  for (const g of groups) {
-    const cx = g.bounds.x + g.bounds.w / 2;
-    const cy = g.bounds.y + g.bounds.h / 2;
-    const dist = (cx - prevCenterX) ** 2 + (cy - prevCenterY) ** 2;
-    if (dist < bestDist) {
-      bestDist = dist;
-      bestGroup = g;
-    }
-  }
-
-  return bestGroup;
-}
-
 /**
  * Compute a hash string for a pose (sorted tile codes) for deduplication.
  */
 export function poseHash(group: SpriteGroup): string {
-  // Only hash tiles from the group's main palette — adjacent tiles from
-  // other palettes are unstable between frames and don't define the pose
-  const codes = group.tiles
-    .filter(t => t.palette === group.palette)
-    .map(t => t.mappedCode)
-    .sort((a, b) => a - b);
+  // Hash sorted tile codes — ignores position and flip so mirrored poses match
+  const codes = group.tiles.map(t => t.mappedCode).sort((a, b) => a - b);
   return codes.join(',');
 }
 
@@ -271,17 +221,16 @@ export function poseHash(group: SpriteGroup): string {
 export function capturePose(
   gfxRom: Uint8Array,
   group: SpriteGroup,
-  paletteLookup: Map<number, Array<[number, number, number]>>,
+  palette: Array<[number, number, number]>,
 ): CapturedPose {
-  const mainPal = paletteLookup.get(group.palette) ?? [];
   return {
     tileHash: poseHash(group),
     tiles: group.tiles.map(t => ({ ...t })),
     w: group.bounds.w,
     h: group.bounds.h,
     palette: group.palette,
-    preview: assembleCharacter(gfxRom, group, paletteLookup),
-    capturedColors: mainPal.map(([r, g, b]) => [r, g, b] as [number, number, number]),
+    preview: assembleCharacter(gfxRom, group, palette),
+    capturedColors: palette.map(([r, g, b]) => [r, g, b] as [number, number, number]),
   };
 }
 

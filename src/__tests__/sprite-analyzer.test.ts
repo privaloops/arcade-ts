@@ -56,26 +56,6 @@ describe('poseHash', () => {
     expect(poseHash(group1)).not.toBe(poseHash(group2));
   });
 
-  it('ignores tiles from other palettes', () => {
-    const group1: SpriteGroup = {
-      sprites: [], palette: 1,
-      bounds: { x: 0, y: 0, w: 32, h: 16 },
-      tiles: [
-        { relX: 0, relY: 0, mappedCode: 100, flipX: false, flipY: false, palette: 1 },
-        { relX: 16, relY: 0, mappedCode: 999, flipX: false, flipY: false, palette: 2 },
-      ],
-    };
-    const group2: SpriteGroup = {
-      sprites: [], palette: 1,
-      bounds: { x: 0, y: 0, w: 16, h: 16 },
-      tiles: [
-        { relX: 0, relY: 0, mappedCode: 100, flipX: false, flipY: false, palette: 1 },
-      ],
-    };
-
-    expect(poseHash(group1)).toBe(poseHash(group2));
-  });
-
   it('hash is order-independent (sorted codes)', () => {
     const group1: SpriteGroup = {
       sprites: [], palette: 0,
@@ -112,7 +92,7 @@ describe('groupCharacter', () => {
     expect(group!.palette).toBe(5);
   });
 
-  it('groups adjacent sprites across palettes (cross-palette flood-fill)', () => {
+  it('groups adjacent sprites across palettes without filter', () => {
     const sprites: ObjSprite[] = [
       makeSprite({ index: 0, screenX: 100, screenY: 100, palette: 5, mappedCode: 10 }),
       makeSprite({ index: 1, screenX: 116, screenY: 100, palette: 6, mappedCode: 11 }),
@@ -121,8 +101,25 @@ describe('groupCharacter', () => {
     const group = groupCharacter(sprites, 0);
     expect(group).not.toBeNull();
     expect(group!.sprites.length).toBe(2);
-    // palette is the clicked sprite's palette
     expect(group!.palette).toBe(5);
+  });
+
+  it('excludes other palettes when filterPalette is set', () => {
+    const sprites: ObjSprite[] = [
+      makeSprite({ index: 0, screenX: 100, screenY: 100, palette: 5, mappedCode: 10 }),
+      makeSprite({ index: 1, screenX: 116, screenY: 100, palette: 6, mappedCode: 11 }),
+      makeSprite({ index: 2, screenX: 132, screenY: 100, palette: 5, mappedCode: 12 }),
+    ];
+
+    // Without filter: all 3 grouped (cross-palette flood-fill)
+    const all = groupCharacter(sprites, 0);
+    expect(all!.sprites.length).toBe(3);
+
+    // With filter: only palette 5 tiles, and sprite at 132 is not adjacent
+    // to sprite at 100 without the palette 6 bridge at 116
+    const mono = groupCharacter(sprites, 0, 5);
+    expect(mono!.sprites.length).toBe(1);
+    expect(mono!.tiles.every(t => t.palette === 5)).toBe(true);
   });
 
   it('does not group distant sprites even with same palette', () => {

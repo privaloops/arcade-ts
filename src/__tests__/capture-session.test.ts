@@ -14,6 +14,7 @@ function createSession(refTileCount = 0): CaptureSession {
     refTileCount,
     lastCenterX: -1,
     lastCenterY: -1,
+    prevPoseCount: 0,
   };
 }
 

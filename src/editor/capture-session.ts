@@ -27,6 +27,10 @@ export interface CaptureSession {
   /** Last known center position for spatial tracking */
   lastCenterX: number;
   lastCenterY: number;
+  /** Existing LayerGroup being resumed */
+  resumeTarget?: LayerGroup;
+  /** Number of poses in the group before this session started */
+  prevPoseCount: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -49,7 +53,6 @@ export class CaptureManager {
     private readonly editor: SpriteEditor,
     private readonly layerGroups: LayerGroup[],
     private readonly onRefresh: () => void,
-    private readonly getHiddenPalettes?: () => Set<number>,
   ) {}
 
   // -- Sprite capture --
@@ -60,23 +63,38 @@ export class CaptureManager {
     if (!video) return;
 
     const allSprites = readAllSprites(video);
-    const group = groupCharacter(allSprites, spriteIndex);
-    if (!group) return;
+    const clicked = allSprites.find(s => s.index === spriteIndex);
+    if (!clicked) return;
+    const palette = clicked.palette;
 
-    const palette = group.palette;
+    const group = groupCharacter(allSprites, spriteIndex, palette);
+    if (!group) return;
 
     if (this.activeSessions.has(palette)) {
       this.stopCaptureForPalette(palette);
     } else {
       const cx = group.bounds.x + group.bounds.w / 2;
       const cy = group.bounds.y + group.bounds.h / 2;
-      this.activeSessions.set(palette, {
-        poses: [], seenHashes: new Set<string>(),
+      // Resume existing group: pre-seed seenHashes and append poses live
+      const existing = this.layerGroups.find(
+        g => g.type === 'sprite' && g.spriteCapture?.palette === palette,
+      );
+      const seenHashes = new Set<string>(
+        existing?.spriteCapture?.poses.map(p => p.tileHash) ?? [],
+      );
+      const existingPoses = existing?.spriteCapture?.poses ?? [];
+      const session: CaptureSession = {
+        poses: existingPoses,
+        seenHashes,
         refTileCount: group.sprites.length,
         lastCenterX: cx, lastCenterY: cy,
-      });
+        prevPoseCount: existingPoses.length,
+      };
+      if (existing) session.resumeTarget = existing;
+      this.activeSessions.set(palette, session);
       this.captureGroupsForPalette(video, palette);
-      showToast(`Recording sprite (palette ${palette})`, true);
+      const msg = existing ? `Resuming capture (palette ${palette})` : `Recording sprite (palette ${palette})`;
+      showToast(msg, true);
     }
 
     this.onRefresh();
@@ -88,23 +106,21 @@ export class CaptureManager {
     if (!session) return;
     this.activeSessions.delete(palette);
 
-    if (session.poses.length > 0) {
-      // Deduplicate poses using tileHash (consistent with frame-time poseHash)
-      const seen = new Set<string>();
-      const unique = session.poses.filter(p => {
-        const key = p.tileHash;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
+    const newPoses = session.poses.length - session.prevPoseCount;
+
+    if (session.resumeTarget) {
+      // Resume mode: poses were appended live to the existing group
+      const name = session.resumeTarget.name;
+      if (newPoses > 0) {
+        showToast(`+${newPoses} pose${newPoses !== 1 ? 's' : ''} → ${name} (${session.poses.length} total)`, true);
+      } else {
+        showToast(`No new poses → ${name}`, false);
+      }
+    } else if (newPoses > 0) {
       this.captureCounter++;
       const name = `Sprite #${this.captureCounter}`;
-      this.layerGroups.push(createSpriteGroup(name, unique, palette));
-      const dupes = session.poses.length - unique.length;
-      const msg = dupes > 0
-        ? `Captured ${unique.length} pose${unique.length !== 1 ? 's' : ''} (${dupes} duplicate${dupes !== 1 ? 's' : ''} removed) → ${name}`
-        : `Captured ${unique.length} pose${unique.length !== 1 ? 's' : ''} → ${name}`;
-      showToast(msg, true);
+      this.layerGroups.push(createSpriteGroup(name, session.poses, palette));
+      showToast(`Captured ${newPoses} pose${newPoses !== 1 ? 's' : ''} → ${name}`, true);
     } else {
       showToast('No poses captured', false);
     }
@@ -145,10 +161,7 @@ export class CaptureManager {
     const session = this.activeSessions.get(palette);
     if (!session) return false;
 
-    const rawSprites = readAllSprites(video);
-    // Filter out hidden palettes so they don't pollute grouping
-    const hidden = this.getHiddenPalettes?.() ?? new Set<number>();
-    const allSprites = hidden.size > 0 ? rawSprites.filter(s => !hidden.has(s.palette)) : rawSprites;
+    const allSprites = readAllSprites(video);
     const samePalette = allSprites.filter(s => s.palette === palette);
     if (samePalette.length === 0) return false;
 
@@ -160,10 +173,10 @@ export class CaptureManager {
     const groups: SpriteGroupData[] = [];
     for (const sprite of samePalette) {
       if (visited.has(sprite.uid)) continue;
-      const group = groupCharacter(allSprites, sprite.index);
+      // Mono-palette grouping: only follow tiles of the target palette
+      const group = groupCharacter(allSprites, sprite.index, palette);
       if (!group) continue;
       for (const s of group.sprites) visited.add(s.uid);
-      // Filter small groups (HUD, text fragments)
       if (group.sprites.length >= CaptureManager.MIN_TILE_COUNT) {
         groups.push(group);
       }
@@ -206,15 +219,9 @@ export class CaptureManager {
     if (session.seenHashes.has(hash)) return false;
     session.seenHashes.add(hash);
 
-    // Build palette map for all palettes used by this group (like the game renderer)
     const paletteBase = video.getPaletteBase();
-    const palMap = new Map<number, Array<[number, number, number]>>();
-    for (const t of bestGroup.tiles) {
-      if (!palMap.has(t.palette)) {
-        palMap.set(t.palette, readPalette(bufs.vram, paletteBase, t.palette));
-      }
-    }
-    session.poses.push(capturePose(gfxRom, bestGroup, palMap));
+    const pal = readPalette(bufs.vram, paletteBase, palette);
+    session.poses.push(capturePose(gfxRom, bestGroup, pal));
     return true;
   }
 
