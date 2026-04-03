@@ -1,5 +1,21 @@
 # Learnings
 
+## Session April 3
+
+### Pose deduplication — two independent bugs causing duplicates
+
+**Context:** Same pose appeared multiple times in sprite sheet exports (e.g., sf2hf captured 80 poses but 18 groups were duplicates).
+
+**Root cause 1 — inconsistent hash formulas:** Three dedup sites (stop-time, export, save restore) used `[...new Set(codes)].sort().join(',')` which strips intra-group duplicate tile codes, while `poseHash()` (frame-time) preserves them. The formulas could disagree on what constitutes a duplicate.
+
+**Fix:** All sites now use `p.tileHash` / `pose.tileHash` (pre-computed by `poseHash()`). Single source of truth.
+
+**Root cause 2 — multi-palette grouping pollution:** `groupCharacter()` flood-fills across palettes (body + weapon + horse share adjacency). `poseHash()` hashed ALL tiles including adjacent sprites from other palettes. If a nearby sprite from another palette entered/left the adjacency zone between frames, the hash changed, creating false-distinct poses.
+
+**Fix:** `poseHash()` now filters `group.tiles` by `group.palette` before hashing. Adjacent tiles from other palettes are irrelevant to pose identity.
+
+**Key insight:** CPS1 characters are multi-palette by design, but pose identity should be per-palette. The grouping correctly includes all adjacent tiles (needed for rendering), but the hash must only consider the target palette.
+
 ## Session April 2-3
 
 ### CPS1 multi-tile sprites — why captures were broken for complex games

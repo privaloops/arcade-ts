@@ -89,10 +89,10 @@ export class CaptureManager {
     this.activeSessions.delete(palette);
 
     if (session.poses.length > 0) {
-      // Deduplicate poses by unique tile code set
+      // Deduplicate poses using tileHash (consistent with frame-time poseHash)
       const seen = new Set<string>();
       const unique = session.poses.filter(p => {
-        const key = [...new Set(p.tiles.map(t => t.mappedCode))].sort((a, b) => a - b).join(',');
+        const key = p.tileHash;
         if (seen.has(key)) return false;
         seen.add(key);
         return true;

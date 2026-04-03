@@ -18,6 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Game matrix Level 3** — automated sprite & scroll REC on all 29 ROMs, PNG export to `test-results/sprite-rec/` for manual review
 
 ### Fixed
+- **Pose deduplication broken** — Unified all dedup hash formulas to use `poseHash()` consistently (stop-time, export, save restore). Additionally, `poseHash()` now filters by the group's main palette so adjacent sprites from other palettes don't pollute the hash and create false-distinct poses
 - **Sprite tile z-order** — `assembleCharacter()` now draws tiles back-to-front (matching CPS1 hardware priority)
 - **Tile click palette** — Clicking a tile in sprite sheet selects its own palette (not the group's main palette)
 - **Frame cropping in per-palette export** — Uses max dimensions across all poses

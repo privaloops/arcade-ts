@@ -108,9 +108,8 @@ export function exportSpriteAseprite(
 
   for (let i = 0; i < poses.length; i++) {
     const pose = poses[i]!;
-    const poseKey = [...new Set(pose.tiles.map(t => t.mappedCode))].sort((a, b) => a - b).join(',');
-    if (seenPoseKeys.has(poseKey)) continue;
-    seenPoseKeys.add(poseKey);
+    if (seenPoseKeys.has(pose.tileHash)) continue;
+    seenPoseKeys.add(pose.tileHash);
     const pixels = new Uint8Array(frameW * frameH).fill(15);
 
     for (const tile of pose.tiles) {
@@ -208,10 +207,9 @@ export function exportSpritePaletteAseprite(
     const palTiles = pose.tiles.filter(t => t.palette === palIdx);
     if (palTiles.length === 0) continue;
 
-    // Deduplicate by unique tile code set (ignores position/flip)
-    const poseKey = [...new Set(palTiles.map(t => t.mappedCode))].sort((a, b) => a - b).join(',');
-    if (seenPoseKeys.has(poseKey)) continue;
-    seenPoseKeys.add(poseKey);
+    // Deduplicate by tile hash (consistent with poseHash)
+    if (seenPoseKeys.has(pose.tileHash)) continue;
+    seenPoseKeys.add(pose.tileHash);
 
     const pixels = new Uint8Array(frameW * frameH).fill(15);
     for (const tile of palTiles) {

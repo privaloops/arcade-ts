@@ -7,7 +7,7 @@
 
 import type { RomStore, DiffEntry, RomDiffs } from '../rom-store';
 import type { CapturedPose, SpriteGroup } from './sprite-analyzer';
-import { assembleCharacter } from './sprite-analyzer';
+import { assembleCharacter, poseHash } from './sprite-analyzer';
 import { readPalette } from './palette-editor';
 
 // ---------------------------------------------------------------------------
@@ -204,7 +204,7 @@ export function applySaveFile(
     const preview = assembleCharacter(romStore.graphicsRom, group, palette);
 
     return {
-      tileHash: tiles.map(t => t.mappedCode).sort((a, b) => a - b).join(','),
+      tileHash: poseHash(group),
       tiles,
       w,
       h,

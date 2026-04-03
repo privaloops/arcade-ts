@@ -256,9 +256,12 @@ export function trackCharacter(
  * Compute a hash string for a pose (sorted tile codes) for deduplication.
  */
 export function poseHash(group: SpriteGroup): string {
-  // Deduplicate by tile codes only — ignores position and flip
-  // so left-facing and right-facing versions of the same pose match
-  const codes = group.tiles.map(t => t.mappedCode).sort((a, b) => a - b);
+  // Only hash tiles from the group's main palette — adjacent tiles from
+  // other palettes are unstable between frames and don't define the pose
+  const codes = group.tiles
+    .filter(t => t.palette === group.palette)
+    .map(t => t.mappedCode)
+    .sort((a, b) => a - b);
   return codes.join(',');
 }
 

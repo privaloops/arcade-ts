@@ -24,8 +24,8 @@ describe('poseHash', () => {
       palette: 1,
       bounds: { x: 0, y: 0, w: 32, h: 32 },
       tiles: [
-        { relX: 0, relY: 0, mappedCode: 100, flipX: false, flipY: false, palette: 0 },
-        { relX: 16, relY: 0, mappedCode: 200, flipX: false, flipY: false, palette: 0 },
+        { relX: 0, relY: 0, mappedCode: 100, flipX: false, flipY: false, palette: 1 },
+        { relX: 16, relY: 0, mappedCode: 200, flipX: false, flipY: false, palette: 1 },
       ],
     };
     const group2: SpriteGroup = {
@@ -33,8 +33,8 @@ describe('poseHash', () => {
       palette: 1,
       bounds: { x: 50, y: 50, w: 32, h: 32 },
       tiles: [
-        { relX: 0, relY: 0, mappedCode: 100, flipX: true, flipY: false, palette: 0 },
-        { relX: 16, relY: 0, mappedCode: 200, flipX: false, flipY: true, palette: 0 },
+        { relX: 0, relY: 0, mappedCode: 100, flipX: true, flipY: false, palette: 1 },
+        { relX: 16, relY: 0, mappedCode: 200, flipX: false, flipY: true, palette: 1 },
       ],
     };
 
@@ -45,15 +45,35 @@ describe('poseHash', () => {
     const group1: SpriteGroup = {
       sprites: [], palette: 1,
       bounds: { x: 0, y: 0, w: 16, h: 16 },
-      tiles: [{ relX: 0, relY: 0, mappedCode: 100, flipX: false, flipY: false, palette: 0 }],
+      tiles: [{ relX: 0, relY: 0, mappedCode: 100, flipX: false, flipY: false, palette: 1 }],
     };
     const group2: SpriteGroup = {
       sprites: [], palette: 1,
       bounds: { x: 0, y: 0, w: 16, h: 16 },
-      tiles: [{ relX: 0, relY: 0, mappedCode: 101, flipX: false, flipY: false, palette: 0 }],
+      tiles: [{ relX: 0, relY: 0, mappedCode: 101, flipX: false, flipY: false, palette: 1 }],
     };
 
     expect(poseHash(group1)).not.toBe(poseHash(group2));
+  });
+
+  it('ignores tiles from other palettes', () => {
+    const group1: SpriteGroup = {
+      sprites: [], palette: 1,
+      bounds: { x: 0, y: 0, w: 32, h: 16 },
+      tiles: [
+        { relX: 0, relY: 0, mappedCode: 100, flipX: false, flipY: false, palette: 1 },
+        { relX: 16, relY: 0, mappedCode: 999, flipX: false, flipY: false, palette: 2 },
+      ],
+    };
+    const group2: SpriteGroup = {
+      sprites: [], palette: 1,
+      bounds: { x: 0, y: 0, w: 16, h: 16 },
+      tiles: [
+        { relX: 0, relY: 0, mappedCode: 100, flipX: false, flipY: false, palette: 1 },
+      ],
+    };
+
+    expect(poseHash(group1)).toBe(poseHash(group2));
   });
 
   it('hash is order-independent (sorted codes)', () => {
