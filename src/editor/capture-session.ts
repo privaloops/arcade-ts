@@ -148,6 +148,8 @@ export class CaptureManager {
     for (const palette of [...this.activeSessions.keys()]) {
       this.stopCaptureForPalette(palette);
     }
+    this.scrollSessions.clear();
+    this.scrollSets.length = 0;
   }
 
   /**
@@ -249,7 +251,10 @@ export class CaptureManager {
     if (this.scrollSessions.has(layerId)) {
       const session = this.scrollSessions.get(layerId)!;
       this.scrollSessions.delete(layerId);
-      const sets = buildScrollSets(session);
+      const video = this.emulator.getVideo();
+      const bufs = this.emulator.getBusBuffers();
+      const paletteBase = video?.getPaletteBase();
+      const sets = buildScrollSets(session, bufs.vram, paletteBase);
       this.scrollSets.push(...sets);
       this.onRefresh();
       showToast(`Captured ${session.tileMap.size} tiles → ${sets.length} scroll set(s)`, true);

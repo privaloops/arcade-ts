@@ -72,15 +72,12 @@ describe('buildScrollSets', () => {
     expect(buildScrollSets(session)).toEqual([]);
   });
 
-  it('sets include capturedColors from palette snapshots', () => {
+  it('sets have no capturedColors when VRAM not provided', () => {
     const session = createScrollSession(LAYER_SCROLL2);
     session.tileMap.set('0,0', makeTile({ absX: 0, absY: 0, palette: 3 }));
-    const colors: Array<[number, number, number]> = Array.from({ length: 16 }, () => [128, 64, 32]);
-    session.paletteSnapshots.set(3, colors);
 
     const sets = buildScrollSets(session);
-    expect(sets[0]!.capturedColors).toBeDefined();
-    expect(sets[0]!.capturedColors![0]).toEqual([128, 64, 32]);
+    expect(sets[0]!.capturedColors).toBeUndefined();
   });
 
   it('sets carry correct layerId and tile dimensions', () => {

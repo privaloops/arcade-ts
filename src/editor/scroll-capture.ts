@@ -54,8 +54,6 @@ export interface ScrollCaptureSession {
   tileMap: Map<string, ScrollTile>;
   tileW: number;
   tileH: number;
-  /** Palette RGB snapshots keyed by palette index, captured at first encounter. */
-  paletteSnapshots: Map<number, Array<[number, number, number]>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -69,7 +67,6 @@ export function createScrollSession(layerId: number): ScrollCaptureSession {
     tileMap: new Map(),
     tileW,
     tileH: tileW,
-    paletteSnapshots: new Map(),
   };
 }
 
@@ -97,11 +94,6 @@ export function captureScrollFrame(
 
       const info = video.inspectScrollAt(px, py, layerId, true);
       if (!info || info.tileCode === -1) continue;
-
-      // Snapshot palette RGB on first encounter of this palette index
-      if (vram && paletteBase !== undefined && !session.paletteSnapshots.has(info.paletteIndex)) {
-        session.paletteSnapshots.set(info.paletteIndex, readPalette(vram, paletteBase, info.paletteIndex));
-      }
 
       // Absolute position = screen position + scroll, snapped to tile grid
       const absX = Math.floor((sx + scrollX) / tileW) * tileW;
@@ -131,8 +123,9 @@ export function captureScrollFrame(
 
 /**
  * Build scroll sets from a capture session (one per palette).
+ * Palette RGB is snapshot at build time (STOP) to avoid fade/flash artifacts.
  */
-export function buildScrollSets(session: ScrollCaptureSession): ScrollSet[] {
+export function buildScrollSets(session: ScrollCaptureSession, vram?: Uint8Array, paletteBase?: number): ScrollSet[] {
   const byPalette = new Map<number, ScrollTile[]>();
 
   for (const tile of session.tileMap.values()) {
@@ -144,9 +137,11 @@ export function buildScrollSets(session: ScrollCaptureSession): ScrollSet[] {
   const sets: ScrollSet[] = [];
   for (const [palette, tiles] of byPalette) {
     if (tiles.length === 0) continue;
-    const capturedColors = session.paletteSnapshots.get(palette);
     const set: ScrollSet = { layerId: session.layerId, palette, tiles, tileW: session.tileW, tileH: session.tileH };
-    if (capturedColors) set.capturedColors = capturedColors;
+    // Snapshot palette from current VRAM state (stable at STOP time)
+    if (vram && paletteBase !== undefined) {
+      set.capturedColors = readPalette(vram, paletteBase, palette);
+    }
     sets.push(set);
   }
 
