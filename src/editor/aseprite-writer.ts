@@ -248,11 +248,17 @@ function buildTilemapCelChunk(
   return buildChunk(0x2005, w.toUint8Array());
 }
 
-/** User Data chunk (0x2020) — text only */
+/** User Data chunk (0x2020) — compressed manifest to avoid Aseprite truncation */
 function buildUserDataChunk(text: string): Uint8Array {
+  // Compress JSON with deflate+base64 and prefix with ROMSTUDIO:
+  // Aseprite truncates long User Data strings; compression reduces ~10×
+  const compressed = pako.deflate(new TextEncoder().encode(text));
+  const b64 = btoa(String.fromCharCode(...compressed));
+  const encoded = 'ROMSTUDIO:' + b64;
+
   const w = new BufWriter();
   w.dword(1);             // flags: has text
-  w.string(text);
+  w.string(encoded);
   return buildChunk(0x2020, w.toUint8Array());
 }
 

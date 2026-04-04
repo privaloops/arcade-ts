@@ -265,9 +265,18 @@ export function readAseprite(buffer: ArrayBuffer): AsepriteFile {
             const text = new TextDecoder().decode(new Uint8Array(buffer, pos, textLen));
             pos += textLen;
             if (!result.userDataText) {
-              result.userDataText = text;
+              let manifestText = text;
+              // Decompress ROMSTUDIO: prefixed data (deflate+base64)
+              if (text.startsWith('ROMSTUDIO:')) {
+                try {
+                  const b64 = text.slice('ROMSTUDIO:'.length);
+                  const binary = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+                  manifestText = new TextDecoder().decode(pako.inflate(binary));
+                } catch { /* decompression failed, keep raw */ }
+              }
+              result.userDataText = manifestText;
               try {
-                result.manifest = JSON.parse(text);
+                result.manifest = JSON.parse(manifestText);
               } catch { /* not JSON */ }
             }
           }

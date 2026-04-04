@@ -112,12 +112,11 @@ describe('aseprite-writer', () => {
 
     const data = writeAseprite(opts);
 
-    // Verify the JSON is somewhere in the binary
-    const text = new TextDecoder().decode(data);
-    expect(text).toContain('"game"');
-    expect(text).toContain('"sf2"');
-    expect(text).toContain('"ryu"');
-    expect(text).toContain('0x3A4F2C');
+    // Verify the compressed manifest survives roundtrip via reader
+    const ase = readAseprite(data.buffer as ArrayBuffer);
+    expect(ase.manifest).not.toBeNull();
+    expect((ase.manifest as Record<string, unknown>).game).toBe('sf2');
+    expect((ase.manifest as Record<string, unknown>).character).toBe('ryu');
   });
 
   it('should set transparent index correctly', () => {
