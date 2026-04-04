@@ -513,20 +513,11 @@ export class SheetViewer {
       setTooltip(badge, `${count} tile${count !== 1 ? 's' : ''} using this palette`);
       row.appendChild(badge);
 
-      // Export buttons (on their own line)
+      // Export button
       const actions = el('div', 'palette-layer-actions');
-      const exportPng = el('button', 'palette-layer-export') as HTMLButtonElement;
-      exportPng.textContent = 'PNG';
-      setTooltip(exportPng, 'Export this palette layer as PNG');
-      exportPng.onclick = (e) => {
-        e.stopPropagation();
-        this.exportPalettePng(palIdx);
-      };
-      actions.appendChild(exportPng);
-
       const exportAse = el('button', 'palette-layer-export') as HTMLButtonElement;
-      exportAse.textContent = '.aseprite';
-      setTooltip(exportAse, 'Export this palette layer as .aseprite (all poses, 16-color indexed)');
+      exportAse.textContent = 'Export';
+      setTooltip(exportAse, 'Export all poses as .aseprite (16-color indexed)');
       exportAse.onclick = (e) => {
         e.stopPropagation();
         exportSpritePaletteAseprite(host.emulator, host.editor, host.activePoses, palIdx);
@@ -559,52 +550,6 @@ export class SheetViewer {
     container.style.display = '';
     container.dataset['captureMode'] = 'true';
     this.renderPaletteLayers(container, palettesUsed);
-  }
-
-  /** Export only the tiles of a specific palette as a PNG download. */
-  private exportPalettePng(palIdx: number): void {
-    const { host } = this;
-    const pose = host.activePoses[this.sheetSelectedPose];
-    if (!pose) return;
-
-    const gfxRom = host.editor.getGfxRom();
-    if (!gfxRom) return;
-    const video = host.emulator.getVideo();
-    if (!video) return;
-    const bufs = host.emulator.getBusBuffers();
-
-    const palTiles = pose.tiles.filter(t => t.palette === palIdx);
-    if (palTiles.length === 0) return;
-
-    const colors = readPalette(bufs.vram, video.getPaletteBase(), palIdx);
-    const palMap = new Map<number, Array<[number, number, number]>>();
-    palMap.set(palIdx, colors);
-
-    const sprGroup: SpriteGroupData = {
-      sprites: [], palette: palIdx,
-      bounds: { x: 0, y: 0, w: pose.w, h: pose.h },
-      tiles: palTiles,
-    };
-    const img = assembleCharacter(gfxRom, sprGroup, palMap);
-
-    // Render to canvas and download
-    const cvs = document.createElement('canvas');
-    cvs.width = pose.w;
-    cvs.height = pose.h;
-    cvs.getContext('2d')!.putImageData(img, 0, 0);
-
-    const groupName = host.activeGroup?.name?.replace(/\s+/g, '_') ?? 'sprite';
-    const filename = `${groupName}_pose${this.sheetSelectedPose}_pal${palIdx}.png`;
-
-    cvs.toBlob((blob) => {
-      if (!blob) return;
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      a.click();
-      URL.revokeObjectURL(url);
-    }, 'image/png');
   }
 
   private renderScrollSetView(): void {

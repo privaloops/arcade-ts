@@ -526,6 +526,23 @@ export function importScrollTilemap(
  * Routes scroll_tilemap manifests to importScrollTilemap.
  * For sprite manifests, writes tiles to GFX ROM and creates/updates layer groups.
  */
+/** Import from a File object directly (used by drag-and-drop). */
+export async function importAsepriteFromDrop(
+  emulator: Emulator,
+  editor: SpriteEditor,
+  layerGroups: LayerGroup[],
+  file: File,
+  onRefresh: () => void,
+): Promise<void> {
+  try {
+    const buffer = await file.arrayBuffer();
+    await importAsepriteBuffer(emulator, editor, layerGroups, buffer, onRefresh);
+  } catch (err) {
+    showToast(`Import failed: ${(err as Error).message}`, false);
+  }
+}
+
+/** Open a file dialog and import an .aseprite file. */
 export function importAsepriteFile(
   emulator: Emulator,
   editor: SpriteEditor,
@@ -538,9 +555,19 @@ export function importAsepriteFile(
   input.onchange = async () => {
     const file = input.files?.[0];
     if (!file) return;
+    await importAsepriteFromDrop(emulator, editor, layerGroups, file, onRefresh);
+  };
+  input.click();
+}
 
+async function importAsepriteBuffer(
+  emulator: Emulator,
+  editor: SpriteEditor,
+  layerGroups: LayerGroup[],
+  buffer: ArrayBuffer,
+  onRefresh: () => void,
+): Promise<void> {
     try {
-      const buffer = await file.arrayBuffer();
       const ase = readAseprite(buffer);
 
       if (!ase.manifest) {
@@ -735,6 +762,4 @@ export function importAsepriteFile(
     } catch (err) {
       showToast(`Import failed: ${(err as Error).message}`, false);
     }
-  };
-  input.click();
 }

@@ -17,7 +17,7 @@ import { findTileReferences } from './tile-refs';
 import type { Emulator } from '../emulator';
 import { pencilCursor, fillCursor, eyedropperCursor, eraserCursor, wandCursor } from './tool-cursors';
 import { showToast } from '../ui/toast';
-import { exportScrollAseprite, importAsepriteFile } from './aseprite-io';
+import { exportScrollAseprite, exportSpritePaletteAseprite, importAsepriteFile } from './aseprite-io';
 import { buildScrollSets, type ScrollSet } from './scroll-capture';
 import { CaptureManager } from './capture-session';
 import { SheetViewer, type SheetViewerHost } from './sheet-viewer';
@@ -1219,13 +1219,29 @@ export class SpriteEditorUI {
       );
       for (const group of captures) {
         const gi = this.layerGroups.indexOf(group);
-        const pose = group.spriteCapture!.poses[0]!;
+        const capture = group.spriteCapture!;
+        const pose = capture.poses[0]!;
         const card = el('div', 'edit-capture-card') as HTMLDivElement;
-        setTooltip(card, 'Open sprite sheet viewer');
-        card.onclick = () => {
-          this.activeGroupIndex = gi;
-          this.sheet.enterSpriteSheetMode();
+        setTooltip(card, 'Click to expand poses');
+
+        // Click card body → toggle expand/collapse + switch palette
+        card.onclick = (e) => {
+          if ((e.target as HTMLElement).closest('.edit-capture-export-btn, .edit-capture-delete, .edit-capture-voir-tout')) return;
+          card.classList.toggle('expanded');
+          // Switch tile palette to this capture's palette
+          const firstPose = capture.poses[0];
+          if (firstPose?.tiles[0]) {
+            this.editor.selectTileFromPose(firstPose.tiles[0].mappedCode, capture.palette);
+            this.refreshPalette();
+          }
         };
+
+        // Header row (chevron + thumb + info + export + delete)
+        const header = el('div', 'edit-capture-header');
+
+        const chevron = el('span', 'edit-capture-toggle');
+        chevron.textContent = '\u25B6'; // ▶
+        header.appendChild(chevron);
 
         const thumb = document.createElement('canvas');
         thumb.className = 'edit-capture-thumb';
@@ -1233,16 +1249,26 @@ export class SpriteEditorUI {
         thumb.height = pose.h;
         const ctx = thumb.getContext('2d');
         if (ctx) ctx.putImageData(pose.preview, 0, 0);
-        card.appendChild(thumb);
+        header.appendChild(thumb);
 
         const info = el('div', 'edit-capture-info');
         const nameEl = el('div', 'edit-capture-name');
         nameEl.textContent = group.name;
         info.appendChild(nameEl);
         const countEl = el('div', 'edit-capture-count');
-        countEl.textContent = `${group.spriteCapture!.poses.length} pose${group.spriteCapture!.poses.length !== 1 ? 's' : ''}`;
+        countEl.textContent = `${capture.poses.length} pose${capture.poses.length !== 1 ? 's' : ''}`;
         info.appendChild(countEl);
-        card.appendChild(info);
+        header.appendChild(info);
+
+        // Export button (right-aligned, vertically centered)
+        const exportBtn = el('button', 'edit-capture-export-btn') as HTMLButtonElement;
+        exportBtn.textContent = 'Export';
+        setTooltip(exportBtn, 'Export poses as .aseprite');
+        exportBtn.onclick = (e) => {
+          e.stopPropagation();
+          exportSpritePaletteAseprite(this.emulator, this.editor, capture.poses, capture.palette);
+        };
+        header.appendChild(exportBtn);
 
         // Delete button
         const delBtn = el('button', 'edit-capture-delete') as HTMLButtonElement;
@@ -1259,7 +1285,33 @@ export class SpriteEditorUI {
             this.refreshSpritePalettes();
           }
         };
-        card.appendChild(delBtn);
+        header.appendChild(delBtn);
+        card.appendChild(header);
+
+        // Pose strip (expandable, hidden by default)
+        const strip = el('div', 'edit-capture-pose-strip');
+        const MAX_INLINE_POSES = 5;
+        for (let pi = 0; pi < Math.min(capture.poses.length, MAX_INLINE_POSES); pi++) {
+          const p = capture.poses[pi]!;
+          const poseThumb = document.createElement('canvas');
+          poseThumb.className = 'edit-capture-pose-thumb';
+          poseThumb.width = p.w;
+          poseThumb.height = p.h;
+          const pctx = poseThumb.getContext('2d');
+          if (pctx) pctx.putImageData(p.preview, 0, 0);
+          strip.appendChild(poseThumb);
+        }
+        // "Voir tout" link → opens Sheet Viewer
+        const voirTout = el('span', 'edit-capture-voir-tout');
+        voirTout.textContent = 'See all';
+        setTooltip(voirTout, 'Open full sprite sheet viewer');
+        voirTout.onclick = (e) => {
+          e.stopPropagation();
+          this.activeGroupIndex = gi;
+          this.sheet.enterSpriteSheetMode();
+        };
+        strip.appendChild(voirTout);
+        card.appendChild(strip);
 
         list.appendChild(card);
       }

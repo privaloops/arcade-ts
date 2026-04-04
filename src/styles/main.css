@@ -1373,7 +1373,7 @@
         background: var(--color-surface); border: 1px solid var(--color-border);
         border-radius: var(--radius-sm); cursor: pointer; transition: border-color 0.15s;
       }
-      .edit-capture-card:hover { border-color: var(--color-accent); }
+      .edit-capture-card:hover { border-color: var(--color-text-dim); }
       .edit-capture-card.edit-capture-active { border-color: #ff324a; animation: capture-pulse 1.5s ease-in-out infinite; }
       @keyframes capture-pulse { 0%, 100% { border-color: #ff324a; } 50% { border-color: #ff324a80; } }
 
@@ -1386,10 +1386,10 @@
 
       .edit-capture-info { flex: 1; min-width: 0; }
       .edit-capture-name {
-        font: 600 0.7rem var(--font-system); color: var(--color-text);
+        font: 600 0.8rem var(--font-system); color: var(--color-text);
         white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
       }
-      .edit-capture-count { font: 0.65rem var(--font-system); color: var(--color-text-dim); margin-top: 2px; }
+      .edit-capture-count { font: 0.7rem var(--font-system); color: var(--color-text-dim); margin-top: 4px; }
       .edit-capture-delete {
         background: none; border: none; color: var(--color-text-dim);
         font-size: 14px; cursor: pointer; padding: 0 4px;
@@ -1398,6 +1398,41 @@
       .edit-capture-card:hover .edit-capture-delete { opacity: 0.6; }
       .edit-capture-delete:hover { opacity: 1 !important; color: #e53e3e; }
       .edit-capture-hint { font: 0.65rem var(--font-system); color: var(--color-text-dim); margin-bottom: 4px; }
+
+      /* Expandable card layout */
+      .edit-capture-toggle {
+        font-size: 10px; color: var(--color-text-dim); flex-shrink: 0;
+        transition: transform 0.15s; display: inline-block;
+      }
+      .edit-capture-card.expanded .edit-capture-toggle { transform: rotate(90deg); }
+      .edit-capture-header { display: flex; align-items: center; gap: 8px; width: 100%; }
+      .edit-capture-card.expanded { flex-direction: column; align-items: stretch; }
+      .edit-capture-export-btn {
+        font: 600 0.7rem var(--font-system); padding: 6px 12px;
+        background: var(--color-surface); color: var(--color-accent);
+        border: 1px solid var(--color-border); border-radius: 4px;
+        cursor: pointer; opacity: 0.7; transition: opacity 0.15s;
+        flex-shrink: 0; align-self: center; margin-left: auto;
+      }
+      .edit-capture-export-btn:hover { opacity: 1; border-color: var(--color-accent); }
+
+      /* Inline pose strip (visible when card is expanded) */
+      .edit-capture-pose-strip {
+        display: none; overflow-x: auto; gap: 4px; padding: 6px 0 2px;
+        align-items: center;
+      }
+      .edit-capture-card.expanded .edit-capture-pose-strip { display: flex; }
+      .edit-capture-pose-thumb {
+        width: 48px; height: 48px; object-fit: contain; image-rendering: pixelated;
+        background: repeating-conic-gradient(#222 0% 25%, #1a1a1a 0% 50%) 50% / 4px 4px;
+        border: 1px solid var(--color-border); border-radius: 2px;
+        flex-shrink: 0;
+      }
+      .edit-capture-voir-tout {
+        font: 600 0.6rem var(--font-system); color: var(--color-text-dim);
+        cursor: pointer; text-decoration: underline; flex-shrink: 0; padding: 0 4px;
+      }
+      .edit-capture-voir-tout:hover { color: var(--color-text); }
       .edit-capture-empty { font: 0.65rem var(--font-system); color: var(--color-text-dim); text-align: center; padding: 12px 0; }
 
       /* ── Tooltip ── */
