@@ -42,22 +42,43 @@
       <p class="section-subtitle">Three steps. No toolchain. No install.</p>
       <div class="workflow-steps">
         <div class="workflow-step">
-          <span class="step-number">1</span>
-          <h3>Capture</h3>
-          <p>Play the game — ROMstudio auto-captures every sprite pose and scroll tile. Click REC, play, stop.</p>
-          <img src="/images/capture-flow.gif" alt="REC + live pose capture" class="step-media" />
+          <div class="step-text">
+            <div class="step-header">
+              <span class="step-number">1</span>
+              <h3>Capture</h3>
+            </div>
+            <p>Play the game — ROMstudio auto-captures every sprite pose and scroll tile. Click REC, play, stop.</p>
+          </div>
+          <video autoplay loop muted playsinline class="step-media">
+            <source src="/images/capture-flow.webm" type="video/webm" />
+            <source src="/images/capture-flow.mp4" type="video/mp4" />
+          </video>
         </div>
         <div class="workflow-step">
-          <span class="step-number">2</span>
-          <h3>Edit in Aseprite</h3>
-          <p>Export .aseprite files with embedded ROM metadata. Indexed 8bpp, 16-color CPS1 palettes, tilemaps — all preserved.</p>
-          <div class="step-media" data-label="Aseprite with CPS1 sprites"></div>
+          <div class="step-text">
+            <div class="step-header">
+              <span class="step-number">2</span>
+              <h3>Edit in Aseprite</h3>
+            </div>
+            <p>Export .aseprite files with embedded ROM metadata. Indexed 8bpp, 16-color CPS1 palettes, tilemaps — all preserved. With actual pixel art talent, you could redesign an entire character. We clearly don't have any.</p>
+          </div>
+          <video autoplay loop muted playsinline class="step-media">
+            <source src="/images/edit-aseprite.webm" type="video/webm" />
+            <source src="/images/edit-aseprite.mp4" type="video/mp4" />
+          </video>
         </div>
         <div class="workflow-step">
-          <span class="step-number">3</span>
-          <h3>Import & Play</h3>
-          <p>Import back — tiles patched into GFX ROM instantly. See your edits in the running game. Export a MAME-compatible ZIP.</p>
-          <div class="step-media" data-label="modified game running"></div>
+          <div class="step-text">
+            <div class="step-header">
+              <span class="step-number">3</span>
+              <h3>Import & Play</h3>
+            </div>
+            <p>Import back — tiles patched into GFX ROM instantly. See your edits in the running game, questionable art skills and all. Export a MAME-compatible ZIP.</p>
+          </div>
+          <video autoplay loop muted playsinline class="step-media">
+            <source src="/images/import-play.webm" type="video/webm" />
+            <source src="/images/import-play.mp4" type="video/mp4" />
+          </video>
         </div>
       </div>
     </section>
