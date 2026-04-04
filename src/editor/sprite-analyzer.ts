@@ -346,6 +346,15 @@ export function extractHead(
   return { tiles: headTiles, x, y, w, h, preview };
 }
 
+/** Check if a 16×16 tile is fully transparent (all pixels = pen 15). */
+export function isTileTransparent(gfxRom: Uint8Array, mappedCode: number): boolean {
+  const pixels = readTile(gfxRom, mappedCode, 16, 16, CHAR_SIZE_16);
+  for (let i = 0; i < pixels.length; i++) {
+    if (pixels[i] !== 15) return false;
+  }
+  return true;
+}
+
 function tilesAdjacent(a: ObjSprite, b: ObjSprite, tolerance: number): boolean {
   // Two 16x16 sprites are adjacent if their bounding boxes touch or overlap
   const ax2 = a.screenX + 16 + tolerance;

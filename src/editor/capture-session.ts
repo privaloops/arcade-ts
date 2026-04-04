@@ -10,7 +10,7 @@ import type { CPS1Video } from '../video/cps1-video';
 import type { CapturedPose, SpriteGroup as SpriteGroupData } from './sprite-analyzer';
 import type { LayerGroup } from './layer-model';
 import type { ScrollCaptureSession, ScrollSet } from './scroll-capture';
-import { readAllSprites, groupCharacter, poseHash, capturePose } from './sprite-analyzer';
+import { readAllSprites, groupCharacter, poseHash, capturePose, isTileTransparent } from './sprite-analyzer';
 import { readPalette } from './palette-editor';
 import { createSpriteGroup } from './layer-model';
 import { createScrollSession, captureScrollFrame, buildScrollSets, scrollLayerName } from './scroll-capture';
@@ -192,7 +192,9 @@ export class CaptureManager {
       const group = groupCharacter(allSprites, sprite.index, palette);
       if (!group) continue;
       for (const s of group.sprites) visited.add(s.uid);
-      if (group.sprites.length >= CaptureManager.MIN_TILE_COUNT) {
+      // Filter out fully transparent tiles (shmups fill OBJ table with empty slots)
+      group.tiles = group.tiles.filter(t => !isTileTransparent(gfxRom, t.mappedCode));
+      if (group.tiles.length >= CaptureManager.MIN_TILE_COUNT) {
         groups.push(group);
       }
     }
