@@ -12,10 +12,6 @@ Precedent positif : le "Retro Color Picker" (Mega Drive/NES/SNES) de DaniSC23 a 
 
 Canal "show & tell" avec des projets indie. Niveau varie. Culture retro presente (pico-8, GB Studio). Un fighting game pixel art avec MUGEN/Ikemen Go (lien direct Street Fighter / CPS1). Des gens cherchent activement des workflows tilemap. Aucun projet d'emulation ou romhacking — ROMstudio serait unique ici.
 
-### #github (priorite basse)
-
-Partage de repos. Simple visibilite.
-
 ### #pixelart (priorite basse)
 
 Contenu visuel. Utile pour poster des captures/GIFs du workflow en action.
@@ -94,16 +90,6 @@ handles the ROM encoding.
 Open source, runs in any browser with WebGL2.
 
 [link] | [GIF of the workflow]
-```
-
-### #github
-
-```
-ROMstudio — CPS1 arcade studio in the browser.
-Play, capture sprites/tilemaps, export to Aseprite, edit, re-import into ROM.
-TypeScript + WebGL2 + Web Worker audio + WASM. Zero emulation dependencies.
-
-[repo link]
 ```
 
 ### #pixelart
