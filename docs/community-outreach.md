@@ -105,7 +105,36 @@ CPS1 hardware: 16-color indexed palettes, 16x16 tiles.
 
 ---
 
-## 5. Mots-cles par audience
+## 5. Recrutement beta testeurs
+
+### Profil recherche
+
+Pixel artists utilisant Aseprite au quotidien. Pas besoin de connaissances en emulation ou romhacking — ROMstudio gere les contraintes hardware. L'ideal : quelqu'un qui edite des sprites, teste le round-trip (export → edit → import), et remonte les frictions dans le workflow.
+
+### Ou recruter
+
+| Canal | Approche |
+|-------|----------|
+| #aseprite-dev | Demander directement apres le post principal. Les profils techniques ici testeront aussi les edge cases du format .aseprite |
+| #game-dev | Cibler les gens qui partagent du pixel art retro ou cherchent des workflows tilemap |
+| #pixelart | Poster un avant/apres et proposer l'acces beta en echange de feedback |
+
+### Template de recrutement (a ajouter en fin de post ou en message separe)
+
+```
+Looking for a few pixel artists to beta test the Aseprite workflow.
+
+What you'd do: capture sprites from a CPS1 game, export to .aseprite, edit
+them in Aseprite, import back, and tell me what feels broken or confusing.
+
+No emulation knowledge needed — just Aseprite. The tool handles the rest.
+
+DM me if interested.
+```
+
+---
+
+## 6. Mots-cles par audience
 
 ### #aseprite-dev
 - indexed 8bpp
