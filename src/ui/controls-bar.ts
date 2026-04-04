@@ -60,10 +60,6 @@ export function toggleDebug(deps: ControlsBarDeps): void {
   debugPanel.toggle();
 }
 
-export function toggleSpriteEditor(deps: ControlsBarDeps): void {
-  toggleDebug(deps);
-}
-
 export function toggleAudio(deps: ControlsBarDeps): void {
   let audioPanel = deps.getAudioPanel();
   if (!audioPanel) {
@@ -129,7 +125,7 @@ export function initControlsBar(deps: ControlsBarDeps): void {
   loadBtnCtrl.addEventListener("click", () => openSsModal("load"));
 
   // Studio tools
-  setTooltip(debugBtn, "Sprite editor — E");
+  setTooltip(debugBtn, "Sprite editor — F2");
   setTooltip(audBtn, "Audio panel — F3");
   debugBtn.addEventListener("click", () => toggleDebug(deps));
   audBtn.addEventListener("click", () => toggleAudio(deps));

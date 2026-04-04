@@ -17,7 +17,7 @@ import { initSaveStateUI, openSsModal, closeSsModal, isSsModalOpen } from "./ui/
 import { renderDipList } from "./ui/dip-switch-ui";
 import { initDropZone, handleRomFile } from "./ui/drop-zone";
 import { getRendererMode, setupDomRenderer, initRendererToggle } from "./ui/renderer-toggle";
-import { initControlsBar, toggleFullscreen, toggleDebug, toggleAudio, toggleSpriteEditor } from "./ui/controls-bar";
+import { initControlsBar, toggleFullscreen, toggleDebug, toggleAudio } from "./ui/controls-bar";
 import { initShortcuts } from "./ui/shortcuts";
 import { exportSaveFile, parseSaveFile, applySaveFile } from "./editor/romstudio-save";
 import { loadAutoSave, clearAutoSave, scheduleAutoSave } from "./editor/romstudio-autosave";
@@ -367,7 +367,6 @@ initShortcuts({
   openSsModal, closeSsModal,
   toggleDebug: () => toggleDebug(controlsBarDeps),
   toggleAudio: () => toggleAudio(controlsBarDeps),
-  toggleSpriteEditor: () => toggleSpriteEditor(controlsBarDeps),
   toggleSynth: () => { /* synth tab removed */ },
   toggleFullscreen: () => toggleFullscreen(canvasWrapper),
   isCtrlModalOpen: () => ctrlOverlay.classList.contains("open"),
