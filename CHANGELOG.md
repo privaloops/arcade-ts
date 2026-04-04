@@ -7,11 +7,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **Center-bottom sprite alignment** — Multi-frame .aseprite exports align all poses by their center-bottom anchor (feet), with a canvas sized to the bounding box of all poses. Manifest stores original tile coords + per-frame `alignOffset` for correct round-trip import
+- **Aseprite grid alignment** — Exported .aseprite files set the grid origin so Aseprite's View > Grid overlays exactly on 16×16 tile boundaries
+- **Landing page demo videos** — Three workflow steps (Capture, Edit, Import) now show looping MP4/WebM videos instead of placeholders (total 1.4 MB vs 18 MB in GIFs)
+- **Beta gate** — Client-side password screen on `/play/` (sessionStorage, once per session)
 - **Scroll tile selection** — Scroll set viewer now has a clickable tile grid (same as sprites): crosshair cursor, tile grid overlay, dashed red highlight on selected tile, zoom in right panel with palette
 - **Multi-tile sprite expansion** — `readAllSprites()` now expands CPS1 multi-tile (nx×ny) OBJ entries into individual sub-tiles with correct positions and tile codes, matching the hardware renderer formula. Fixes misplaced tiles for games like WoF
 - **Per-palette export** — PNG and .aseprite export per palette in sprite sheet viewer (replaces global export). Each .aseprite file is mono-palette (16 colors) with manifest for round-trip import
 - **Live sprite palette panel** — "Sprite Palettes" section in editor right panel shows active OBJ palettes with eye toggle to hide/show sprites by palette in the game renderer
 - **Palette-aware capture** — Hidden palettes are excluded from sprite grouping during capture, so the REC bounds and captured poses match what's visible
+- **Inline export/import on cards** — Export .aseprite and Import buttons directly on sprite capture cards in the layer panel
+- **Palette ROM patching** — Palette color changes traced via M68K A0 register to find the source ROM address. Edits persist across rounds by patching the ROM, not just VRAM
+- **Palette override on import** — Importing a .aseprite with modified palette colors applies persistent overrides (VRAM + ROM patch) that survive round transitions
 - **Capture delete** — Delete button (×) on capture cards in left panel
 - **Pose deduplication** — Duplicate poses removed at capture finalization and in .aseprite export (by unique tile code set)
 - **Capture reset on game change** — Layer groups and palette state cleared when loading a new ROM
@@ -26,6 +33,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Tile click palette** — Clicking a tile in sprite sheet selects its own palette (not the group's main palette)
 - **Frame cropping in per-palette export** — Uses max dimensions across all poses
 - **Palette persistence in sheet viewer** — Palette visibility state persists across pose changes
+- **Manifest truncation** — Compressed manifest with deflate+base64 to prevent Aseprite truncating long User Data strings
+- **Transparent tile filtering** — Fully transparent tiles (all pen 15) excluded from sprite capture
+- **E shortcut removed** — Redundant E key shortcut removed (use F2 for sprite editor)
 
 ### Changed
 - **Mono-palette sprite capture** — `groupCharacter()` flood-fill restricted to the target palette only. Eliminates parasites from adjacent sprites/decor of other palettes. Cleaner captures, simpler code
