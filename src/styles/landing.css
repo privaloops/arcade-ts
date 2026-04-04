@@ -226,60 +226,70 @@ body {
 }
 
 .workflow-steps {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 64px;
 }
 
 .workflow-step {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: 1fr 1.4fr;
+  gap: 40px;
   align-items: center;
-  text-align: center;
-  flex: 1;
 }
 
-.workflow-step .step-media {
-  margin-top: auto;
+.step-text {
+  display: flex;
+  flex-direction: column;
+}
+
+.step-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 12px;
 }
 
 .step-number {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 48px;
-  height: 48px;
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
   background: var(--color-accent);
   color: #fff;
-  font-size: 1.2rem;
+  font-size: 1.1rem;
   font-weight: 700;
-  margin-bottom: 20px;
   flex-shrink: 0;
 }
 
 .workflow-step h3 {
-  font-size: 1.2rem;
+  font-size: 1.3rem;
   font-weight: 700;
-  margin-bottom: 8px;
+  margin: 0;
 }
 
 .workflow-step p {
-  font-size: 0.9rem;
+  font-size: 0.95rem;
   color: var(--color-text-muted);
   line-height: 1.6;
-  margin-bottom: 20px;
+  margin-bottom: 0;
 }
 
 .step-media {
   width: 100%;
-  aspect-ratio: 16 / 10;
+  aspect-ratio: 16 / 9;
   background: var(--color-bg-card);
   border: 1px solid var(--color-border);
   border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+video.step-media {
+  object-fit: cover;
 }
 
 .step-media::after {
@@ -607,9 +617,9 @@ body {
     flex-direction: column;
   }
 
-  .workflow-steps {
+  .workflow-step {
     grid-template-columns: 1fr;
-    gap: 48px;
+    gap: 24px;
   }
 
   .feature {
