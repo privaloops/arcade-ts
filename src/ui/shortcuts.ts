@@ -22,7 +22,6 @@ export interface ShortcutsDeps {
   closeSsModal(): void;
   toggleDebug(): void;
   toggleAudio(): void;
-  toggleSpriteEditor(): void;
   toggleSynth(): void;
   toggleFullscreen(): void;
   isCtrlModalOpen(): boolean;
@@ -39,7 +38,7 @@ export function initShortcuts(deps: ShortcutsDeps): void {
     getMuted, setMuted,
     openControlsModal, closeControlsModal,
     openSsModal, closeSsModal,
-    toggleDebug, toggleAudio, toggleSpriteEditor, toggleSynth, toggleFullscreen,
+    toggleDebug, toggleAudio, toggleSynth, toggleFullscreen,
     isCtrlModalOpen, isSsModalOpen,
     setStatus,
   } = deps;
@@ -112,12 +111,6 @@ export function initShortcuts(deps: ShortcutsDeps): void {
         updatePauseBtn(pauseBtn, emuBar, false);
         setStatus("Running");
       }
-      return;
-    }
-
-    // E = Toggle sprite editor
-    if (key === "e") {
-      toggleSpriteEditor();
       return;
     }
 
