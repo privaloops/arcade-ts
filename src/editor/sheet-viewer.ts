@@ -9,7 +9,7 @@ import { SCREEN_WIDTH, SCREEN_HEIGHT } from '../constants';
 import type { Emulator } from '../emulator';
 import type { SpriteEditor } from './sprite-editor';
 import type { CapturedPose, SpriteGroup as SpriteGroupData } from './sprite-analyzer';
-import type { ScrollSet } from './scroll-capture';
+import type { ScrollSet, ScrollTile } from './scroll-capture';
 import type { LayerGroup } from './layer-model';
 import { assembleCharacter } from './sprite-analyzer';
 import { readPalette } from './palette-editor';
@@ -41,8 +41,9 @@ export interface SheetViewerHost {
   refreshInfoBar(): void;
   refreshLayerPanel(): void;
   updateStatus(): void;
-  /** Container for sprite palettes in the right debug panel. */
-  getSpritePaletteContainer(): HTMLDivElement | null;
+  /** Show/hide export button in the right panel. */
+  showExportButton(label: string, onExport: () => void): void;
+  hideExportButton(): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -199,13 +200,8 @@ export class SheetViewer {
     this.sheetContainer?.remove();
     this.sheetContainer = null;
 
-    // Clear capture palettes from right panel (refreshSpritePalettes will restore live palettes)
-    const palContainer = this.host.getSpritePaletteContainer();
-    if (palContainer) {
-      palContainer.innerHTML = '';
-      delete palContainer.dataset['palKeys'];
-      delete palContainer.dataset['captureMode'];
-    }
+    // Hide export button in right panel
+    this.host.hideExportButton();
     this.hiddenPalettes.clear();
 
     this.showGame();
@@ -447,110 +443,16 @@ export class SheetViewer {
 
     container.appendChild(main);
 
-    // Push capture palettes into the right debug panel
-    this.refreshCapturePalettes();
-  }
-
-  /** Render palette layer toggles (eye icon + color swatch + tile count). */
-  private renderPaletteLayers(parent: HTMLElement, palettesUsed: Map<number, number>): void {
-    const { host } = this;
-    const video = host.emulator.getVideo();
-    const bufs = host.emulator.getBusBuffers();
-
-    const label = el('div', 'edit-section-label');
-    label.textContent = 'Palettes';
-    parent.appendChild(label);
-
-    const list = el('div', 'palette-layer-list');
-
-    for (const [palIdx, count] of palettesUsed) {
-      const row = el('div', 'palette-layer-row') as HTMLDivElement;
-      const isHidden = this.hiddenPalettes.has(palIdx);
-
-      // Eye toggle
-      const eyeBtn = el('button', 'palette-layer-eye') as HTMLButtonElement;
-      eyeBtn.textContent = isHidden ? '\u{1F441}\u{FE0F}\u{200D}\u{1F5E8}\u{FE0F}' : '\u{1F441}';
-      eyeBtn.style.opacity = isHidden ? '0.3' : '1';
-      setTooltip(eyeBtn, 'Toggle palette visibility');
-      eyeBtn.onclick = () => {
-        if (this.hiddenPalettes.has(palIdx)) {
-          this.hiddenPalettes.delete(palIdx);
-        } else {
-          this.hiddenPalettes.add(palIdx);
-        }
-        this.renderSheetZoomedPose();
-        // Refresh tile grid to dim hidden tiles
-        const tilesGrid = this.sheetContainer?.querySelector('.sprite-sheet-tiles');
-        const pose = host.activePoses[this.sheetSelectedPose];
-        if (tilesGrid && pose) this.renderSheetTileGrid(tilesGrid as HTMLElement, pose);
-        // Update eye state
-        eyeBtn.style.opacity = this.hiddenPalettes.has(palIdx) ? '0.3' : '1';
-      };
-      row.appendChild(eyeBtn);
-
-      // Color swatch (first 8 non-transparent colors)
-      const swatch = el('div', 'palette-layer-swatch') as HTMLDivElement;
-      if (video) {
-        const colors = readPalette(bufs.vram, video.getPaletteBase(), palIdx);
-        for (let i = 0; i < 15; i++) {
-          const [r, g, b] = colors[i] ?? [0, 0, 0];
-          const dot = document.createElement('span');
-          dot.className = 'palette-layer-color';
-          dot.style.background = `rgb(${r},${g},${b})`;
-          swatch.appendChild(dot);
-        }
-      }
-      row.appendChild(swatch);
-
-      // Label
-      const nameEl = el('span', 'palette-layer-name');
-      nameEl.textContent = `#${palIdx}`;
-      row.appendChild(nameEl);
-
-      // Tile count badge
-      const badge = el('span', 'palette-layer-count');
-      badge.textContent = `${count}`;
-      setTooltip(badge, `${count} tile${count !== 1 ? 's' : ''} using this palette`);
-      row.appendChild(badge);
-
-      // Export button
-      const actions = el('div', 'palette-layer-actions');
-      const exportAse = el('button', 'palette-layer-export') as HTMLButtonElement;
-      exportAse.textContent = 'Export';
-      setTooltip(exportAse, 'Export all poses as .aseprite (16-color indexed)');
-      exportAse.onclick = (e) => {
-        e.stopPropagation();
-        exportSpritePaletteAseprite(host.emulator, host.editor, host.activePoses, palIdx);
-      };
-      actions.appendChild(exportAse);
-      row.appendChild(actions);
-
-      list.appendChild(row);
+    // Show export button in the right panel
+    const group = this.host.activeGroup;
+    const palette = group?.spriteCapture?.palette;
+    if (palette !== undefined) {
+      this.host.showExportButton('Export .aseprite', () => {
+        exportSpritePaletteAseprite(this.host.emulator, this.host.editor, this.host.activePoses, palette);
+      });
     }
-
-    parent.appendChild(list);
   }
 
-  /** Push capture palette controls into the right debug panel (only rebuilds once). */
-  private refreshCapturePalettes(): void {
-    const container = this.host.getSpritePaletteContainer();
-    if (!container) return;
-    // Already built for this capture — don't rebuild (preserves eye toggle state)
-    if (container.dataset['captureMode'] === 'true') return;
-
-    const poses = this.host.activePoses;
-    const palettesUsed = new Map<number, number>();
-    for (const p of poses) {
-      for (const t of p.tiles) {
-        palettesUsed.set(t.palette, (palettesUsed.get(t.palette) ?? 0) + 1);
-      }
-    }
-
-    container.innerHTML = '';
-    container.style.display = '';
-    container.dataset['captureMode'] = 'true';
-    this.renderPaletteLayers(container, palettesUsed);
-  }
 
   private renderScrollSetView(): void {
     const container = this.sheetContainer;
@@ -568,6 +470,13 @@ export class SheetViewer {
     const { tileW, tileH, palette: palIdx, tiles, layerId, capturedColors } = set;
     const colors = capturedColors ?? readPalette(bufs.vram, video.getPaletteBase(), palIdx);
 
+    const objBuf = video.getObjBuffer();
+    const vram = bufs.vram;
+    const cpsaRegs = video.getCpsaRegs();
+    const mapperTable = video.getMapperTable();
+    const bankSizes = video.getBankSizes();
+    const bankBases = video.getBankBases();
+
     const main = el('div', 'sprite-sheet-main');
 
     // Header
@@ -575,14 +484,6 @@ export class SheetViewer {
     const title = document.createElement('h3');
     title.textContent = `${scrollLayerName(layerId)} · Palette #${palIdx} · ${tiles.length} tiles`;
     header.appendChild(title);
-
-    const exportBtn = el('button', 'sprite-sheet-back') as HTMLButtonElement;
-    exportBtn.textContent = 'Export .aseprite';
-    setTooltip(exportBtn, 'Export as Aseprite tilemap (16 colors)');
-    exportBtn.onclick = () => {
-      exportScrollAseprite(host.emulator, host.editor, set);
-    };
-    header.appendChild(exportBtn);
 
     const backBtn = el('button', 'sprite-sheet-back') as HTMLButtonElement;
     backBtn.textContent = 'Close';
@@ -620,47 +521,117 @@ export class SheetViewer {
       renderTileToImageData(imgData.data, w, gfxRom, tile, tileW, tileH, colors, tile.tileCol - minCol, tile.tileRow - minRow);
     }
     ctx.putImageData(imgData, 0, 0);
-    zoomSection.appendChild(cvs);
 
-    // Tile strip
-    const tilesLabel = el('div', 'edit-section-label');
-    tilesLabel.textContent = `Tiles (${tiles.length})`;
-    tilesLabel.style.marginTop = '12px';
-    zoomSection.appendChild(tilesLabel);
-
-    const tilesGrid = el('div', 'sprite-sheet-tiles');
+    // Build deduplicated tile list for the grid (preserving order of first appearance)
+    const uniqueTiles: typeof tiles = [];
     const seenCodes = new Set<number>();
     for (const tile of tiles) {
       if (seenCodes.has(tile.tileCode)) continue;
       seenCodes.add(tile.tileCode);
+      uniqueTiles.push(tile);
+    }
+
+    const drawTileGrid = () => {
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+      ctx.lineWidth = 0.5;
+      for (const t of tiles) {
+        const gx = (t.tileCol - minCol) * tileW;
+        const gy = (t.tileRow - minRow) * tileH;
+        ctx.strokeRect(gx + 0.5, gy + 0.5, tileW - 1, tileH - 1);
+      }
+    };
+    drawTileGrid();
+
+    // Click on scroll canvas → find tile at position and select it
+    cvs.style.cursor = 'crosshair';
+    let selectedScrollTile: typeof tiles[0] | null = null;
+
+    const drawScrollSelection = () => {
+      ctx.putImageData(imgData, 0, 0);
+      drawTileGrid();
+      if (selectedScrollTile) {
+        const sx = (selectedScrollTile.tileCol - minCol) * tileW;
+        const sy = (selectedScrollTile.tileRow - minRow) * tileH;
+        ctx.strokeStyle = '#ff1a50';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([2, 2]);
+        ctx.strokeRect(sx + 0.5, sy + 0.5, tileW - 1, tileH - 1);
+        ctx.setLineDash([]);
+      }
+    };
+
+    cvs.addEventListener('click', (e) => {
+      const rect = cvs.getBoundingClientRect();
+      const px = Math.floor((e.clientX - rect.left) / cssScale);
+      const py = Math.floor((e.clientY - rect.top) / cssScale);
+      const col = Math.floor(px / tileW) + minCol;
+      const row = Math.floor(py / tileH) + minRow;
+      const hit = tiles.find(t => t.tileCol === col && t.tileRow === row);
+      if (hit) {
+        selectedScrollTile = hit;
+        drawScrollSelection();
+        this.selectScrollTile(hit, palIdx, uniqueTiles);
+      }
+    });
+    zoomSection.appendChild(cvs);
+
+    // Tile grid
+    const tilesLabel = el('div', 'edit-section-label');
+    tilesLabel.textContent = `Tiles (${uniqueTiles.length})`;
+    tilesLabel.style.marginTop = '12px';
+    zoomSection.appendChild(tilesLabel);
+
+    const tilesGrid = el('div', 'sprite-sheet-tiles');
+    for (let i = 0; i < uniqueTiles.length; i++) {
+      const tile = uniqueTiles[i]!;
+      const tileWrap = el('div', 'sprite-sheet-tile-wrap') as HTMLDivElement;
 
       const tileCanvas = document.createElement('canvas');
       tileCanvas.width = tileW;
       tileCanvas.height = tileH;
-      tileCanvas.style.width = `${tileW * 2}px`;
-      tileCanvas.style.height = `${tileH * 2}px`;
-      tileCanvas.style.imageRendering = 'pixelated';
-      tileCanvas.style.border = '1px solid #333';
-      tileCanvas.style.cursor = 'pointer';
+      tileCanvas.className = 'sprite-sheet-tile';
+
       const tCtx = tileCanvas.getContext('2d')!;
       const tImg = tCtx.createImageData(tileW, tileH);
       const pixels = readTileFn(gfxRom, tile.tileCode, tile.tileW, tile.tileH, tile.charSize);
-      for (let i = 0; i < tileW * tileH; i++) {
-        const colorIdx = pixels[i]!;
+      for (let pi = 0; pi < tileW * tileH; pi++) {
+        const colorIdx = pixels[pi]!;
         if (colorIdx === 15) continue;
         const [r, g, b] = colors[colorIdx] ?? [0, 0, 0];
-        tImg.data[i * 4] = r;
-        tImg.data[i * 4 + 1] = g;
-        tImg.data[i * 4 + 2] = b;
-        tImg.data[i * 4 + 3] = 255;
+        tImg.data[pi * 4] = r;
+        tImg.data[pi * 4 + 1] = g;
+        tImg.data[pi * 4 + 2] = b;
+        tImg.data[pi * 4 + 3] = 255;
       }
       tCtx.putImageData(tImg, 0, 0);
-      tilesGrid.appendChild(tileCanvas);
+      tileWrap.appendChild(tileCanvas);
+
+      // Shared tile badge
+      const refs = findTileReferences(tile.tileCode, objBuf, vram, cpsaRegs, mapperTable, bankSizes, bankBases);
+      if (refs.length > 1) {
+        const badge = el('div', 'sprite-sheet-tile-shared') as HTMLDivElement;
+        badge.textContent = `×${refs.length}`;
+        setTooltip(badge, `Shared by ${refs.length} references — editing affects all`);
+        tileWrap.appendChild(badge);
+      }
+
+      setTooltip(tileWrap, 'Click to select this tile');
+      tileWrap.onclick = () => {
+        selectedScrollTile = tile;
+        drawScrollSelection();
+        this.selectScrollTile(tile, palIdx, uniqueTiles);
+      };
+      tilesGrid.appendChild(tileWrap);
     }
     zoomSection.appendChild(tilesGrid);
 
     main.appendChild(zoomSection);
     container.appendChild(main);
+
+    // Show export button in the right panel
+    host.showExportButton('Export .aseprite', () => {
+      exportScrollAseprite(host.emulator, host.editor, set);
+    });
   }
 
   refreshAllPosePreviews(): void {
@@ -865,6 +836,24 @@ export class SheetViewer {
     if (tilesGrid) {
       tilesGrid.querySelectorAll('.sprite-sheet-tile').forEach((c, i) => {
         c.classList.toggle('active', i === tileIdx);
+      });
+    }
+  }
+
+  /** Select a scroll tile → zoom in right panel + highlight in grid. */
+  private selectScrollTile(tile: ScrollTile, palette: number, uniqueTiles: ScrollTile[]): void {
+    const { host } = this;
+    host.editor.selectTileFromPose(tile.tileCode, palette);
+    host.refreshTileGrid();
+    host.refreshPalette();
+    host.refreshInfoBar();
+
+    // Highlight selected tile in the grid (match by tileCode since objects may differ)
+    const idx = uniqueTiles.findIndex(t => t.tileCode === tile.tileCode);
+    const tilesGrid = this.sheetContainer?.querySelector('.sprite-sheet-tiles');
+    if (tilesGrid) {
+      tilesGrid.querySelectorAll('.sprite-sheet-tile').forEach((c, i) => {
+        c.classList.toggle('active', i === idx);
       });
     }
   }

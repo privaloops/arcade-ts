@@ -125,18 +125,6 @@ export class LayerPanel {
   ): void {
     this.content.innerHTML = '';
 
-    // Import .aseprite button at the top
-    const importBtn = document.createElement('button');
-    importBtn.className = 'ctrl-btn';
-    importBtn.textContent = 'Import .aseprite';
-    importBtn.style.width = '100%';
-    importBtn.style.marginBottom = '8px';
-    importBtn.style.padding = '4px';
-    importBtn.style.fontSize = '11px';
-    setTooltip(importBtn, 'Import an edited .aseprite file back into the ROM');
-    importBtn.onclick = () => this.callbacks.onImportAseprite?.();
-    this.content.appendChild(importBtn);
-
     // Inject CSS for REC blinking dot (once)
     if (!document.getElementById('rec-dot-style')) {
       const style = document.createElement('style');
@@ -364,5 +352,20 @@ export class LayerPanel {
     slider.oninput = () => this.callbacks.onSpreadChange(parseInt(slider.value, 10));
     sec3d.appendChild(slider);
     this.content.appendChild(sec3d);
+
+    // Aseprite section (global import)
+    const aseSection = document.createElement('div');
+    aseSection.className = 'layer-aseprite-section';
+    const aseLabel = document.createElement('div');
+    aseLabel.className = 'layer-section-label';
+    aseLabel.textContent = 'Aseprite';
+    aseSection.appendChild(aseLabel);
+    const importBtn = document.createElement('button');
+    importBtn.className = 'layer-import-btn';
+    importBtn.textContent = 'Import .aseprite';
+    setTooltip(importBtn, 'Import an edited .aseprite file back into the ROM');
+    importBtn.onclick = () => this.callbacks.onImportAseprite?.();
+    aseSection.appendChild(importBtn);
+    this.content.appendChild(aseSection);
   }
 }

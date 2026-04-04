@@ -10,14 +10,14 @@ import { SpriteEditor, type EditorTool } from './sprite-editor';
 import { SCREEN_WIDTH, SCREEN_HEIGHT } from '../constants';
 import { LAYER_OBJ, LAYER_SCROLL1, LAYER_SCROLL2, LAYER_SCROLL3, readWord } from '../video/cps1-video';
 import { readAllSprites, groupCharacter, assembleCharacter, type SpriteGroup as SpriteGroupData, type CapturedPose } from './sprite-analyzer';
-import { readPalette, rgbToHsl, hslToRgb } from './palette-editor';
+import { rgbToHsl, hslToRgb } from './palette-editor';
 import { createSpriteGroup, createScrollGroup, type LayerGroup } from './layer-model';
 import { LayerPanel } from './layer-panel';
 import { findTileReferences } from './tile-refs';
 import type { Emulator } from '../emulator';
 import { pencilCursor, fillCursor, eyedropperCursor, eraserCursor, wandCursor } from './tool-cursors';
 import { showToast } from '../ui/toast';
-import { exportScrollAseprite, exportSpritePaletteAseprite, importAsepriteFile } from './aseprite-io';
+import { exportScrollAseprite, importAsepriteFile } from './aseprite-io';
 import { buildScrollSets, type ScrollSet } from './scroll-capture';
 import { CaptureManager } from './capture-session';
 import { SheetViewer, type SheetViewerHost } from './sheet-viewer';
@@ -103,8 +103,7 @@ export class SpriteEditorUI {
   private gridLayers: Map<number, boolean> = new Map();
   private hwLayerVisible: Map<number, boolean> = new Map();
   private hiddenSpritePalettes = new Set<number>();
-  private spritePaletteContainer: HTMLDivElement | null = null;
-  private spritePaletteTick = 0;
+  private exportContainer: HTMLDivElement | null = null;
   private _isInteractionBlocked: (() => boolean) | null = null;
   private _onHwLayerToggle: ((layerId: number, visible: boolean) => void) | null = null;
   private _onSpreadChange: ((value: number) => void) | null = null;
@@ -181,9 +180,10 @@ export class SpriteEditorUI {
 
     // Import button moved to layer panel (left sidebar)
 
-    // Sprite palettes (live OBJ palette list with visibility toggles)
-    this.spritePaletteContainer = el('div', 'edit-sprite-palettes') as HTMLDivElement;
-    container.appendChild(this.spritePaletteContainer);
+    // Export button (shown when sheet viewer is active)
+    this.exportContainer = el('div', 'edit-export-section') as HTMLDivElement;
+    this.exportContainer.style.display = 'none';
+    container.appendChild(this.exportContainer);
 
     // Status bar (contextual hint at bottom)
     container.appendChild(createStatusBar());
@@ -233,17 +233,14 @@ export class SpriteEditorUI {
     this.emulator.getVideo()?.clearPaletteOverrides();
     this.hiddenSpritePalettes.clear();
     this.emulator.getVideo()?.setHiddenSpritePalettes(null);
-    if (this.spritePaletteContainer) {
-      this.spritePaletteContainer.innerHTML = '';
-      delete this.spritePaletteContainer.dataset['palKeys'];
-    }
+    this.hideExportButton();
     // Recreate default HW layer groups so the panel works
     this.ensureDefaultGroups();
     this.refreshLayerPanel();
   }
 
-  getSpritePaletteContainer(): HTMLDivElement | null {
-    return this.spritePaletteContainer;
+  getExportContainer(): HTMLDivElement | null {
+    return this.exportContainer;
   }
 
   setGridLayers(m: Map<number, boolean>): void {
@@ -412,7 +409,30 @@ export class SpriteEditorUI {
     // Use tracked HW visibility (default to true if not yet toggled)
     for (let i = 0; i < 4; i++) hwState.visible.set(i, this.hwLayerVisible.get(i) !== false);
 
-    // Sprite sets now live in the right palette panel — no longer passed to layer panel
+    // Build sprite set infos for the layer panel
+    const spriteSets: import('./layer-panel').SpriteSetInfo[] = [];
+    for (let gi = 0; gi < this.layerGroups.length; gi++) {
+      const g = this.layerGroups[gi]!;
+      if (g.type !== 'sprite' || !g.spriteCapture) continue;
+      const cap = g.spriteCapture;
+      if (cap.poses.length === 0) continue;
+      const first = cap.poses[0]!;
+      spriteSets.push({
+        groupIndex: gi, name: g.name, poseCount: cap.poses.length,
+        preview: first.preview, previewW: first.w, previewH: first.h,
+        palette: cap.palette,
+      });
+    }
+    // Live recording sessions (not yet finalized)
+    for (const [palIdx, session] of this.capture.activeSessions) {
+      if (session.resumeTarget || session.poses.length === 0) continue;
+      const first = session.poses[0]!;
+      spriteSets.push({
+        groupIndex: -1, name: `Recording (pal ${palIdx})`, poseCount: session.poses.length,
+        preview: first.preview, previewW: first.w, previewH: first.h,
+        palette: palIdx,
+      });
+    }
 
     // Include live scroll sets from active capture sessions
     const allScrollSets = [...this.capture.scrollSets];
@@ -420,7 +440,7 @@ export class SpriteEditorUI {
       allScrollSets.push(...buildScrollSets(session));
     }
 
-    this.layerPanel?.refresh(this.layerGroups, this.activeGroupIndex, -1, gfxRom, hwState, allScrollSets);
+    this.layerPanel?.refresh(this.layerGroups, this.activeGroupIndex, -1, gfxRom, hwState, allScrollSets, spriteSets);
   }
 
 
@@ -439,12 +459,6 @@ export class SpriteEditorUI {
       this.drawSelectedOverlay();
       this.captureFrame();
       this.captureScrollTick();
-      // Refresh palettes every frame during capture (live pose count), otherwise every 30 frames
-      const refreshInterval = this.capture.activeSessions.size > 0 ? 1 : 30;
-      if (++this.spritePaletteTick >= refreshInterval) {
-        this.spritePaletteTick = 0;
-        this.refreshSpritePalettes();
-      }
       this.overlayRafId = requestAnimationFrame(loop);
     };
     this.overlayRafId = requestAnimationFrame(loop);
@@ -1114,238 +1128,24 @@ export class SpriteEditorUI {
     this.updateStatus();
   }
 
-  /** Scan active OBJ palettes and rebuild the sprite palette list. */
-  private refreshSpritePalettes(): void {
-    const container = this.spritePaletteContainer;
+  /** Show export button in the right panel for the active capture. */
+  showExportButton(label: string, onExport: () => void): void {
+    const container = this.exportContainer;
     if (!container) return;
-    // In sprite sheet mode, the sheet viewer manages this container
-    if (this.sheet.spriteSheetMode) return;
-    const video = this.emulator.getVideo();
-    if (!video) return;
-
-    const allSprites = readAllSprites(video);
-    // Count sprites per palette
-    const palCounts = new Map<number, number>();
-    for (const s of allSprites) {
-      palCounts.set(s.palette, (palCounts.get(s.palette) ?? 0) + 1);
-    }
-
-    // Rebuild DOM if palette set or capture state changed
-    const captureKeys = this.layerGroups
-      .filter(g => g.type === 'sprite' && g.spriteCapture)
-      .map(g => `${g.spriteCapture!.palette}:${g.spriteCapture!.poses.length}`)
-      .join(';');
-    const activeKeys = [...this.capture.activeSessions.keys()].join(',');
-    const palKeys = [...palCounts.keys()].sort((a, b) => a - b).join(',') + '|' + captureKeys + '|' + activeKeys;
-    if (container.dataset['palKeys'] === palKeys) {
-      // Just update eye states (in case user toggled while paused)
-      container.querySelectorAll<HTMLButtonElement>('.palette-layer-eye').forEach(btn => {
-        const pi = parseInt(btn.dataset['pal'] ?? '', 10);
-        if (!isNaN(pi)) btn.style.opacity = this.hiddenSpritePalettes.has(pi) ? '0.3' : '1';
-      });
-      return;
-    }
-    container.dataset['palKeys'] = palKeys;
     container.innerHTML = '';
+    container.style.display = '';
+    const btn = el('button', 'edit-export-btn') as HTMLButtonElement;
+    btn.textContent = label;
+    setTooltip(btn, 'Export as .aseprite (16-color indexed)');
+    btn.onclick = onExport;
+    container.appendChild(btn);
+  }
 
-    if (palCounts.size === 0) return;
-
-    const label = el('div', 'edit-section-label');
-    label.textContent = 'Sprite Palettes';
-    container.appendChild(label);
-
-    const list = el('div', 'palette-layer-list');
-    const bufs = this.emulator.getBusBuffers();
-    const paletteBase = video.getPaletteBase();
-
-    for (const [palIdx, count] of palCounts) {
-      const row = el('div', 'palette-layer-row') as HTMLDivElement;
-      const isHidden = this.hiddenSpritePalettes.has(palIdx);
-
-      const eyeBtn = el('button', 'palette-layer-eye') as HTMLButtonElement;
-      eyeBtn.textContent = '\u{1F441}';
-      eyeBtn.style.opacity = isHidden ? '0.3' : '1';
-      eyeBtn.dataset['pal'] = String(palIdx);
-      setTooltip(eyeBtn, 'Toggle palette visibility in game');
-      eyeBtn.onclick = () => {
-        if (this.hiddenSpritePalettes.has(palIdx)) {
-          this.hiddenSpritePalettes.delete(palIdx);
-        } else {
-          this.hiddenSpritePalettes.add(palIdx);
-        }
-        eyeBtn.style.opacity = this.hiddenSpritePalettes.has(palIdx) ? '0.3' : '1';
-        video.setHiddenSpritePalettes(
-          this.hiddenSpritePalettes.size > 0 ? this.hiddenSpritePalettes : null,
-        );
-        this.emulator.rerender();
-      };
-      row.appendChild(eyeBtn);
-
-      const swatch = el('div', 'palette-layer-swatch') as HTMLDivElement;
-      const colors = readPalette(bufs.vram, paletteBase, palIdx);
-      for (let i = 0; i < 15; i++) {
-        const [r, g, b] = colors[i] ?? [0, 0, 0];
-        const dot = document.createElement('span');
-        dot.className = 'palette-layer-color';
-        dot.style.background = `rgb(${r},${g},${b})`;
-        swatch.appendChild(dot);
-      }
-      row.appendChild(swatch);
-
-      const nameEl = el('span', 'palette-layer-name');
-      nameEl.textContent = `#${palIdx}`;
-      row.appendChild(nameEl);
-
-      const badge = el('span', 'palette-layer-count');
-      badge.textContent = `${count}`;
-      setTooltip(badge, `${count} sprite tile${count !== 1 ? 's' : ''}`);
-      row.appendChild(badge);
-
-      // REC button
-      const isRec = this.capture.activeSessions.has(palIdx);
-      const recBtn = el('button', 'layer-rec-btn' + (isRec ? ' recording' : '')) as HTMLButtonElement;
-      recBtn.innerHTML = `<span class="rec-dot${isRec ? ' rec-blink' : ''}"></span> REC`;
-      recBtn.onclick = (e) => {
-        e.stopPropagation();
-        this.capture.toggleCaptureForPalette(palIdx);
-      };
-      row.appendChild(recBtn);
-
-      list.appendChild(row);
-
-      // Captured sprite cards for this palette
-      const captures = this.layerGroups.filter(
-        g => g.type === 'sprite' && g.spriteCapture?.palette === palIdx && g.spriteCapture.poses.length > 0,
-      );
-      for (const group of captures) {
-        const gi = this.layerGroups.indexOf(group);
-        const capture = group.spriteCapture!;
-        const pose = capture.poses[0]!;
-        const card = el('div', 'edit-capture-card') as HTMLDivElement;
-        setTooltip(card, 'Click to expand poses');
-
-        // Click card body → toggle expand/collapse + switch palette
-        card.onclick = (e) => {
-          if ((e.target as HTMLElement).closest('.edit-capture-export-btn, .edit-capture-delete, .edit-capture-voir-tout')) return;
-          card.classList.toggle('expanded');
-          // Switch tile palette to this capture's palette
-          const firstPose = capture.poses[0];
-          if (firstPose?.tiles[0]) {
-            this.editor.selectTileFromPose(firstPose.tiles[0].mappedCode, capture.palette);
-            this.refreshPalette();
-          }
-        };
-
-        // Header row (chevron + thumb + info + export + delete)
-        const header = el('div', 'edit-capture-header');
-
-        const chevron = el('span', 'edit-capture-toggle');
-        chevron.textContent = '\u25B6'; // ▶
-        header.appendChild(chevron);
-
-        const thumb = document.createElement('canvas');
-        thumb.className = 'edit-capture-thumb';
-        thumb.width = pose.w;
-        thumb.height = pose.h;
-        const ctx = thumb.getContext('2d');
-        if (ctx) ctx.putImageData(pose.preview, 0, 0);
-        header.appendChild(thumb);
-
-        const info = el('div', 'edit-capture-info');
-        const nameEl = el('div', 'edit-capture-name');
-        nameEl.textContent = group.name;
-        info.appendChild(nameEl);
-        const countEl = el('div', 'edit-capture-count');
-        countEl.textContent = `${capture.poses.length} pose${capture.poses.length !== 1 ? 's' : ''}`;
-        info.appendChild(countEl);
-        header.appendChild(info);
-
-        // Export button (right-aligned, vertically centered)
-        const exportBtn = el('button', 'edit-capture-export-btn') as HTMLButtonElement;
-        exportBtn.textContent = 'Export';
-        setTooltip(exportBtn, 'Export poses as .aseprite');
-        exportBtn.onclick = (e) => {
-          e.stopPropagation();
-          exportSpritePaletteAseprite(this.emulator, this.editor, capture.poses, capture.palette);
-        };
-        header.appendChild(exportBtn);
-
-        // Delete button
-        const delBtn = el('button', 'edit-capture-delete') as HTMLButtonElement;
-        delBtn.textContent = '\u00D7';
-        setTooltip(delBtn, 'Delete this capture');
-        delBtn.onclick = (e) => {
-          e.stopPropagation();
-          if (gi >= 0 && gi < this.layerGroups.length) {
-            this.layerGroups.splice(gi, 1);
-            if (this.activeGroupIndex >= this.layerGroups.length) {
-              this.activeGroupIndex = Math.max(0, this.layerGroups.length - 1);
-            }
-            this.refreshLayerPanel();
-            this.refreshSpritePalettes();
-          }
-        };
-        header.appendChild(delBtn);
-        card.appendChild(header);
-
-        // Pose strip (expandable, hidden by default)
-        const strip = el('div', 'edit-capture-pose-strip');
-        const MAX_INLINE_POSES = 5;
-        for (let pi = 0; pi < Math.min(capture.poses.length, MAX_INLINE_POSES); pi++) {
-          const p = capture.poses[pi]!;
-          const poseThumb = document.createElement('canvas');
-          poseThumb.className = 'edit-capture-pose-thumb';
-          poseThumb.width = p.w;
-          poseThumb.height = p.h;
-          const pctx = poseThumb.getContext('2d');
-          if (pctx) pctx.putImageData(p.preview, 0, 0);
-          strip.appendChild(poseThumb);
-        }
-        // "Voir tout" link → opens Sheet Viewer
-        const voirTout = el('span', 'edit-capture-voir-tout');
-        voirTout.textContent = 'See all';
-        setTooltip(voirTout, 'Open full sprite sheet viewer');
-        voirTout.onclick = (e) => {
-          e.stopPropagation();
-          this.activeGroupIndex = gi;
-          this.sheet.enterSpriteSheetMode();
-        };
-        strip.appendChild(voirTout);
-        card.appendChild(strip);
-
-        list.appendChild(card);
-      }
-
-      // Live recording card (new capture, not resumed)
-      const liveSession = this.capture.activeSessions.get(palIdx);
-      if (liveSession && !liveSession.resumeTarget && liveSession.poses.length > 0) {
-        const pose = liveSession.poses[0]!;
-        const card = el('div', 'edit-capture-card recording') as HTMLDivElement;
-        setTooltip(card, 'Click to stop recording');
-        card.onclick = () => this.capture.toggleCaptureForPalette(palIdx);
-
-        const thumb = document.createElement('canvas');
-        thumb.className = 'edit-capture-thumb';
-        thumb.width = pose.w;
-        thumb.height = pose.h;
-        const ctx = thumb.getContext('2d');
-        if (ctx) ctx.putImageData(pose.preview, 0, 0);
-        card.appendChild(thumb);
-
-        const info = el('div', 'edit-capture-info');
-        const nameEl = el('div', 'edit-capture-name');
-        nameEl.textContent = `Recording (pal ${palIdx})`;
-        info.appendChild(nameEl);
-        const countEl = el('div', 'edit-capture-count');
-        countEl.textContent = `${liveSession.poses.length} pose${liveSession.poses.length !== 1 ? 's' : ''}`;
-        info.appendChild(countEl);
-        card.appendChild(info);
-
-        list.appendChild(card);
-      }
-    }
-
-    container.appendChild(list);
+  /** Hide the export button in the right panel. */
+  hideExportButton(): void {
+    if (!this.exportContainer) return;
+    this.exportContainer.innerHTML = '';
+    this.exportContainer.style.display = 'none';
   }
 
   private openColorPicker(colorIndex: number): void {
