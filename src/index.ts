@@ -6,8 +6,6 @@
 
 import { checkBetaAccess } from "./beta-gate";
 import { Emulator } from "./emulator";
-
-checkBetaAccess();
 import { DEFAULT_GP_MAPPING, DEFAULT_P1_MAPPING, DEFAULT_P2_MAPPING, type AutofireKey } from "./input/input";
 import { DebugPanel } from "./debug/debug-panel";
 import { AudioPanel } from "./audio/audio-panel";
@@ -26,6 +24,8 @@ import { exportSaveFile, parseSaveFile, applySaveFile } from "./editor/romstudio
 import { loadAutoSave, clearAutoSave, scheduleAutoSave } from "./editor/romstudio-autosave";
 import { showToast } from "./ui/toast";
 import { setTooltip } from "./ui/tooltip";
+
+checkBetaAccess();
 
 // ── DOM lookups ──────────────────────────────────────────────────────────────
 

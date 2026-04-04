@@ -147,7 +147,6 @@ export function exportSpriteAseprite(
 
     aseFrames.push({ pixels, duration: 100 });
 
-    // Store original relX/relY + alignment offset (import applies offset for pixel reading)
     manifestFrames.push({
       id: `pose_${i}`,
       alignOffset: { x: dx, y: dy },
@@ -169,6 +168,12 @@ export function exportSpriteAseprite(
     frames: manifestFrames,
   };
 
+  // Grid offset: align Aseprite's View>Grid with tile boundaries
+  const firstFrame = manifestFrames[0];
+  const firstOffset = firstFrame?.alignOffset ?? { x: 0, y: 0 };
+  const gridX = firstOffset.x % 16;
+  const gridY = firstOffset.y % 16;
+
   const data = writeAseprite({
     width: frameW,
     height: frameH,
@@ -177,6 +182,8 @@ export function exportSpriteAseprite(
     transparentIndex: 15,
     layerName: manifest.character,
     manifest,
+    gridOffsetX: gridX,
+    gridOffsetY: gridY,
   });
 
   const filename = `${manifest.game}_${manifest.character}_${poses.length}poses.aseprite`;
@@ -271,6 +278,9 @@ export function exportSpritePaletteAseprite(
     frames: manifestFrames,
   };
 
+  const firstFrame = manifestFrames[0];
+  const firstOffset = firstFrame?.alignOffset ?? { x: 0, y: 0 };
+
   const data = writeAseprite({
     width: frameW, height: frameH,
     palette: asePalette,
@@ -278,6 +288,8 @@ export function exportSpritePaletteAseprite(
     transparentIndex: 15,
     layerName: manifest.character,
     manifest,
+    gridOffsetX: firstOffset.x % 16,
+    gridOffsetY: firstOffset.y % 16,
   });
 
   const filename = `${manifest.game}_pal${palIdx}_${aseFrames.length}poses.aseprite`;

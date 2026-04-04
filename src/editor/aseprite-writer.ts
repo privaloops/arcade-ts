@@ -14,10 +14,16 @@ import pako from 'pako';
 // ---------------------------------------------------------------------------
 
 export interface AsepriteFrame {
-  /** Palette-indexed pixels, row-major, one byte per pixel. Length = width * height. */
+  /** Palette-indexed pixels, row-major, one byte per pixel. Length = celW*celH (or width*height if not set). */
   pixels: Uint8Array;
   /** Frame duration in ms. */
   duration?: number;
+  /** Cel position within the canvas (default 0). */
+  celX?: number;
+  celY?: number;
+  /** Cel dimensions — if set, pixels size is celW*celH instead of canvas width*height. */
+  celW?: number;
+  celH?: number;
 }
 
 export interface AsepritePaletteEntry {
@@ -38,6 +44,11 @@ export interface AsepriteOptions {
   layerName?: string;
   /** JSON manifest to embed in User Data. */
   manifest?: object;
+  /** Optional guide pixels per frame (same dimensions as main pixels). Rendered on a separate "Guide" layer. */
+  guideFrames?: Uint8Array[];
+  /** Grid origin offset — aligns Aseprite's grid overlay with tile boundaries. */
+  gridOffsetX?: number;
+  gridOffsetY?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -153,12 +164,14 @@ function buildCelChunk(
   width: number,
   height: number,
   pixels: Uint8Array,
+  celX = 0,
+  celY = 0,
 ): Uint8Array {
   const compressed = pako.deflate(pixels);
   const w = new BufWriter();
   w.word(layerIndex);     // layer index
-  w.short(0);             // x position
-  w.short(0);             // y position
+  w.short(celX);          // x position
+  w.short(celY);          // y position
   w.byte(255);            // opacity
   w.word(2);              // cel type: compressed image
   w.short(0);             // z-index
@@ -303,9 +316,13 @@ export function writeAseprite(opts: AsepriteOptions): Uint8Array {
     transparentIndex = 0,
     layerName = 'Sprite',
     manifest,
+    guideFrames,
+    gridOffsetX = 0,
+    gridOffsetY = 0,
   } = opts;
 
   if (frames.length === 0) throw new Error('At least one frame required');
+  const hasGuide = guideFrames && guideFrames.length > 0;
 
   // Build all frames
   const frameBuffers: Uint8Array[] = [];
@@ -315,18 +332,27 @@ export function writeAseprite(opts: AsepriteOptions): Uint8Array {
     const chunks: Uint8Array[] = [];
 
     if (i === 0) {
-      // First frame: color profile + palette + layer + user data (manifest)
+      // First frame: color profile + palette + layers + user data (manifest)
       chunks.push(buildColorProfileChunk());
       chunks.push(buildPaletteChunk(palette));
       chunks.push(buildLayerChunk(layerName));
       if (manifest) {
-        // User data on the layer
         chunks.push(buildUserDataChunk(JSON.stringify(manifest)));
+      }
+      if (hasGuide) {
+        chunks.push(buildLayerChunk('Guide'));
       }
     }
 
-    // Cel for this frame
-    chunks.push(buildCelChunk(0, width, height, frame.pixels));
+    // Sprite cel (layer 0)
+    const cw = frame.celW ?? width;
+    const ch = frame.celH ?? height;
+    chunks.push(buildCelChunk(0, cw, ch, frame.pixels, frame.celX ?? 0, frame.celY ?? 0));
+
+    // Guide cel (layer 1)
+    if (hasGuide && guideFrames[i]) {
+      chunks.push(buildCelChunk(1, width, height, guideFrames[i]!));
+    }
 
     frameBuffers.push(buildFrame(chunks, frame.duration ?? 100));
   }
@@ -353,8 +379,8 @@ export function writeAseprite(opts: AsepriteOptions): Uint8Array {
   header.word(palette.length);   // number of colors
   header.byte(1);                // pixel width
   header.byte(1);                // pixel height
-  header.short(0);               // grid X
-  header.short(0);               // grid Y
+  header.short(gridOffsetX);     // grid X
+  header.short(gridOffsetY);     // grid Y
   header.word(16);               // grid width
   header.word(16);               // grid height
   header.zeros(84);              // reserved
