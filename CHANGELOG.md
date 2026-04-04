@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **Scroll tile selection** — Scroll set viewer now has a clickable tile grid (same as sprites): crosshair cursor, tile grid overlay, dashed red highlight on selected tile, zoom in right panel with palette
 - **Multi-tile sprite expansion** — `readAllSprites()` now expands CPS1 multi-tile (nx×ny) OBJ entries into individual sub-tiles with correct positions and tile codes, matching the hardware renderer formula. Fixes misplaced tiles for games like WoF
 - **Per-palette export** — PNG and .aseprite export per palette in sprite sheet viewer (replaces global export). Each .aseprite file is mono-palette (16 colors) with manifest for round-trip import
 - **Live sprite palette panel** — "Sprite Palettes" section in editor right panel shows active OBJ palettes with eye toggle to hide/show sprites by palette in the game renderer
@@ -18,6 +19,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Game matrix Level 3** — automated sprite & scroll REC on all 29 ROMs, PNG export to `test-results/sprite-rec/` for manual review
 
 ### Fixed
+- **Scroll palette snapshot at STOP** — Palette RGB captured when recording stops (stable state) instead of first frame (may be mid-fade/flash). Fixes washed-out scroll captures
+- **Scroll capture reset on game change** — Active scroll sessions and finalized scroll sets now cleared when loading a new ROM
 - **Pose deduplication broken** — Unified all dedup hash formulas to use `poseHash()` consistently (stop-time, export, save restore). Additionally, `poseHash()` now filters by the group's main palette so adjacent sprites from other palettes don't pollute the hash and create false-distinct poses
 - **Sprite tile z-order** — `assembleCharacter()` now draws tiles back-to-front (matching CPS1 hardware priority)
 - **Tile click palette** — Clicking a tile in sprite sheet selects its own palette (not the group's main palette)
@@ -27,6 +30,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ### Changed
 - **Mono-palette sprite capture** — `groupCharacter()` flood-fill restricted to the target palette only. Eliminates parasites from adjacent sprites/decor of other palettes. Cleaner captures, simpler code
 - **Capture resumption** — Re-clicking a sprite whose palette was already captured resumes the existing group instead of creating a new one. New poses append live to the same card
+- **Editor layout refactored** — Import button moved to bottom "Aseprite" section in left panel; Export button unified in right panel (shown in sheet viewer for both sprites and scrolls); removed inline card features (chevron, pose strip, See all) — simplified cards in left panel, sheet viewer for full view
 - **Palette panel sprite cards + REC** — Captured sprite cards moved from left panel to right palette panel, grouped under their palette. Each palette has a REC button to start/stop capture directly
 - **Large manifest import fix** — .aseprite files with manifests >65535 bytes (UINT16 overflow) now import correctly
 - **Palette import from .aseprite** — Importing a .aseprite with modified palette colors applies them as VRAM overrides that persist across rounds (re-applied every frame)
