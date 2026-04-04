@@ -4,7 +4,10 @@
  * Wires up DOM elements, creates the Emulator, and initializes UI modules.
  */
 
+import { checkBetaAccess } from "./beta-gate";
 import { Emulator } from "./emulator";
+
+checkBetaAccess();
 import { DEFAULT_GP_MAPPING, DEFAULT_P1_MAPPING, DEFAULT_P2_MAPPING, type AutofireKey } from "./input/input";
 import { DebugPanel } from "./debug/debug-panel";
 import { AudioPanel } from "./audio/audio-panel";
