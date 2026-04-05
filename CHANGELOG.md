@@ -43,6 +43,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Cached framebuffer Uint32Array view** — Reuse a single Uint32Array view across renderScrollLayer, renderObjects, and renderFrame instead of allocating 3 per frame
 - **Row-scroll tile-based rendering** — Scroll2 row-scroll path refactored from pixel-by-pixel (86K iterations) to tile-based (~26 cols × 224 rows), reducing gfxromBankMapper calls ~24×
 
+### Added
+- **CPS-B multiplication tests** — 5 tests covering the hardware multiply used by SF2CE/SF2HF (factor writes, result reads, edge cases 0×max, max×max)
+- **M68000 interrupt tests** — 5 tests covering IRQ level masking, NMI (level 7 never masked), one-shot vs level-triggered, irqAckCallback
+- **`inspectScrollAt` tests** — 5 tests covering scroll2 tile lookup, out-of-bounds, invalid layer, transparent pixel handling, `boundsOnly` mode
+
 ### Changed
 - **Color picker extracted** — `openColorPicker` (162 lines) moved from `SpriteEditorUI` class to standalone `color-picker.ts` module. Reduces `sprite-editor-ui.ts` from 1,521 to 1,363 lines
 - **`loadRom` split** — 122-line method split into `loadQSoundAudio()` and `loadStandardAudio()` private methods in `emulator.ts`

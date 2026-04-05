@@ -598,3 +598,143 @@ describe('CPS1Video.inspectSpriteAt', () => {
     expect(result!.localY).toBe(7);
   });
 });
+
+// ---------------------------------------------------------------------------
+// inspectScrollAt — scroll tile hit-test
+// ---------------------------------------------------------------------------
+
+describe('CPS1Video.inspectScrollAt', () => {
+  // Reuse createTestVideo + fillTile from inspectSpriteAt tests above.
+  function createScrollTestVideo(gfxRomSize = 0x40000) {
+    const vram = new Uint8Array(0x30000);
+    const gfxRom = new Uint8Array(gfxRomSize);
+    const cpsaRegs = new Uint8Array(0x40);
+    const cpsbRegs = new Uint8Array(0x40);
+
+    const totalTiles = gfxRomSize / 128;
+    const gfxMapper = {
+      ranges: [{ type: 0x0F, start: 0, end: totalTiles - 1, bank: 0 }],
+      bankSizes: [totalTiles, 0, 0, 0] as [number, number, number, number],
+    };
+
+    const video = new CPS1Video(vram, gfxRom, cpsaRegs, cpsbRegs, undefined, gfxMapper);
+    return { video, vram, gfxRom, cpsaRegs, cpsbRegs };
+  }
+
+  function fillTile16(gfxRom: Uint8Array, tileCode: number, colorIndex: number) {
+    const base = tileCode * 128;
+    for (let row = 0; row < 16; row++) {
+      for (let half = 0; half < 2; half++) {
+        const groupOff = base + row * 8 + half * 4;
+        let b0 = 0, b1 = 0, b2 = 0, b3 = 0;
+        for (let px = 0; px < 8; px++) {
+          const bit = 7 - px;
+          if (colorIndex & 1) b0 |= (1 << bit);
+          if (colorIndex & 2) b1 |= (1 << bit);
+          if (colorIndex & 4) b2 |= (1 << bit);
+          if (colorIndex & 8) b3 |= (1 << bit);
+        }
+        gfxRom[groupOff] = b0;
+        gfxRom[groupOff + 1] = b1;
+        gfxRom[groupOff + 2] = b2;
+        gfxRom[groupOff + 3] = b3;
+      }
+    }
+  }
+
+  // Set scroll2 tilemap base via CPS-A register 0x04
+  // Value = base / 256
+  function setScroll2Base(cpsaRegs: Uint8Array, vramBase: number) {
+    const val = vramBase / 256;
+    cpsaRegs[0x04] = (val >> 8) & 0xFF;
+    cpsaRegs[0x05] = val & 0xFF;
+  }
+
+  // Set scroll2 X/Y via CPS-A registers 0x10/0x12
+  // CPS1 adds CPS_HBEND(64) / CPS_VBEND(16) internally, so scroll=0
+  // means virtual pixel 0 maps to screen pixel 0 after HBEND/VBEND offset
+  function setScroll2XY(cpsaRegs: Uint8Array, scrollX: number, scrollY: number) {
+    cpsaRegs[0x10] = (scrollX >> 8) & 0xFF;
+    cpsaRegs[0x11] = scrollX & 0xFF;
+    cpsaRegs[0x12] = (scrollY >> 8) & 0xFF;
+    cpsaRegs[0x13] = scrollY & 0xFF;
+  }
+
+  // Write a 4-byte tilemap entry at the given VRAM offset
+  function writeTilemapEntry(vram: Uint8Array, offset: number, code: number, palette: number, flipX = false, flipY = false) {
+    vram[offset] = (code >> 8) & 0xFF;
+    vram[offset + 1] = code & 0xFF;
+    let attribs = palette & 0x1F;
+    if (flipX) attribs |= (1 << 5);
+    if (flipY) attribs |= (1 << 6);
+    vram[offset + 2] = (attribs >> 8) & 0xFF;
+    vram[offset + 3] = attribs & 0xFF;
+  }
+
+  it('returns null for out-of-bounds coordinates', () => {
+    const { video } = createScrollTestVideo();
+    expect(video.inspectScrollAt(-1, 0, 2)).toBeNull();
+    expect(video.inspectScrollAt(0, -1, 2)).toBeNull();
+    expect(video.inspectScrollAt(384, 0, 2)).toBeNull();
+    expect(video.inspectScrollAt(0, 224, 2)).toBeNull();
+  });
+
+  it('returns null for invalid layer ID', () => {
+    const { video } = createScrollTestVideo();
+    expect(video.inspectScrollAt(0, 0, 0)).toBeNull(); // LAYER_OBJ
+    expect(video.inspectScrollAt(0, 0, 5)).toBeNull(); // invalid
+  });
+
+  it('returns correct tile for scroll2 at (0,0)', () => {
+    const { video, vram, gfxRom, cpsaRegs } = createScrollTestVideo();
+
+    // Set tilemap base at VRAM offset 0x4000
+    setScroll2Base(cpsaRegs, 0x4000);
+    // Scroll = 0 (screen pixel 0,0 maps to virtual pixel 64,16 → tile col=4, row=1)
+    setScroll2XY(cpsaRegs, 0, 0);
+
+    // tilemap1Scan(4, 1) = (1 & 0x0f) + ((4 & 0x3f) << 4) + ((1 & 0x30) << 6) = 1 + 64 = 65
+    const tileIndex = 65;
+    const entryOffset = 0x4000 + tileIndex * 4;
+    const tileCode = 0x42;
+    writeTilemapEntry(vram, entryOffset, tileCode, 5);
+    fillTile16(gfxRom, tileCode, 3); // color index 3
+
+    const result = video.inspectScrollAt(0, 0, 2);
+    expect(result).not.toBeNull();
+    expect(result!.tileCode).toBe(tileCode);
+    expect(result!.paletteIndex).toBe(5 + 0x40); // scroll2 group offset = 0x40
+    expect(result!.colorIndex).toBe(3);
+  });
+
+  it('returns null for transparent pixel (colorIndex 15)', () => {
+    const { video, vram, gfxRom, cpsaRegs } = createScrollTestVideo();
+
+    setScroll2Base(cpsaRegs, 0x4000);
+    setScroll2XY(cpsaRegs, 0, 0);
+
+    const tileIndex = 65;
+    const entryOffset = 0x4000 + tileIndex * 4;
+    writeTilemapEntry(vram, entryOffset, 0x10, 2);
+    fillTile16(gfxRom, 0x10, 15); // all transparent
+
+    expect(video.inspectScrollAt(0, 0, 2)).toBeNull();
+  });
+
+  it('returns result for transparent pixel when boundsOnly=true', () => {
+    const { video, vram, gfxRom, cpsaRegs } = createScrollTestVideo();
+
+    setScroll2Base(cpsaRegs, 0x4000);
+    setScroll2XY(cpsaRegs, 0, 0);
+
+    const tileIndex = 65;
+    const entryOffset = 0x4000 + tileIndex * 4;
+    writeTilemapEntry(vram, entryOffset, 0x10, 2);
+    fillTile16(gfxRom, 0x10, 15);
+
+    const result = video.inspectScrollAt(0, 0, 2, true);
+    expect(result).not.toBeNull();
+    expect(result!.tileCode).toBe(0x10);
+    expect(result!.colorIndex).toBe(15);
+  });
+});

@@ -70,3 +70,67 @@ describe('Bus address decoding', () => {
     expect(bus.read8(0x400000)).toBe(0xFF);
   });
 });
+
+// ---------------------------------------------------------------------------
+// CPS-B multiplication hardware
+// ---------------------------------------------------------------------------
+
+describe('CPS-B multiplication', () => {
+  function writeWord(bus: Bus, addr: number, value: number) {
+    bus.write8(addr, (value >> 8) & 0xFF);
+    bus.write8(addr + 1, value & 0xFF);
+  }
+
+  function readResult(bus: Bus): { lo: number; hi: number } {
+    const lo = (bus.read8(0x800144) << 8) | bus.read8(0x800145);
+    const hi = (bus.read8(0x800146) << 8) | bus.read8(0x800147);
+    return { lo, hi };
+  }
+
+  it('multiplies 1 × 1 = 1', () => {
+    const bus = new Bus();
+    writeWord(bus, 0x800140, 1); // factor1
+    writeWord(bus, 0x800142, 1); // factor2
+    const { lo, hi } = readResult(bus);
+    expect(hi).toBe(0);
+    expect(lo).toBe(1);
+  });
+
+  it('multiplies 0 × 0xFFFF = 0', () => {
+    const bus = new Bus();
+    writeWord(bus, 0x800140, 0);
+    writeWord(bus, 0x800142, 0xFFFF);
+    const { lo, hi } = readResult(bus);
+    expect(hi).toBe(0);
+    expect(lo).toBe(0);
+  });
+
+  it('multiplies 0xFFFF × 0xFFFF = 0xFFFE0001', () => {
+    const bus = new Bus();
+    writeWord(bus, 0x800140, 0xFFFF);
+    writeWord(bus, 0x800142, 0xFFFF);
+    const { lo, hi } = readResult(bus);
+    expect(hi).toBe(0xFFFE);
+    expect(lo).toBe(0x0001);
+  });
+
+  it('multiplies 100 × 200 = 20000', () => {
+    const bus = new Bus();
+    writeWord(bus, 0x800140, 100);
+    writeWord(bus, 0x800142, 200);
+    const { lo, hi } = readResult(bus);
+    expect(hi).toBe(0);
+    expect(lo).toBe(20000);
+  });
+
+  it('recomputes when factor1 changes', () => {
+    const bus = new Bus();
+    writeWord(bus, 0x800140, 10);
+    writeWord(bus, 0x800142, 5);
+    expect(readResult(bus).lo).toBe(50);
+
+    // Change factor1 only
+    writeWord(bus, 0x800140, 20);
+    expect(readResult(bus).lo).toBe(100);
+  });
+});

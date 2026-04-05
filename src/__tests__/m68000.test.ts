@@ -117,3 +117,115 @@ describe('M68000 basic instructions', () => {
     expect(state.d[0]).toBe(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// M68000 interrupts
+// ---------------------------------------------------------------------------
+
+describe('M68000 interrupts', () => {
+  function createCpuWithIsr(
+    isrAddr: number,
+    level: number,
+    programWords: number[],
+  ) {
+    const bus = new MockBus();
+    // Reset vectors: SP=0x1000, PC=0x100
+    bus.write32(0x0000, 0x00001000);
+    bus.write32(0x0004, 0x00000100);
+    // Autovector for this level: (25 + level - 1) * 4
+    const vectorAddr = (25 + level - 1) * 4;
+    bus.write32(vectorAddr, isrAddr);
+    // Write ISR: RTE (0x4E73)
+    bus.write16(isrAddr, 0x4E73);
+    // Write main program
+    bus.writeProgram(0x100, programWords);
+    const cpu = new M68000(bus);
+    cpu.reset();
+    return { cpu, bus };
+  }
+
+  it('takes IRQ level 2 when IPL=0', () => {
+    // NOP loop
+    const { cpu } = createCpuWithIsr(0x200, 2, [0x4E71, 0x4E71, 0x4E71]);
+    // SR after reset = 0x2700 (IPL=7). Lower IPL to 0 via MOVE to SR.
+    // ANDI #0x20FF, SR → 0x027C 0x20FF (clears IPL bits, keeps supervisor)
+    // Actually, let's use setState for simplicity
+    const state = cpu.getState();
+    state.sr = 0x2000; // supervisor, IPL=0
+    cpu.setState(state);
+
+    cpu.assertInterrupt(2);
+    cpu.step(); // should take the interrupt
+
+    const after = cpu.getState();
+    // PC should be at ISR address (0x200) + 2 (after prefetch)
+    // SR IPL should be 2
+    expect((after.sr >> 8) & 7).toBe(2);
+    // SP should have decreased by 6 (pushed PC=4 + SR=2)
+    expect(after.a[7]).toBeLessThan(0x1000);
+  });
+
+  it('masks IRQ when level <= IPL', () => {
+    const { cpu } = createCpuWithIsr(0x200, 2, [0x4E71, 0x4E71]);
+    const state = cpu.getState();
+    state.sr = 0x2300; // supervisor, IPL=3
+    cpu.setState(state);
+
+    cpu.assertInterrupt(2);
+    const pcBefore = cpu.getState().pc;
+    cpu.step(); // should execute NOP, not take IRQ
+
+    const after = cpu.getState();
+    // PC advanced (NOP executed), not jumped to ISR
+    expect(after.pc).toBe(pcBefore + 2);
+  });
+
+  it('level 7 (NMI) is never masked', () => {
+    const { cpu } = createCpuWithIsr(0x200, 7, [0x4E71, 0x4E71]);
+    const state = cpu.getState();
+    state.sr = 0x2700; // supervisor, IPL=7 (max mask)
+    cpu.setState(state);
+
+    cpu.assertInterrupt(7);
+    cpu.step();
+
+    const after = cpu.getState();
+    expect((after.sr >> 8) & 7).toBe(7);
+    // SP decreased = interrupt was taken
+    expect(after.a[7]).toBeLessThan(0x1000);
+  });
+
+  it('requestInterrupt is one-shot (cleared after servicing)', () => {
+    const { cpu } = createCpuWithIsr(0x200, 2, [0x4E71, 0x4E71, 0x4E71]);
+    const state = cpu.getState();
+    state.sr = 0x2000; // IPL=0
+    cpu.setState(state);
+
+    cpu.requestInterrupt(2);
+    cpu.step(); // takes IRQ, clears pending
+
+    // Execute RTE at 0x200
+    cpu.step();
+    const afterRte = cpu.getState();
+    // After RTE, IPL restored to 0, pendingInterrupt cleared
+    // Next step should execute NOP, not re-enter IRQ
+    const pcAfterRte = afterRte.pc;
+    cpu.step();
+    const afterNop = cpu.getState();
+    expect(afterNop.pc).toBe(pcAfterRte + 2); // NOP advanced PC
+  });
+
+  it('irqAckCallback is called on interrupt acknowledge', () => {
+    const { cpu } = createCpuWithIsr(0x200, 2, [0x4E71]);
+    const state = cpu.getState();
+    state.sr = 0x2000;
+    cpu.setState(state);
+
+    let acked = false;
+    cpu.setIrqAckCallback(() => { acked = true; });
+    cpu.assertInterrupt(2);
+    cpu.step();
+
+    expect(acked).toBe(true);
+  });
+});
