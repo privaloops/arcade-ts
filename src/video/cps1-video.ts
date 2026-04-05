@@ -298,6 +298,10 @@ export class CPS1Video {
   // updated at VBlank, not from live VRAM. This prevents tearing.
   private readonly objBuffer: Uint8Array;
 
+  // Cached Uint32Array view over the framebuffer (avoids allocation per frame)
+  private fb32: Uint32Array | null = null;
+  private fb32Source: ArrayBufferLike | null = null;
+
   // Editor hook: hide sprites by palette index
   private hiddenSpritePalettes: Set<number> | null = null;
 
@@ -352,6 +356,15 @@ export class CPS1Video {
       this.bankBases.push(bankBase);
       bankBase += size;
     }
+  }
+
+  /** Get or create cached Uint32Array view over the framebuffer */
+  private getFb32(framebuffer: Uint8Array): Uint32Array {
+    if (!this.fb32 || this.fb32Source !== framebuffer.buffer) {
+      this.fb32 = new Uint32Array(framebuffer.buffer, framebuffer.byteOffset, framebuffer.byteLength / 4);
+      this.fb32Source = framebuffer.buffer;
+    }
+    return this.fb32;
   }
 
   // -------------------------------------------------------------------------
@@ -568,30 +581,43 @@ export class CPS1Video {
     const rowBuf = this.tileRowBuf;
 
     // Use Uint32Array view for 4-byte writes
-    const fb32 = new Uint32Array(framebuffer.buffer, framebuffer.byteOffset, framebuffer.byteLength / 4);
+    const fb32 = this.getFb32(framebuffer);
 
-    // Row scroll mode for scroll2: render per-scanline with per-row X offset
-    // From MAME: for (int i = 0; i < 256; i++)
-    //   set_scrollx((i - scrly) & 0x3ff, m_scroll2x + m_other[(i + otheroffs) & 0x3ff])
-    // where scrly = -m_scroll2y, i = screen row
+    // Row scroll mode for scroll2: per-scanline X offset, tile-based rendering.
+    // Each row has its own X scroll read from the "other" VRAM area.
+    // We iterate by tile columns per row and blit 8-pixel groups (like the
+    // non-row-scroll path), which is ~24× fewer gfxromBankMapper calls than
+    // the previous pixel-by-pixel approach.
     if (useRowScroll) {
+      const numTileCols = ((SCREEN_WIDTH / tileW) | 0) + 2;
+      const groupsPerRow = tileW >> 3;
+
       for (let screenY = 0; screenY < SCREEN_HEIGHT; screenY++) {
         const vy = ((screenY + scrollY) & 0xFFFF) % virtualH;
-        // MAME: i = tilemapRow - m_scroll2y = screenY + CPS_VBEND
-        // other index = (i + otheroffs) & 0x3ff
+        const tileRow = (vy / tileH) | 0;
+        const localY_base = vy % tileH;
+
+        // Per-row X scroll from VRAM "other" area
         const otherIdx = (screenY + CPS_VBEND + otherOffs) & 0x3FF;
         const otherAddr = otherBase + otherIdx * 2;
         const rowOffset = otherAddr + 1 < VRAM_SIZE
           ? ((this.vram[otherAddr]! << 8) | this.vram[otherAddr + 1]!) & 0xFFFF
           : 0;
-        // Sign-extend the 16-bit row offset
         const rowOffsetSigned = rowOffset > 0x7FFF ? rowOffset - 0x10000 : rowOffset;
         const rowScrollX = (baseScrollX + rowOffsetSigned) & 0xFFFF;
 
-        for (let screenX = 0; screenX < SCREEN_WIDTH; screenX++) {
-          const vx = ((screenX + rowScrollX) & 0xFFFF) % virtualW;
-          const tileCol = (vx / tileW) | 0;
-          const tileRow = (vy / tileH) | 0;
+        const vxStart = (rowScrollX & 0xFFFF) % virtualW;
+        const startTileCol = (vxStart / tileW) | 0;
+        const firstTilePixelX = -(vxStart % tileW);
+        const fbRowBase = screenY * SCREEN_WIDTH;
+
+        for (let tileColIdx = 0; tileColIdx < numTileCols; tileColIdx++) {
+          const tileCol = (startTileCol + tileColIdx) % 64;
+          const screenTileX = firstTilePixelX + tileColIdx * tileW;
+
+          if (screenTileX >= SCREEN_WIDTH) break;
+          if (screenTileX + tileW <= 0) continue;
+
           const tileIndex = scanFn(tileCol, tileRow);
           const entryOffset = tilemapBase + tileIndex * 4;
           if (entryOffset + 3 >= VRAM_SIZE) continue;
@@ -602,29 +628,33 @@ export class CPS1Video {
 
           const attribs = (vram[entryOffset + 2]! << 8) | vram[entryOffset + 3]!;
           const palette = (attribs & 0x1F) + paletteGroupOffset;
-          const flipXb = (attribs >> 5) & 1;
-          const flipYb = (attribs >> 6) & 1;
+          const flipX = (attribs >> 5) & 1;
+          const flipY = (attribs >> 6) & 1;
 
-          let localX = vx % tileW;
-          let localY = vy % tileH;
-          if (flipXb) localX = tileW - 1 - localX;
-          if (flipYb) localY = tileH - 1 - localY;
-
-          // Decode pixel inline (16x16 tile)
+          const localY = flipY ? (tileH - 1 - localY_base) : localY_base;
           const charBase = tileCode * charSize;
-          const halfOff = localX >= 8 ? 4 : 0;
-          const planeBase = charBase + localY * rowStride + halfOff;
-          const bit = 7 - (localX & 7);
-          if (planeBase + 3 >= gfxRomLen) continue;
+          const rowBase = charBase + localY * rowStride;
+          const palCacheBase = palette * 16;
 
-          const colorIdx =
-            ((gfxRom[planeBase]! >> bit) & 1) |
-            (((gfxRom[planeBase + 1]! >> bit) & 1) << 1) |
-            (((gfxRom[planeBase + 2]! >> bit) & 1) << 2) |
-            (((gfxRom[planeBase + 3]! >> bit) & 1) << 3);
+          for (let group = 0; group < groupsPerRow; group++) {
+            const groupScreenX = screenTileX + (flipX ? (groupsPerRow - 1 - group) * 8 : group * 8);
+            if (groupScreenX >= SCREEN_WIDTH || groupScreenX + 8 <= 0) continue;
 
-          if (colorIdx === 15) continue;
-          fb32[screenY * SCREEN_WIDTH + screenX] = palCache[palette * 16 + colorIdx]!;
+            const planeBase = rowBase + group * 4;
+            if (planeBase + 3 >= gfxRomLen) continue;
+
+            decodeRow(gfxRom[planeBase]!, gfxRom[planeBase + 1]!, gfxRom[planeBase + 2]!, gfxRom[planeBase + 3]!, rowBuf, 0);
+
+            for (let px = 0; px < 8; px++) {
+              const sx = flipX ? groupScreenX + 7 - px : groupScreenX + px;
+              if (sx < 0 || sx >= SCREEN_WIDTH) continue;
+
+              const colorIdx = rowBuf[px]!;
+              if (colorIdx === 15) continue;
+
+              fb32[fbRowBase + sx] = palCache[palCacheBase + colorIdx]!;
+            }
+          }
         }
       }
       return; // done with row scroll path
@@ -768,7 +798,7 @@ export class CPS1Video {
       }
     }
 
-    const fb32 = new Uint32Array(framebuffer.buffer, framebuffer.byteOffset, framebuffer.byteLength / 4);
+    const fb32 = this.getFb32(framebuffer);
     const palCache = this.paletteCache;
     const gfxRom = this.graphicsRom;
     const gfxRomLen = gfxRom.length;
@@ -793,7 +823,6 @@ export class CPS1Video {
       // handle the mapping to the correct GFX ROM region. No spriteCodeOffset
       // is needed here — the bank mapper resolves codes via bank 2 for sprites.
       const mappedBaseCode = gfxromBankMapper(GFXTYPE_SPRITES, code, this.mapperTable, this.bankSizes, this.bankBases);
-      if (mappedBaseCode === -1) continue;
       if (mappedBaseCode === -1) continue;
 
       if (colour & 0xFF00) {
@@ -999,7 +1028,7 @@ export class CPS1Video {
 
     // 1. Clear framebuffer to black (RGBA = 0, 0, 0, 255)
     // Use Uint32Array for fast fill: 0xFF000000 = ABGR(255, 0, 0, 0) = opaque black
-    const fb32 = new Uint32Array(framebuffer.buffer, framebuffer.byteOffset, framebuffer.byteLength / 4);
+    const fb32 = this.getFb32(framebuffer);
     fb32.fill(0xFF000000);
 
     // 2. Clear priority buffer

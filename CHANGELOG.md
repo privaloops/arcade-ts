@@ -40,6 +40,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ### Performance
 - **M68000 flags as direct booleans** — CCR flags (C, V, Z, N, X) stored as boolean fields instead of getter/setter proxies to the SR register. SR reconstructed on demand only (exceptions, save state, MOVE from SR). Eliminates ~10 function calls per instruction on the hottest path (~50K instructions/frame)
 - **M68000 prefetch as scalars** — Prefetch queue changed from `number[]` to two scalar fields, removing array indirection on every instruction fetch
+- **Cached framebuffer Uint32Array view** — Reuse a single Uint32Array view across renderScrollLayer, renderObjects, and renderFrame instead of allocating 3 per frame
+- **Row-scroll tile-based rendering** — Scroll2 row-scroll path refactored from pixel-by-pixel (86K iterations) to tile-based (~26 cols × 224 rows), reducing gfxromBankMapper calls ~24×
 
 ### Changed
 - **Mono-palette sprite capture** — `groupCharacter()` flood-fill restricted to the target palette only. Eliminates parasites from adjacent sprites/decor of other palettes. Cleaner captures, simpler code
