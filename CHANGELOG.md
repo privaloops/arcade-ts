@@ -37,6 +37,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Transparent tile filtering** — Fully transparent tiles (all pen 15) excluded from sprite capture
 - **E shortcut removed** — Redundant E key shortcut removed (use F2 for sprite editor)
 
+### Performance
+- **M68000 flags as direct booleans** — CCR flags (C, V, Z, N, X) stored as boolean fields instead of getter/setter proxies to the SR register. SR reconstructed on demand only (exceptions, save state, MOVE from SR). Eliminates ~10 function calls per instruction on the hottest path (~50K instructions/frame)
+- **M68000 prefetch as scalars** — Prefetch queue changed from `number[]` to two scalar fields, removing array indirection on every instruction fetch
+
 ### Changed
 - **Mono-palette sprite capture** — `groupCharacter()` flood-fill restricted to the target palette only. Eliminates parasites from adjacent sprites/decor of other palettes. Cleaner captures, simpler code
 - **Capture resumption** — Re-clicking a sprite whose palette was already captured resumes the existing group instead of creating a new one. New poses append live to the same card

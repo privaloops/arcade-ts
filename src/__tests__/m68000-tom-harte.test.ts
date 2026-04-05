@@ -121,7 +121,9 @@ function setupCPU(cpu: M68000, bus: TestBus, test: TestVector): void {
   });
 
   // Set prefetch queue
-  (cpu as unknown as { prefetch: number[] }).prefetch = [...init.prefetch];
+  const cpuAny = cpu as unknown as { prefetch0: number; prefetch1: number };
+  cpuAny.prefetch0 = init.prefetch[0];
+  cpuAny.prefetch1 = init.prefetch[1];
 }
 
 function verifyCPU(cpu: M68000, bus: TestBus, test: TestVector): string[] {

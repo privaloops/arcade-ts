@@ -22,12 +22,7 @@ export interface CpuState {
 // Constants
 // ---------------------------------------------------------------------------
 
-// SR flag positions
-const FLAG_C = 0;
-const FLAG_V = 1;
-const FLAG_Z = 2;
-const FLAG_N = 3;
-const FLAG_X = 4;
+// SR flag positions (CCR bits stored as direct booleans, see _fC/_fV/_fZ/_fN/_fX)
 const SR_S = 13;
 const SR_T = 15;
 
@@ -142,7 +137,8 @@ export class M68000 {
   private irqLines: number = 0;
 
   // Prefetch (the 68000 has a 2-word prefetch queue, we model it simply)
-  private prefetch: number[] = [0, 0];
+  private prefetch0: number = 0;
+  private prefetch1: number = 0;
 
   // Bus
   private bus: BusInterface;
@@ -186,6 +182,7 @@ export class M68000 {
 
   reset(): void {
     this.sr = 0x2700;
+    this._fC = this._fV = this._fZ = this._fN = this._fX = false;
     this.ssp = this.bus.read32(VEC_RESET_SSP * 4);
     this.a[7] = this.ssp;
     this.pc = this.bus.read32(VEC_RESET_PC * 4);
@@ -224,12 +221,12 @@ export class M68000 {
       const instrPC = this.pc; // PC points to current instruction (before prefetch)
       this._traceLog.push(
         `PC=${instrPC.toString(16).padStart(6, '0').toUpperCase()} ` +
-        `SR=${this.sr.toString(16).padStart(4, '0').toUpperCase()} ` +
+        `SR=${this.getSR().toString(16).padStart(4, '0').toUpperCase()} ` +
         `D0=${(this.d[0]! >>> 0).toString(16).padStart(8, '0').toUpperCase()} ` +
         `D1=${(this.d[1]! >>> 0).toString(16).padStart(8, '0').toUpperCase()} ` +
         `A0=${(this.a[0]! >>> 0).toString(16).padStart(8, '0').toUpperCase()} ` +
         `A7=${(this.a[7]! >>> 0).toString(16).padStart(8, '0').toUpperCase()} ` +
-        `OP=${this.prefetch[0]!.toString(16).padStart(4, '0').toUpperCase()}`
+        `OP=${this.prefetch0.toString(16).padStart(4, '0').toUpperCase()}`
       );
       if (this._traceLog.length >= this._traceMax) {
         this._traceEnabled = false;
@@ -300,7 +297,7 @@ export class M68000 {
       d: new Int32Array(this.d),
       a: new Int32Array(this.a),
       pc: this.pc,
-      sr: this.sr,
+      sr: this.getSR(),
       usp: this.usp,
       ssp: this.ssp,
       stopped: this.stopped,
@@ -313,7 +310,8 @@ export class M68000 {
     this.d.set(state.d);
     this.a.set(state.a);
     this.pc = state.pc;
-    this.sr = state.sr;
+    this.sr = state.sr & 0xFFE0;
+    this.syncFlagsFromSR(state.sr);
     this.usp = state.usp;
     this.ssp = state.ssp;
     this.stopped = state.stopped;
@@ -327,15 +325,15 @@ export class M68000 {
   // =========================================================================
 
   private prefetchFill(): void {
-    this.prefetch[0] = this.bus.read16(this.pc & 0xFFFFFF);
-    this.prefetch[1] = this.bus.read16((this.pc + 2) & 0xFFFFFF);
+    this.prefetch0 = this.bus.read16(this.pc & 0xFFFFFF);
+    this.prefetch1 = this.bus.read16((this.pc + 2) & 0xFFFFFF);
   }
 
   private prefetchRead(): number {
-    const word = this.prefetch[0]!;
+    const word = this.prefetch0;
     this.pc = (this.pc + 2) & 0xFFFFFFFF;
-    this.prefetch[0] = this.prefetch[1]!;
-    this.prefetch[1] = this.bus.read16((this.pc + 2) & 0xFFFFFF);
+    this.prefetch0 = this.prefetch1;
+    this.prefetch1 = this.bus.read16((this.pc + 2) & 0xFFFFFF);
     return word;
   }
 
@@ -353,46 +351,50 @@ export class M68000 {
   }
 
   // =========================================================================
-  // SR / flags helpers
+  // SR / flags — stored as direct booleans for hot-path performance.
+  // The sr field holds only the upper byte (S, T, IPL mask).
+  // Flags are synced to/from sr on demand (getSR, setSR, getState, etc.)
   // =========================================================================
 
-  private getFlag(bit: number): boolean {
-    return (this.sr & (1 << bit)) !== 0;
+  private _fC: boolean = false;
+  private _fV: boolean = false;
+  private _fZ: boolean = false;
+  private _fN: boolean = false;
+  private _fX: boolean = false;
+
+  /** Rebuild full 16-bit SR from upper byte + boolean flags */
+  private getSR(): number {
+    return (this.sr & 0xFFE0)
+      | (this._fX ? 0x10 : 0)
+      | (this._fN ? 0x08 : 0)
+      | (this._fZ ? 0x04 : 0)
+      | (this._fV ? 0x02 : 0)
+      | (this._fC ? 0x01 : 0);
   }
 
-  private setFlag(bit: number, val: boolean): void {
-    if (val) this.sr |= (1 << bit);
-    else this.sr &= ~(1 << bit);
+  /** Sync boolean flags from a full 16-bit SR value */
+  private syncFlagsFromSR(val: number): void {
+    this._fC = (val & 1) !== 0;
+    this._fV = (val & 2) !== 0;
+    this._fZ = (val & 4) !== 0;
+    this._fN = (val & 8) !== 0;
+    this._fX = (val & 16) !== 0;
   }
-
-  private get flagC(): boolean { return this.getFlag(FLAG_C); }
-  private get flagV(): boolean { return this.getFlag(FLAG_V); }
-  private get flagZ(): boolean { return this.getFlag(FLAG_Z); }
-  private get flagN(): boolean { return this.getFlag(FLAG_N); }
-  private get flagX(): boolean { return this.getFlag(FLAG_X); }
-
-  private set flagC(v: boolean) { this.setFlag(FLAG_C, v); }
-  private set flagV(v: boolean) { this.setFlag(FLAG_V, v); }
-  private set flagZ(v: boolean) { this.setFlag(FLAG_Z, v); }
-  private set flagN(v: boolean) { this.setFlag(FLAG_N, v); }
-  private set flagX(v: boolean) { this.setFlag(FLAG_X, v); }
 
   private getCCR(): number {
-    return this.sr & 0x1F;
+    return this.getSR() & 0x1F;
   }
 
   private setCCR(v: number): void {
-    this.sr = (this.sr & 0xFF00) | (v & 0x1F);
+    this.syncFlagsFromSR(v);
   }
 
   private setSupervisorMode(s: boolean): void {
     const wasSuper = (this.sr & (1 << SR_S)) !== 0;
     if (s && !wasSuper) {
-      // Entering supervisor: save USP, load SSP
       this.usp = this.a[7]!;
       this.a[7] = this.ssp;
     } else if (!s && wasSuper) {
-      // Leaving supervisor: save SSP, load USP
       this.ssp = this.a[7]!;
       this.a[7] = this.usp;
     }
@@ -403,7 +405,8 @@ export class M68000 {
   private setSR(val: number): void {
     const newS = (val & (1 << SR_S)) !== 0;
     this.setSupervisorMode(newS);
-    this.sr = val & 0xFFFF;
+    this.sr = val & 0xFFE0; // upper byte only, flags go to booleans
+    this.syncFlagsFromSR(val);
   }
 
   private isSupervisor(): boolean {
@@ -418,20 +421,20 @@ export class M68000 {
     switch (cc & 0xF) {
       case 0: return true;                                    // T
       case 1: return false;                                   // F
-      case 2: return !this.flagC && !this.flagZ;              // HI
-      case 3: return this.flagC || this.flagZ;                // LS
-      case 4: return !this.flagC;                             // CC (HS)
-      case 5: return this.flagC;                              // CS (LO)
-      case 6: return !this.flagZ;                             // NE
-      case 7: return this.flagZ;                              // EQ
-      case 8: return !this.flagV;                             // VC
-      case 9: return this.flagV;                              // VS
-      case 10: return !this.flagN;                            // PL
-      case 11: return this.flagN;                             // MI
-      case 12: return this.flagN === this.flagV;              // GE
-      case 13: return this.flagN !== this.flagV;              // LT
-      case 14: return !this.flagZ && (this.flagN === this.flagV); // GT
-      case 15: return this.flagZ || (this.flagN !== this.flagV);  // LE
+      case 2: return !this._fC && !this._fZ;              // HI
+      case 3: return this._fC || this._fZ;                // LS
+      case 4: return !this._fC;                             // CC (HS)
+      case 5: return this._fC;                              // CS (LO)
+      case 6: return !this._fZ;                             // NE
+      case 7: return this._fZ;                              // EQ
+      case 8: return !this._fV;                             // VC
+      case 9: return this._fV;                              // VS
+      case 10: return !this._fN;                            // PL
+      case 11: return this._fN;                             // MI
+      case 12: return this._fN === this._fV;              // GE
+      case 13: return this._fN !== this._fV;              // LT
+      case 14: return !this._fZ && (this._fN === this._fV); // GT
+      case 15: return this._fZ || (this._fN !== this._fV);  // LE
       default: return false;
     }
   }
@@ -441,7 +444,7 @@ export class M68000 {
   // =========================================================================
 
   private raiseException(vector: number, extraCycles: number): void {
-    const oldSR = this.sr;
+    const oldSR = this.getSR();
     this.setSupervisorMode(true);
     this.sr &= ~(1 << SR_T); // Clear trace
 
@@ -456,7 +459,7 @@ export class M68000 {
   }
 
   private raiseAddressError(address: number, isWrite: boolean = false, isInstruction: boolean = false): void {
-    const oldSR = this.sr;
+    const oldSR = this.getSR();
     this.setSupervisorMode(true);
     this.sr &= ~(1 << SR_T);
 
@@ -515,7 +518,7 @@ export class M68000 {
   }
 
   private processInterrupt(level: number): void {
-    const oldSR = this.sr;
+    const oldSR = this.getSR();
     this.setSupervisorMode(true);
     this.sr &= ~(1 << SR_T);
     // Set new interrupt mask
@@ -794,20 +797,20 @@ export class M68000 {
 
   private setLogicFlags(val: number, size: number): void {
     if (this.addressError) return;
-    this.flagV = false;
-    this.flagC = false;
+    this._fV = false;
+    this._fC = false;
     switch (size) {
       case 1:
-        this.flagN = msb8(val);
-        this.flagZ = clip8(val) === 0;
+        this._fN = msb8(val);
+        this._fZ = clip8(val) === 0;
         break;
       case 2:
-        this.flagN = msb16(val);
-        this.flagZ = clip16(val) === 0;
+        this._fN = msb16(val);
+        this._fZ = clip16(val) === 0;
         break;
       case 4:
-        this.flagN = msb32(val);
-        this.flagZ = clip32(val) === 0;
+        this._fN = msb32(val);
+        this._fZ = clip32(val) === 0;
         break;
     }
   }
@@ -818,29 +821,29 @@ export class M68000 {
     switch (size) {
       case 1:
         s = src & 0xFF; d = dst & 0xFF; r = result & 0xFF;
-        this.flagN = msb8(r);
-        this.flagZ = r === 0;
-        this.flagV = ((~(s ^ d) & (r ^ d)) & 0x80) !== 0;
-        this.flagC = (result & 0x100) !== 0;
-        this.flagX = this.flagC;
+        this._fN = msb8(r);
+        this._fZ = r === 0;
+        this._fV = ((~(s ^ d) & (r ^ d)) & 0x80) !== 0;
+        this._fC = (result & 0x100) !== 0;
+        this._fX = this._fC;
         break;
       case 2:
         s = src & 0xFFFF; d = dst & 0xFFFF; r = result & 0xFFFF;
-        this.flagN = msb16(r);
-        this.flagZ = r === 0;
-        this.flagV = ((~(s ^ d) & (r ^ d)) & 0x8000) !== 0;
-        this.flagC = (result & 0x10000) !== 0;
-        this.flagX = this.flagC;
+        this._fN = msb16(r);
+        this._fZ = r === 0;
+        this._fV = ((~(s ^ d) & (r ^ d)) & 0x8000) !== 0;
+        this._fC = (result & 0x10000) !== 0;
+        this._fX = this._fC;
         break;
       case 4:
         s = src >>> 0; d = dst >>> 0; r = result >>> 0;
-        this.flagN = msb32(r);
-        this.flagZ = r === 0;
+        this._fN = msb32(r);
+        this._fZ = r === 0;
         // For 32-bit, we must use different overflow detection
-        this.flagV = ((~(s ^ d) & (r ^ d)) & 0x80000000) !== 0;
+        this._fV = ((~(s ^ d) & (r ^ d)) & 0x80000000) !== 0;
         // Carry: result > 0xFFFFFFFF, detect by checking if sum wrapped
-        this.flagC = (r < s) || (r < d);
-        this.flagX = this.flagC;
+        this._fC = (r < s) || (r < d);
+        this._fX = this._fC;
         break;
     }
   }
@@ -853,13 +856,13 @@ export class M68000 {
     const s = size === 4 ? src >>> 0 : src & mask;
     const d = size === 4 ? dst >>> 0 : dst & mask;
     const r = size === 4 ? result >>> 0 : result & mask;
-    this.flagN = (r & msb) !== 0;
-    this.flagZ = r === 0;
+    this._fN = (r & msb) !== 0;
+    this._fZ = r === 0;
     // V uses original src (not src+X) to correctly detect signed overflow
-    this.flagV = (((s ^ d) & (r ^ d)) & msb) !== 0;
+    this._fV = (((s ^ d) & (r ^ d)) & msb) !== 0;
     // C = borrow occurred: dst < src + X (full precision, no wrapping)
-    this.flagC = result < 0;
-    this.flagX = this.flagC;
+    this._fC = result < 0;
+    this._fX = this._fC;
   }
 
   private setAddXFlags(src: number, dst: number, result: number, size: number): void {
@@ -870,13 +873,13 @@ export class M68000 {
     const s = size === 4 ? src >>> 0 : src & mask;
     const d = size === 4 ? dst >>> 0 : dst & mask;
     const r = size === 4 ? result >>> 0 : result & mask;
-    this.flagN = (r & msb) !== 0;
-    this.flagZ = r === 0;
+    this._fN = (r & msb) !== 0;
+    this._fZ = r === 0;
     // V uses original src (not src+X) to correctly detect signed overflow
-    this.flagV = ((~(s ^ d) & (r ^ d)) & msb) !== 0;
+    this._fV = ((~(s ^ d) & (r ^ d)) & msb) !== 0;
     // C = carry occurred: result >= limit
-    this.flagC = result >= limit;
-    this.flagX = this.flagC;
+    this._fC = result >= limit;
+    this._fX = this._fC;
   }
 
   private setSubFlags(src: number, dst: number, result: number, size: number): void {
@@ -885,36 +888,36 @@ export class M68000 {
     switch (size) {
       case 1:
         s = src & 0xFF; d = dst & 0xFF; r = result & 0xFF;
-        this.flagN = msb8(r);
-        this.flagZ = r === 0;
-        this.flagV = (((s ^ d) & (r ^ d)) & 0x80) !== 0;
-        this.flagC = (d < s);
-        this.flagX = this.flagC;
+        this._fN = msb8(r);
+        this._fZ = r === 0;
+        this._fV = (((s ^ d) & (r ^ d)) & 0x80) !== 0;
+        this._fC = (d < s);
+        this._fX = this._fC;
         break;
       case 2:
         s = src & 0xFFFF; d = dst & 0xFFFF; r = result & 0xFFFF;
-        this.flagN = msb16(r);
-        this.flagZ = r === 0;
-        this.flagV = (((s ^ d) & (r ^ d)) & 0x8000) !== 0;
-        this.flagC = (d < s);
-        this.flagX = this.flagC;
+        this._fN = msb16(r);
+        this._fZ = r === 0;
+        this._fV = (((s ^ d) & (r ^ d)) & 0x8000) !== 0;
+        this._fC = (d < s);
+        this._fX = this._fC;
         break;
       case 4:
         s = src >>> 0; d = dst >>> 0; r = result >>> 0;
-        this.flagN = msb32(r);
-        this.flagZ = r === 0;
-        this.flagV = (((s ^ d) & (r ^ d)) & 0x80000000) !== 0;
-        this.flagC = ((d >>> 0) < (s >>> 0));
-        this.flagX = this.flagC;
+        this._fN = msb32(r);
+        this._fZ = r === 0;
+        this._fV = (((s ^ d) & (r ^ d)) & 0x80000000) !== 0;
+        this._fC = ((d >>> 0) < (s >>> 0));
+        this._fX = this._fC;
         break;
     }
   }
 
   private setCmpFlags(src: number, dst: number, result: number, size: number): void {
     // Same as sub flags but don't touch X
-    const oldX = this.flagX;
+    const oldX = this._fX;
     this.setSubFlags(src, dst, result, size);
-    this.flagX = oldX;
+    this._fX = oldX;
   }
 
   // =========================================================================
@@ -1025,7 +1028,7 @@ export class M68000 {
     if (mode === EA_DATA_REG) {
       const bit = bitNum & 31;
       const val = this.d[reg]!;
-      this.flagZ = ((val >>> bit) & 1) === 0;
+      this._fZ = ((val >>> bit) & 1) === 0;
 
       switch (type) {
         case 0: // BTST
@@ -1048,7 +1051,7 @@ export class M68000 {
       // BTST Dn, #imm — test bit in immediate data
       const bit = bitNum & 7;
       const val = this.readImm16() & 0xFF;
-      this.flagZ = ((val >>> bit) & 1) === 0;
+      this._fZ = ((val >>> bit) & 1) === 0;
       this.cycles += (type === 0 ? 4 : 8);
       // Note: BCHG/BCLR/BSET on #imm are illegal on real 68000,
       // but we handle BTST for correctness
@@ -1056,7 +1059,7 @@ export class M68000 {
       const bit = bitNum & 7;
       const addr = this.computeEA(mode, reg, 1);
       const val = this.bus.read8(addr);
-      this.flagZ = ((val >>> bit) & 1) === 0;
+      this._fZ = ((val >>> bit) & 1) === 0;
 
       switch (type) {
         case 0: // BTST
@@ -1150,7 +1153,7 @@ export class M68000 {
     if (size === 2 && mode === EA_OTHER && reg === EA_IMMEDIATE) {
       if (!this.isSupervisor()) { this.raiseException(VEC_PRIVILEGE, 0); return; }
       const imm = this.readImm16();
-      this.setSR(this.sr | imm);
+      this.setSR(this.getSR() | imm);
       this.cycles += 20;
       return;
     }
@@ -1183,7 +1186,7 @@ export class M68000 {
     if (size === 2 && mode === EA_OTHER && reg === EA_IMMEDIATE) {
       if (!this.isSupervisor()) { this.raiseException(VEC_PRIVILEGE, 0); return; }
       const imm = this.readImm16();
-      this.setSR(this.sr & imm);
+      this.setSR(this.getSR() & imm);
       this.cycles += 20;
       return;
     }
@@ -1252,7 +1255,7 @@ export class M68000 {
     if (size === 2 && mode === EA_OTHER && reg === EA_IMMEDIATE) {
       if (!this.isSupervisor()) { this.raiseException(VEC_PRIVILEGE, 0); return; }
       const imm = this.readImm16();
-      this.setSR(this.sr ^ imm);
+      this.setSR(this.getSR() ^ imm);
       this.cycles += 20;
       return;
     }
@@ -1526,7 +1529,7 @@ export class M68000 {
 
     // TRAPV: 0100 1110 0111 0110
     if (op === 0x4E76) {
-      if (this.flagV) {
+      if (this._fV) {
         this.raiseException(VEC_TRAPV, 0);
       }
       this.cycles += 4;
@@ -1571,11 +1574,11 @@ export class M68000 {
     const mode = (this.opcode >> 3) & 7;
     const reg = this.opcode & 7;
     if (mode === EA_DATA_REG) {
-      this.d[reg] = (this.d[reg]! & 0xFFFF0000) | (this.sr & 0xFFFF);
+      this.d[reg] = (this.d[reg]! & 0xFFFF0000) | (this.getSR() & 0xFFFF);
       this.cycles += 6;
     } else {
       const addr = this.computeEA(mode, reg, 2);
-      this.bus.write16(addr, this.sr & 0xFFFF);
+      this.bus.write16(addr, this.getSR() & 0xFFFF);
       this.cycles += 8;
     }
   }
@@ -1601,7 +1604,7 @@ export class M68000 {
     const size = this.decodeSize2((this.opcode >> 6) & 3);
     const mode = (this.opcode >> 3) & 7;
     const reg = this.opcode & 7;
-    const x = this.flagX ? 1 : 0;
+    const x = this._fX ? 1 : 0;
 
     if (mode === EA_DATA_REG) {
       const dst = this.readEA(mode, reg, size);
@@ -1609,13 +1612,13 @@ export class M68000 {
       this.writeEA(mode, reg, size, result);
       this.setSubFlags(dst + x, 0, result, size);
       // NEGX: Z is only cleared, never set
-      if (size === 1 && clip8(result) !== 0) this.flagZ = false;
-      else if (size === 2 && clip16(result) !== 0) this.flagZ = false;
-      else if (size === 4 && clip32(result) !== 0) this.flagZ = false;
+      if (size === 1 && clip8(result) !== 0) this._fZ = false;
+      else if (size === 2 && clip16(result) !== 0) this._fZ = false;
+      else if (size === 4 && clip32(result) !== 0) this._fZ = false;
       // Actually NEGX: Z is cleared if result non-zero, unchanged otherwise
       // Re-implement: Z unchanged if result is 0
       const clipped = size === 1 ? clip8(result) : size === 2 ? clip16(result) : clip32(result);
-      if (clipped !== 0) this.flagZ = false;
+      if (clipped !== 0) this._fZ = false;
       this.cycles += (size === 4 ? 8 : 4);
     } else {
       const addr = this.computeEA(mode, reg, size);
@@ -1624,7 +1627,7 @@ export class M68000 {
       this.writeToAddr(addr, size, result);
       this.setSubFlags(dst + x, 0, result, size);
       const clipped = size === 1 ? clip8(result) : size === 2 ? clip16(result) : clip32(result);
-      if (clipped !== 0) this.flagZ = false;
+      if (clipped !== 0) this._fZ = false;
       this.cycles += (size === 4 ? 12 : 8);
     }
   }
@@ -1646,10 +1649,10 @@ export class M68000 {
     }
 
     if (this.addressError) return;
-    this.flagN = false;
-    this.flagZ = true;
-    this.flagV = false;
-    this.flagC = false;
+    this._fN = false;
+    this._fZ = true;
+    this._fV = false;
+    this._fC = false;
   }
 
   private opNEG(): void {
@@ -1715,7 +1718,7 @@ export class M68000 {
   private opNBCD(): void {
     const mode = (this.opcode >> 3) & 7;
     const reg = this.opcode & 7;
-    const x = this.flagX ? 1 : 0;
+    const x = this._fX ? 1 : 0;
 
     if (mode === EA_DATA_REG) {
       const dst = this.d[reg]! & 0xFF;
@@ -1749,9 +1752,9 @@ export class M68000 {
     }
 
     result = ((highNibble & 0xF) << 4) | (lowNibble & 0xF);
-    this.flagC = carry;
-    this.flagX = carry;
-    if ((result & 0xFF) !== 0) this.flagZ = false;
+    this._fC = carry;
+    this._fX = carry;
+    if ((result & 0xFF) !== 0) this._fZ = false;
     return result & 0xFF;
   }
 
@@ -2039,11 +2042,11 @@ export class M68000 {
     const val = signExtend16(this.d[dataReg]! & 0xFFFF);
 
     if (val < 0) {
-      this.flagN = true;
+      this._fN = true;
       this.raiseException(VEC_CHK, 0);
       this.cycles += 40;
     } else if (val > bound) {
-      this.flagN = false;
+      this._fN = false;
       this.raiseException(VEC_CHK, 0);
       this.cycles += 40;
     } else {
@@ -2324,7 +2327,7 @@ export class M68000 {
     const dstReg = (this.opcode >> 9) & 7;
     const srcReg = this.opcode & 7;
     const rm = (this.opcode >> 3) & 1;
-    const x = this.flagX ? 1 : 0;
+    const x = this._fX ? 1 : 0;
 
     if (rm === 0) {
       // Dn
@@ -2363,11 +2366,11 @@ export class M68000 {
     }
 
     const result = ((highNibble & 0xF) << 4) | (lowNibble & 0xF);
-    this.flagC = borrow;
-    this.flagX = borrow;
-    if ((result & 0xFF) !== 0) this.flagZ = false;
+    this._fC = borrow;
+    this._fX = borrow;
+    if ((result & 0xFF) !== 0) this._fZ = false;
     // N is undefined for SBCD, but real 68000 sets it from MSB
-    this.flagN = (result & 0x80) !== 0;
+    this._fN = (result & 0x80) !== 0;
     return result & 0xFF;
   }
 
@@ -2387,18 +2390,18 @@ export class M68000 {
 
     if (quotient > 0xFFFF) {
       // Overflow
-      this.flagV = true;
-      this.flagC = false;
+      this._fV = true;
+      this._fC = false;
       // Overflow doesn't change the register
       this.cycles += 140; // worst case
       return;
     }
 
     this.d[dataReg] = ((remainder & 0xFFFF) << 16) | (quotient & 0xFFFF);
-    this.flagN = (quotient & 0x8000) !== 0;
-    this.flagZ = (quotient & 0xFFFF) === 0;
-    this.flagV = false;
-    this.flagC = false;
+    this._fN = (quotient & 0x8000) !== 0;
+    this._fZ = (quotient & 0xFFFF) === 0;
+    this._fV = false;
+    this._fC = false;
     this.cycles += 140; // varies, use worst case
   }
 
@@ -2417,17 +2420,17 @@ export class M68000 {
     const remainder = dividend - quotient * divisor;
 
     if (quotient > 32767 || quotient < -32768) {
-      this.flagV = true;
-      this.flagC = false;
+      this._fV = true;
+      this._fC = false;
       this.cycles += 158;
       return;
     }
 
     this.d[dataReg] = ((remainder & 0xFFFF) << 16) | (quotient & 0xFFFF);
-    this.flagN = (quotient & 0x8000) !== 0;
-    this.flagZ = (quotient & 0xFFFF) === 0;
-    this.flagV = false;
-    this.flagC = false;
+    this._fN = (quotient & 0x8000) !== 0;
+    this._fZ = (quotient & 0xFFFF) === 0;
+    this._fV = false;
+    this._fC = false;
     this.cycles += 158;
   }
 
@@ -2488,8 +2491,8 @@ export class M68000 {
 
   private opSUBX(sizeBits: number, dstReg: number, srcReg: number, rm: number): void {
     const size = this.decodeSize2(sizeBits);
-    const x = this.flagX ? 1 : 0;
-    const oldZ = this.flagZ;
+    const x = this._fX ? 1 : 0;
+    const oldZ = this._fZ;
 
     if (rm === 0) {
       // Dn
@@ -2500,7 +2503,7 @@ export class M68000 {
       this.setSubXFlags(src, dst, result, size);
       // Z unchanged if result is 0
       const clipped = size === 1 ? clip8(result) : size === 2 ? clip16(result) : clip32(result);
-      if (clipped === 0) this.flagZ = oldZ;
+      if (clipped === 0) this._fZ = oldZ;
       this.cycles += (size === 4 ? 8 : 4);
     } else {
       // Source predecrement and read
@@ -2541,7 +2544,7 @@ export class M68000 {
       this.writeToAddr(dstAddr, size, result);
       this.setSubXFlags(src, dst, result, size);
       const clipped = size === 1 ? clip8(result) : size === 2 ? clip16(result) : clip32(result);
-      if (clipped === 0) this.flagZ = oldZ;
+      if (clipped === 0) this._fZ = oldZ;
       this.cycles += (size === 4 ? 30 : 18);
     }
   }
@@ -2721,7 +2724,7 @@ export class M68000 {
     const dstReg = (this.opcode >> 9) & 7;
     const srcReg = this.opcode & 7;
     const rm = (this.opcode >> 3) & 1;
-    const x = this.flagX ? 1 : 0;
+    const x = this._fX ? 1 : 0;
 
     if (rm === 0) {
       const src = this.d[srcReg]! & 0xFF;
@@ -2758,10 +2761,10 @@ export class M68000 {
     }
 
     const result = ((highNibble & 0xF) << 4) | (lowNibble & 0xF);
-    this.flagC = borrow;
-    this.flagX = borrow;
-    if ((result & 0xFF) !== 0) this.flagZ = false;
-    this.flagN = (result & 0x80) !== 0;
+    this._fC = borrow;
+    this._fX = borrow;
+    if ((result & 0xFF) !== 0) this._fZ = false;
+    this._fN = (result & 0x80) !== 0;
     return result & 0xFF;
   }
 
@@ -2771,10 +2774,10 @@ export class M68000 {
     const dst = this.d[dataReg]! & 0xFFFF;
     const result = (src * dst) >>> 0;
     this.d[dataReg] = result | 0;
-    this.flagN = msb32(result);
-    this.flagZ = result === 0;
-    this.flagV = false;
-    this.flagC = false;
+    this._fN = msb32(result);
+    this._fZ = result === 0;
+    this._fV = false;
+    this._fC = false;
     // Cycles: 38 + 2 * number of set bits in source (use 70 worst case simplified)
     this.cycles += 70;
   }
@@ -2785,10 +2788,10 @@ export class M68000 {
     const dst = signExtend16(this.d[dataReg]! & 0xFFFF);
     const result = Math.imul(src, dst);
     this.d[dataReg] = result | 0;
-    this.flagN = msb32(result);
-    this.flagZ = (result | 0) === 0;
-    this.flagV = false;
-    this.flagC = false;
+    this._fN = msb32(result);
+    this._fZ = (result | 0) === 0;
+    this._fV = false;
+    this._fC = false;
     this.cycles += 70;
   }
 
@@ -2849,8 +2852,8 @@ export class M68000 {
 
   private opADDX(sizeBits: number, dstReg: number, srcReg: number, rm: number): void {
     const size = this.decodeSize2(sizeBits);
-    const x = this.flagX ? 1 : 0;
-    const oldZ = this.flagZ;
+    const x = this._fX ? 1 : 0;
+    const oldZ = this._fZ;
 
     if (rm === 0) {
       const src = this.readEA(EA_DATA_REG, srcReg, size);
@@ -2859,7 +2862,7 @@ export class M68000 {
       this.writeEA(EA_DATA_REG, dstReg, size, result);
       this.setAddXFlags(src, dst, result, size);
       const clipped = size === 1 ? clip8(result) : size === 2 ? clip16(result) : clip32(result);
-      if (clipped === 0) this.flagZ = oldZ;
+      if (clipped === 0) this._fZ = oldZ;
       this.cycles += (size === 4 ? 8 : 4);
     } else {
       // Source predecrement and read
@@ -2903,7 +2906,7 @@ export class M68000 {
       this.writeToAddr(dstAddr, size, result);
       this.setAddXFlags(src, dst, result, size);
       const clipped = size === 1 ? clip8(result) : size === 2 ? clip16(result) : clip32(result);
-      if (clipped === 0) this.flagZ = oldZ;
+      if (clipped === 0) this._fZ = oldZ;
       this.cycles += (size === 4 ? 30 : 18);
     }
   }
@@ -3052,7 +3055,7 @@ export class M68000 {
     const mask = size === 1 ? 0xFF : size === 2 ? 0xFFFF : 0xFFFFFFFF;
 
     if (count === 0) {
-      this.flagC = false;
+      this._fC = false;
       this.setLogicFlags(val, size);
       return val & mask;
     }
@@ -3067,21 +3070,21 @@ export class M68000 {
     const effectiveCount = Math.min(count, sizeBits);
 
     for (let i = 0; i < effectiveCount; i++) {
-      this.flagC = (v & 1) !== 0;
-      this.flagX = this.flagC;
+      this._fC = (v & 1) !== 0;
+      this._fX = this._fC;
       v = v >> 1; // arithmetic shift preserves sign
     }
 
     // Beyond operand width, no more original bits to shift out
     if (count > sizeBits) {
-      this.flagC = false;
-      this.flagX = false;
+      this._fC = false;
+      this._fX = false;
     }
 
     const result = v & mask;
-    this.flagN = size === 1 ? msb8(result) : size === 2 ? msb16(result) : msb32(result);
-    this.flagZ = (result & mask) === 0;
-    this.flagV = false; // ASR never sets V
+    this._fN = size === 1 ? msb8(result) : size === 2 ? msb16(result) : msb32(result);
+    this._fZ = (result & mask) === 0;
+    this._fV = false; // ASR never sets V
     return result;
   }
 
@@ -3090,20 +3093,20 @@ export class M68000 {
     let v = val & mask;
 
     if (count === 0) {
-      this.flagC = false;
+      this._fC = false;
       this.setLogicFlags(v, size);
       return v;
     }
 
     for (let i = 0; i < count; i++) {
-      this.flagC = (v & 1) !== 0;
-      this.flagX = this.flagC;
+      this._fC = (v & 1) !== 0;
+      this._fX = this._fC;
       v = (v >>> 1) & mask;
     }
 
-    this.flagN = false; // LSR always clears N (0 shifted in)
-    this.flagZ = v === 0;
-    this.flagV = false;
+    this._fN = false; // LSR always clears N (0 shifted in)
+    this._fZ = v === 0;
+    this._fV = false;
     return v;
   }
 
@@ -3114,22 +3117,22 @@ export class M68000 {
     let overflow = false;
 
     if (count === 0) {
-      this.flagC = false;
+      this._fC = false;
       this.setLogicFlags(v, size);
       return v;
     }
 
     const signBefore = v & msbit;
     for (let i = 0; i < count; i++) {
-      this.flagC = (v & msbit) !== 0;
-      this.flagX = this.flagC;
+      this._fC = (v & msbit) !== 0;
+      this._fX = this._fC;
       v = (v << 1) & mask;
       if ((v & msbit) !== signBefore) overflow = true;
     }
 
-    this.flagN = (v & msbit) !== 0;
-    this.flagZ = (v & mask) === 0;
-    this.flagV = overflow;
+    this._fN = (v & msbit) !== 0;
+    this._fZ = (v & mask) === 0;
+    this._fV = overflow;
     return v;
   }
 
@@ -3139,20 +3142,20 @@ export class M68000 {
     let v = val & mask;
 
     if (count === 0) {
-      this.flagC = false;
+      this._fC = false;
       this.setLogicFlags(v, size);
       return v;
     }
 
     for (let i = 0; i < count; i++) {
-      this.flagC = (v & msbit) !== 0;
-      this.flagX = this.flagC;
+      this._fC = (v & msbit) !== 0;
+      this._fX = this._fC;
       v = (v << 1) & mask;
     }
 
-    this.flagN = (v & msbit) !== 0;
-    this.flagZ = (v & mask) === 0;
-    this.flagV = false;
+    this._fN = (v & msbit) !== 0;
+    this._fZ = (v & mask) === 0;
+    this._fV = false;
     return v;
   }
 
@@ -3162,7 +3165,7 @@ export class M68000 {
     let v = val & mask;
 
     if (count === 0) {
-      this.flagC = false;
+      this._fC = false;
       this.setLogicFlags(v, size);
       return v;
     }
@@ -3172,10 +3175,10 @@ export class M68000 {
       v = ((v << 1) | bit) & mask;
     }
 
-    this.flagC = (v & 1) !== 0;
-    this.flagN = (v & msbit) !== 0;
-    this.flagZ = (v & mask) === 0;
-    this.flagV = false;
+    this._fC = (v & 1) !== 0;
+    this._fN = (v & msbit) !== 0;
+    this._fZ = (v & mask) === 0;
+    this._fV = false;
     return v;
   }
 
@@ -3185,7 +3188,7 @@ export class M68000 {
     let v = val & mask;
 
     if (count === 0) {
-      this.flagC = false;
+      this._fC = false;
       this.setLogicFlags(v, size);
       return v;
     }
@@ -3195,10 +3198,10 @@ export class M68000 {
       v = ((v >>> 1) & mask) | (bit ? msbit : 0);
     }
 
-    this.flagC = (v & msbit) !== 0;
-    this.flagN = (v & msbit) !== 0;
-    this.flagZ = (v & mask) === 0;
-    this.flagV = false;
+    this._fC = (v & msbit) !== 0;
+    this._fN = (v & msbit) !== 0;
+    this._fZ = (v & mask) === 0;
+    this._fV = false;
     return v;
   }
 
@@ -3206,12 +3209,12 @@ export class M68000 {
     const mask = size === 1 ? 0xFF : size === 2 ? 0xFFFF : 0xFFFFFFFF;
     const msbit = size === 1 ? 0x80 : size === 2 ? 0x8000 : 0x80000000;
     let v = val & mask;
-    let x = this.flagX ? 1 : 0;
+    let x = this._fX ? 1 : 0;
 
     if (count === 0) {
-      this.flagC = this.flagX;
+      this._fC = this._fX;
       this.setLogicFlags(v, size);
-      this.flagC = this.flagX; // restore, setLogicFlags clears it
+      this._fC = this._fX; // restore, setLogicFlags clears it
       return v;
     }
 
@@ -3221,11 +3224,11 @@ export class M68000 {
       x = outBit;
     }
 
-    this.flagX = x !== 0;
-    this.flagC = x !== 0;
-    this.flagN = (v & msbit) !== 0;
-    this.flagZ = (v & mask) === 0;
-    this.flagV = false;
+    this._fX = x !== 0;
+    this._fC = x !== 0;
+    this._fN = (v & msbit) !== 0;
+    this._fZ = (v & mask) === 0;
+    this._fV = false;
     return v;
   }
 
@@ -3233,12 +3236,12 @@ export class M68000 {
     const mask = size === 1 ? 0xFF : size === 2 ? 0xFFFF : 0xFFFFFFFF;
     const msbit = size === 1 ? 0x80 : size === 2 ? 0x8000 : 0x80000000;
     let v = val & mask;
-    let x = this.flagX ? 1 : 0;
+    let x = this._fX ? 1 : 0;
 
     if (count === 0) {
-      this.flagC = this.flagX;
+      this._fC = this._fX;
       this.setLogicFlags(v, size);
-      this.flagC = this.flagX;
+      this._fC = this._fX;
       return v;
     }
 
@@ -3248,11 +3251,11 @@ export class M68000 {
       x = outBit;
     }
 
-    this.flagX = x !== 0;
-    this.flagC = x !== 0;
-    this.flagN = (v & msbit) !== 0;
-    this.flagZ = (v & mask) === 0;
-    this.flagV = false;
+    this._fX = x !== 0;
+    this._fC = x !== 0;
+    this._fN = (v & msbit) !== 0;
+    this._fZ = (v & mask) === 0;
+    this._fV = false;
     return v;
   }
 
