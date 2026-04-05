@@ -69,8 +69,6 @@ export interface SoundDriverInfo {
 // ── Constants ────────────────────────────────────────────────────────────────
 
 export const VOICE_SIZE = 40;
-/** @deprecated Use VOICE_SIZE instead */
-export const PATCH_SIZE = VOICE_SIZE;
 
 /** YM2151 slot offsets: OP1(M1)=+0, OP2(C1)=+8, OP3(M2)=+16, OP4(C2)=+24 */
 const SLOT_OFFSETS: readonly [number, number, number, number] = [0, 8, 16, 24];

@@ -43,6 +43,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Cached framebuffer Uint32Array view** — Reuse a single Uint32Array view across renderScrollLayer, renderObjects, and renderFrame instead of allocating 3 per frame
 - **Row-scroll tile-based rendering** — Scroll2 row-scroll path refactored from pixel-by-pixel (86K iterations) to tile-based (~26 cols × 224 rows), reducing gfxromBankMapper calls ~24×
 
+### Removed
+- **Dead code cleanup** — Removed `nuked-opm.ts` (2,318 lines) and `ym2151.ts` (1,246 lines), both unused reference implementations replaced by WASM. Removed 8 dead exports, 2 unused imports, internalized 2 exports used only internally
+
 ### Changed
 - **Mono-palette sprite capture** — `groupCharacter()` flood-fill restricted to the target palette only. Eliminates parasites from adjacent sprites/decor of other palettes. Cleaner captures, simpler code
 - **Capture resumption** — Re-clicking a sprite whose palette was already captured resumes the existing group instead of creating a new one. New poses append live to the same card

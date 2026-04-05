@@ -12,8 +12,8 @@
  *   VBlank IRQ     : level 2 on the 68000 every frame
  */
 
-import { M68000, CpuState } from "./cpu/m68000";
-import { Z80, Z80State } from "./cpu/z80";
+import { M68000 } from "./cpu/m68000";
+import { Z80 } from "./cpu/z80";
 import { Bus } from "./memory/bus";
 import { Z80Bus } from "./memory/z80-bus";
 import { Z80BusQSound } from "./memory/z80-bus-qsound";

@@ -14,7 +14,7 @@ export interface CPS1GameEntry {
   parent: string;
 }
 
-export const CPS1_GAME_CATALOG: CPS1GameEntry[] = [
+const CPS1_GAME_CATALOG: CPS1GameEntry[] = [
   { name: '1941', description: '1941: Counter Attack (World 900227)', parent: '' },
   { name: '1941j', description: '1941: Counter Attack (Japan)', parent: '1941' },
   { name: '1941r1', description: '1941: Counter Attack (World)', parent: '1941' },

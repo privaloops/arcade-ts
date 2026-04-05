@@ -13,34 +13,6 @@ import { gfxromBankMapper } from '../video/cps1-video';
 import type { CPS1Video } from '../video/cps1-video';
 
 // ---------------------------------------------------------------------------
-// Reverse bank mapper
-// ---------------------------------------------------------------------------
-
-/**
- * Build a reverse mapping: mappedCode → rawCode for a given GFX type.
- * Scans all possible raw codes and records where they map to.
- */
-export function buildReverseMap(
-  gfxType: number,
-  maxRawCode: number,
-  video: CPS1Video,
-): Map<number, number> {
-  const mapperTable = video.getMapperTable();
-  const bankSizes = video.getBankSizes();
-  const bankBases = video.getBankBases();
-  const reverse = new Map<number, number>();
-
-  for (let raw = 0; raw < maxRawCode; raw++) {
-    const mapped = gfxromBankMapper(gfxType, raw, mapperTable, bankSizes, bankBases);
-    if (mapped !== -1 && !reverse.has(mapped)) {
-      reverse.set(mapped, raw);
-    }
-  }
-
-  return reverse;
-}
-
-// ---------------------------------------------------------------------------
 // Free tile scanner
 // ---------------------------------------------------------------------------
 

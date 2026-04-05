@@ -67,14 +67,6 @@ function autoSaveKey(gameName: string): string {
 // Public API
 // ---------------------------------------------------------------------------
 
-/** Check if an auto-save exists for this game */
-export async function hasAutoSave(gameName: string): Promise<boolean> {
-  const db = await openDb();
-  const data = await idbGet(db, autoSaveKey(gameName));
-  db.close();
-  return data !== undefined;
-}
-
 /** Load auto-save data (returns the raw JSON string, or null) */
 export async function loadAutoSave(gameName: string): Promise<string | null> {
   const db = await openDb();

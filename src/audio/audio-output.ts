@@ -25,12 +25,10 @@ import { LinearResampler } from './resampler';
 export const RING_BUFFER_SAMPLES = 12288;
 
 /** Byte offsets inside the SharedArrayBuffer */
-export const SAB_WRITE_PTR_OFFSET = 0; // Int32, in samples
-export const SAB_READ_PTR_OFFSET = 4; // Int32, in samples
 export const SAB_DATA_OFFSET = 8; // Float32 data starts here
 
 /** Total SharedArrayBuffer size in bytes */
-export const SAB_BYTE_LENGTH = SAB_DATA_OFFSET + RING_BUFFER_SAMPLES * 2 * 4;
+const SAB_BYTE_LENGTH = SAB_DATA_OFFSET + RING_BUFFER_SAMPLES * 2 * 4;
 
 // ---------------------------------------------------------------------------
 // Worklet processor source (inlined as string, loaded via Blob URL)
