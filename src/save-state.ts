@@ -127,6 +127,15 @@ export function loadFromSlot(slot: number): SaveState | null {
     const raw = JSON.parse(json) as Record<string, unknown>;
     if ((raw["version"] as number) !== SAVE_STATE_VERSION) return null;
 
+    // Validate required fields before casting
+    if (typeof raw["gameName"] !== 'string' ||
+        typeof raw["timestamp"] !== 'number' ||
+        typeof raw["workRam"] !== 'string' ||
+        typeof raw["vram"] !== 'string' ||
+        !raw["m68k"] || !raw["z80"]) {
+      return null;
+    }
+
     // Deserialize CpuState
     raw["m68k"] = deserializeCpuState(raw["m68k"] as Record<string, unknown>);
 

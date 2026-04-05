@@ -360,7 +360,6 @@ export async function loadRomFromZip(file: File | ArrayBuffer): Promise<RomSet> 
     if (dspFile) {
       // File is 24KB but only first 8KB (4096 x 16-bit words) is used
       qsoundDspRom = dspFile.subarray(0, 0x2000);
-      console.log(`[ROM] Loaded QSound DSP ROM (${qsoundDspRom.length} bytes)`);
     } else {
       console.warn('[ROM] QSound game but dl-1425.bin not found in ZIP');
     }

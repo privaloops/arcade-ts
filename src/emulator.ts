@@ -123,10 +123,8 @@ export class Emulator {
     // Try WebGL2 first, fallback to Canvas 2D
     try {
       this.renderer = new WebGLRenderer(canvas);
-      console.log('Using WebGL2 renderer');
     } catch {
       this.renderer = new Renderer(canvas);
-      console.log('Using Canvas 2D renderer (WebGL2 unavailable)');
     }
     this.input = new InputManager();
     this.framebuffer = new Uint8Array(FRAMEBUFFER_SIZE);
@@ -432,7 +430,11 @@ export class Emulator {
     // Get audio worker state (Z80 + Z80Bus + OKI)
     let workerState: Record<string, unknown> | null = null;
     if (this.audioWorkerReady && this.audioWorker) {
-      workerState = await this.getWorkerState();
+      try {
+        workerState = await this.getWorkerState();
+      } catch {
+        console.warn('Failed to get audio worker state for save');
+      }
     }
 
     const state: SaveState = {
@@ -458,12 +460,17 @@ export class Emulator {
     return saveToSlot(slot, state);
   }
 
-  /** Request the audio worker's internal state. */
+  /** Request the audio worker's internal state (with 2s timeout). */
   private getWorkerState(): Promise<Record<string, unknown>> {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       const prev = this.audioWorker!.onmessage;
+      const timeout = setTimeout(() => {
+        this.audioWorker!.onmessage = prev;
+        reject(new Error('Audio worker state request timed out'));
+      }, 2000);
       this.audioWorker!.onmessage = (e) => {
         if (e.data.type === 'state') {
+          clearTimeout(timeout);
           this.audioWorker!.onmessage = prev;
           resolve(e.data.state as Record<string, unknown>);
         }
@@ -761,7 +768,6 @@ export class Emulator {
           if (e.data.type === 'ready') {
             clearTimeout(timeout);
             this.audioWorkerReady = true;
-            console.log('Audio worker ready — Z80+YM2151+OKI running off main thread');
             resolve();
           }
         };

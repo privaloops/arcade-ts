@@ -1402,8 +1402,6 @@ export class CPS1Video {
       bank: newBankIdx,
     });
 
-    console.log(`[EXPAND] extraBytes=${extraBytes}, tilesNeeded=${tilesNeeded}, shift=${shift}, bankSizeShifted=${bankSizeShifted}, romBytes=${romBytes}. GFX ROM: ${oldSize} → ${newRom.length}. Bank ${newBankIdx}: range=${rangeStart}-${rangeEnd}`);
-
     return newRom;
   }
 

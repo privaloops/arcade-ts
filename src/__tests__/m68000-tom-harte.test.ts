@@ -197,7 +197,13 @@ try {
     .filter(f => f.endsWith('.json'))
     .sort();
 } catch {
-  // Test directory doesn't exist — skip
+  // Test directory doesn't exist
+}
+
+if (testFiles.length === 0) {
+  it('M68000 Tom Harte fixtures must be present', () => {
+    throw new Error(`No test vectors found in ${TEST_DIR}. Run: git submodule update --init`);
+  });
 }
 
 for (const file of testFiles) {
