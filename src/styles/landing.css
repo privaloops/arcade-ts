@@ -301,69 +301,6 @@ video.step-media {
   letter-spacing: 0.1em;
 }
 
-/* ── Features ── */
-.features {
-  max-width: var(--max-width);
-  margin: 0 auto;
-  padding: 80px 24px;
-}
-
-.features h2 {
-  text-align: center;
-  font-size: 2rem;
-  font-weight: 700;
-  margin-bottom: 64px;
-}
-
-.feature {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 48px;
-  align-items: center;
-  margin-bottom: 80px;
-}
-
-.feature--reverse {
-  direction: rtl;
-}
-
-.feature--reverse > * {
-  direction: ltr;
-}
-
-.feature-text h3 {
-  font-size: 1.4rem;
-  font-weight: 700;
-  margin-bottom: 12px;
-}
-
-.feature-text p {
-  font-size: 0.95rem;
-  color: var(--color-text-muted);
-  line-height: 1.7;
-}
-
-/* ── GIF placeholders ── */
-.gif-placeholder {
-  width: 100%;
-  aspect-ratio: 16 / 10;
-  background: var(--color-bg-card);
-  border: 1px solid var(--color-border);
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.gif-placeholder::after {
-  content: attr(data-label);
-  font-family: var(--font-mono);
-  font-size: 0.85rem;
-  color: var(--color-text-dim);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-}
-
 /* ── Architecture ── */
 .architecture {
   max-width: var(--max-width);
@@ -620,15 +557,6 @@ video.step-media {
   .workflow-step {
     grid-template-columns: 1fr;
     gap: 24px;
-  }
-
-  .feature {
-    grid-template-columns: 1fr;
-    gap: 24px;
-  }
-
-  .feature--reverse {
-    direction: ltr;
   }
 
   .arch-grid {
