@@ -22,6 +22,7 @@ import { buildScrollSets, type ScrollSet } from './scroll-capture';
 import { CaptureManager } from './capture-session';
 import { SheetViewer, type SheetViewerHost } from './sheet-viewer';
 import { setTooltip } from '../ui/tooltip';
+import { openColorPicker } from './color-picker';
 import { createStatusBar, setStatus } from '../ui/status-bar';
 
 // ---------------------------------------------------------------------------
@@ -1148,168 +1149,9 @@ export class SpriteEditorUI {
     this.exportContainer.style.display = 'none';
   }
 
-  private openColorPicker(colorIndex: number): void {
-    const palette = this.editor.getCurrentPalette();
-    const [r, g, b] = palette[colorIndex] ?? [0, 0, 0];
-    const isTransparent = colorIndex === 15;
-
-    // Remove any existing color dialog
-    this.paletteContainer?.querySelector('.edit-color-dialog')?.remove();
-
-    const dialog = el('div', 'edit-color-dialog') as HTMLDivElement;
-
-    // Color input (visible, always shown)
-    const input = document.createElement('input');
-    input.type = 'color';
-    input.value = `#${hex2(r)}${hex2(g)}${hex2(b)}`;
-    input.className = 'edit-color-input';
-
-    // Transparent checkbox
-    const transLabel = el('label', 'edit-color-trans-label') as HTMLLabelElement;
-    const transCb = document.createElement('input');
-    transCb.type = 'checkbox';
-    transCb.checked = isTransparent;
-    transLabel.append(transCb, ' Transparent');
-    setTooltip(transLabel, 'Mark this color index as transparent');
-
-    // Nuances checkbox (hue shift similar colors)
-    const nuancesLabel = el('label', 'edit-color-trans-label') as HTMLLabelElement;
-    const nuancesCb = document.createElement('input');
-    nuancesCb.type = 'checkbox';
-    nuancesCb.checked = false;
-    nuancesLabel.append(nuancesCb, ' Nuances');
-    setTooltip(nuancesLabel, 'Hue-shift all similar colors together (or selected nuance group)');
-
-    // Reset button
-    const resetBtn = el('button', 'edit-color-reset-btn') as HTMLButtonElement;
-    resetBtn.textContent = 'Reset';
-    setTooltip(resetBtn, 'Reset palette to original ROM colors');
-
-    // Saturation slider
-    const satLabel = el('label', 'edit-color-sat-label') as HTMLLabelElement;
-    satLabel.textContent = 'Saturation';
-    const satSlider = document.createElement('input');
-    satSlider.type = 'range';
-    satSlider.min = '0';
-    satSlider.max = '200';
-    satSlider.value = '100';
-    satSlider.className = 'edit-color-sat-slider';
-    satLabel.appendChild(satSlider);
-
-    satLabel.appendChild(resetBtn);
-    dialog.append(input, transLabel, nuancesLabel, satLabel);
-    this.paletteContainer?.appendChild(dialog);
-
-    // Snapshot original RGB for reset
-    const origRgb = palette.map(([cr, cg, cb]) => [cr, cg, cb] as [number, number, number]);
-
-    // Store original palette HSL for hue shift calculation
-    const origHsl = palette.map(([cr, cg, cb]) => rgbToHsl(cr, cg, cb));
-    const [origH] = origHsl[colorIndex] ?? [0, 0, 0];
-    const HUE_TOLERANCE = 30 / 360; // ±30°
-
-    input.addEventListener('input', () => {
-      const hex = input.value;
-      const nr = parseInt(hex.slice(1, 3), 16);
-      const ng = parseInt(hex.slice(3, 5), 16);
-      const nb = parseInt(hex.slice(5, 7), 16);
-
-      if (nuancesCb.checked) {
-        const [newH] = rgbToHsl(nr, ng, nb);
-        const hueShift = newH - origH;
-
-        // Use manually selected nuance group if any, otherwise auto-detect by hue
-        const targets = this.nuanceGroup.size > 0
-          ? this.nuanceGroup
-          : new Set(Array.from({ length: 15 }, (_, i) => i).filter(i => {
-              const [h, s] = origHsl[i] ?? [0, 0, 0];
-              if (s < 0.05) return false;
-              const dist = Math.min(Math.abs(h - origH), 1 - Math.abs(h - origH));
-              return dist <= HUE_TOLERANCE;
-            }));
-
-        for (const i of targets) {
-          const [h, s, l] = origHsl[i] ?? [0, 0, 0];
-          const shiftedH = ((h + hueShift) % 1 + 1) % 1;
-          const [sr, sg, sb] = hslToRgb(shiftedH, s, l);
-          this.editor.editPaletteColor(i, sr, sg, sb);
-        }
-      } else {
-        this.editor.editPaletteColor(colorIndex, nr, ng, nb);
-      }
-
-      // Update swatch colors in-place (without rebuilding DOM)
-      const updatedPalette = this.editor.getCurrentPalette();
-      const swatches = this.paletteContainer?.querySelectorAll('.edit-swatch');
-      if (swatches) {
-        for (let i = 0; i < Math.min(swatches.length, 15); i++) {
-          const sw = swatches[i] as HTMLDivElement;
-          const [ur, ug, ub] = updatedPalette[i] ?? [0, 0, 0];
-          sw.style.backgroundColor = `rgb(${ur},${ug},${ub})`;
-        }
-      }
-    });
-
-    transCb.addEventListener('change', () => {
-      if (transCb.checked) {
-        this.editor.replaceColorWithTransparent(colorIndex);
-      } else {
-        // Undo transparency: replace pen 15 pixels back to this color index
-        this.editor.replaceTransparentWithColor(colorIndex);
-      }
-      this.refreshPalette();
-      // Re-open dialog to keep editing
-      this.paletteContainer?.appendChild(dialog);
-      transCb.checked = transCb.checked; // preserve state
-    });
-
-    satSlider.addEventListener('input', () => {
-      const factor = parseInt(satSlider.value, 10) / 100; // 0 = grayscale, 1 = original, 2 = boosted
-
-      // Apply saturation to selected nuance group or all colors
-      const targets = this.nuanceGroup.size > 0
-        ? this.nuanceGroup
-        : new Set(Array.from({ length: 15 }, (_, i) => i));
-
-      for (const i of targets) {
-        const [h, s, l] = origHsl[i] ?? [0, 0, 0];
-        const newS = Math.min(1, s * factor);
-        const [sr, sg, sb] = hslToRgb(h, newS, l);
-        this.editor.editPaletteColor(i, sr, sg, sb);
-      }
-
-      // Update swatches
-      const updatedPalette = this.editor.getCurrentPalette();
-      const swatches = this.paletteContainer?.querySelectorAll('.edit-swatch');
-      if (swatches) {
-        for (let i = 0; i < Math.min(swatches.length, 15); i++) {
-          const sw = swatches[i] as HTMLDivElement;
-          const [ur, ug, ub] = updatedPalette[i] ?? [0, 0, 0];
-          sw.style.backgroundColor = `rgb(${ur},${ug},${ub})`;
-        }
-      }
-    });
-
-    resetBtn.addEventListener('click', () => {
-      satSlider.value = '100';
-      for (let i = 0; i < 15; i++) {
-        const [or, og, ob] = origRgb[i] ?? [0, 0, 0];
-        this.editor.editPaletteColor(i, or, og, ob);
-      }
-      // Update swatches
-      const swatches = this.paletteContainer?.querySelectorAll('.edit-swatch');
-      if (swatches) {
-        for (let i = 0; i < Math.min(swatches.length, 15); i++) {
-          const sw = swatches[i] as HTMLDivElement;
-          const [or, og, ob] = origRgb[i] ?? [0, 0, 0];
-          sw.style.backgroundColor = `rgb(${or},${og},${ob})`;
-        }
-      }
-      // Reset color input to original color
-      const [or, og, ob] = origRgb[colorIndex] ?? [0, 0, 0];
-      input.value = `#${hex2(or)}${hex2(og)}${hex2(ob)}`;
-    });
-
+  private openColorPickerDialog(colorIndex: number): void {
+    if (!this.paletteContainer) return;
+    openColorPicker(this.editor, this.paletteContainer, colorIndex, this.nuanceGroup);
   }
 
   refreshInfoBar(): void {

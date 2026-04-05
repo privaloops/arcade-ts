@@ -43,6 +43,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Cached framebuffer Uint32Array view** — Reuse a single Uint32Array view across renderScrollLayer, renderObjects, and renderFrame instead of allocating 3 per frame
 - **Row-scroll tile-based rendering** — Scroll2 row-scroll path refactored from pixel-by-pixel (86K iterations) to tile-based (~26 cols × 224 rows), reducing gfxromBankMapper calls ~24×
 
+### Changed
+- **Color picker extracted** — `openColorPicker` (162 lines) moved from `SpriteEditorUI` class to standalone `color-picker.ts` module. Reduces `sprite-editor-ui.ts` from 1,521 to 1,363 lines
+- **`loadRom` split** — 122-line method split into `loadQSoundAudio()` and `loadStandardAudio()` private methods in `emulator.ts`
+
 ### Fixed
 - **Save state worker timeout** — `getWorkerState()` now rejects after 2s instead of hanging forever if the audio worker doesn't respond. Save state proceeds without audio state on timeout
 - **Save state validation** — `loadFromSlot()` validates required fields before casting, preventing silent crashes on corrupted localStorage data

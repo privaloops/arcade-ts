@@ -217,85 +217,9 @@ export class Emulator {
     );
 
     if (romSet.qsound) {
-      // ── QSound path (CPS1.5: Dino, Punisher, WoF, Slammasters) ──────
-
-      // 1. Init QSound WASM
-      await initQSoundWasm();
-      this.qsound = new QSoundWasm();
-      this.qsound.reset();
-
-      // 2. Load DSP ROM and sample ROM
-      if (romSet.qsoundDspRom) {
-        this.qsound.loadDspRom(romSet.qsoundDspRom);
-      }
-      this.qsound.loadSampleRom(romSet.okiRom); // "oki" field is QSound PCM data
-
-      // 3. Kabuki-decrypt the Z80 audio ROM
-      const audioRomCopy = new Uint8Array(romSet.audioRom);
-      const opcodeRom = decodeKabuki(audioRomCopy, romSet.name);
-
-      // 4. Create QSound Z80 bus and wire it
-      this.z80BusQSound = new Z80BusQSound();
-      this.z80BusQSound.loadAudioRom(audioRomCopy); // data-decoded
-      if (opcodeRom) {
-        this.z80BusQSound.loadOpcodeRom(opcodeRom);
-      }
-
-      // Wire QSound DSP callbacks
-      const qs = this.qsound;
-      this.z80BusQSound.setQsoundWriteCallback((offset, data) => {
-        qs.write(offset, data);
-      });
-      this.z80BusQSound.setQsoundReadCallback(() => {
-        return qs.read();
-      });
-
-      // 5. Switch Z80 to QSound bus
-      this.z80.setBus(this.z80BusQSound);
-
-      // 6. Wire shared RAM and EEPROM into 68K bus
-      this.bus.setQsoundSharedRam(
-        this.z80BusQSound.getSharedRam1(),
-        this.z80BusQSound.getSharedRam2(),
-      );
-      const eeprom = new EEPROM93C46();
-      this.bus.setEeprom(eeprom);
-
-      // 7. Reset QSound IRQ accumulator
-      this.qsIrqAccum = 0;
-      this.oki6295 = null;
-
+      await this.loadQSoundAudio(romSet);
     } else {
-      // ── Standard CPS1 path (YM2151 + OKI6295) ───────────────────────
-
-      // Clear QSound state from previous load
-      this.qsound = null;
-      this.z80BusQSound = null;
-      this.bus.setQsoundSharedRam(null, null);
-
-      // Initialize Nuked OPM WASM
-      await initOPMWasm();
-      if (!this.ym2151) {
-        this.ym2151 = new NukedOPMWasm();
-        this.ym2151.setTimerCallback(() => { this.z80.setIrqLine(true); });
-        this.ym2151.setIrqClearCallback(() => { this.z80.setIrqLine(false); });
-        this.ym2151.setExternalTimerMode(true);
-      }
-      this.ym2151.reset();
-      this.z80Bus.loadAudioRom(romSet.audioRom);
-
-      // Switch Z80 back to standard bus (in case previous game was QSound)
-      this.z80.setBus(this.z80Bus);
-
-      // Create OKI6295 with its ROM data and wire to Z80 bus
-      this.okiRom = romSet.okiRom;
-      this.oki6295 = new OKI6295(romSet.okiRom);
-      this.z80Bus.setOkiWriteCallback((value: number) => {
-        this.oki6295!.write(value);
-      });
-
-      // Try to create audio worker for off-main-thread audio processing
-      await this.initAudioWorker(romSet.audioRom, romSet.okiRom);
+      await this.loadStandardAudio(romSet);
     }
 
     this.romLoaded = true;
@@ -305,6 +229,71 @@ export class Emulator {
     // so VBlank IRQs cannot corrupt the initialization.
     this.m68000.reset();
     this.z80.reset();
+  }
+
+  /** QSound audio path (CPS1.5: Dino, Punisher, WoF, Slammasters) */
+  private async loadQSoundAudio(romSet: RomSet): Promise<void> {
+    await initQSoundWasm();
+    this.qsound = new QSoundWasm();
+    this.qsound.reset();
+
+    if (romSet.qsoundDspRom) {
+      this.qsound.loadDspRom(romSet.qsoundDspRom);
+    }
+    this.qsound.loadSampleRom(romSet.okiRom);
+
+    // Kabuki-decrypt the Z80 audio ROM
+    const audioRomCopy = new Uint8Array(romSet.audioRom);
+    const opcodeRom = decodeKabuki(audioRomCopy, romSet.name);
+
+    this.z80BusQSound = new Z80BusQSound();
+    this.z80BusQSound.loadAudioRom(audioRomCopy);
+    if (opcodeRom) {
+      this.z80BusQSound.loadOpcodeRom(opcodeRom);
+    }
+
+    const qs = this.qsound;
+    this.z80BusQSound.setQsoundWriteCallback((offset, data) => { qs.write(offset, data); });
+    this.z80BusQSound.setQsoundReadCallback(() => qs.read());
+
+    this.z80.setBus(this.z80BusQSound);
+
+    this.bus.setQsoundSharedRam(
+      this.z80BusQSound.getSharedRam1(),
+      this.z80BusQSound.getSharedRam2(),
+    );
+    this.bus.setEeprom(new EEPROM93C46());
+
+    this.qsIrqAccum = 0;
+    this.oki6295 = null;
+  }
+
+  /** Standard CPS1 audio path (YM2151 + OKI6295) */
+  private async loadStandardAudio(romSet: RomSet): Promise<void> {
+    // Clear QSound state from previous load
+    this.qsound = null;
+    this.z80BusQSound = null;
+    this.bus.setQsoundSharedRam(null, null);
+
+    await initOPMWasm();
+    if (!this.ym2151) {
+      this.ym2151 = new NukedOPMWasm();
+      this.ym2151.setTimerCallback(() => { this.z80.setIrqLine(true); });
+      this.ym2151.setIrqClearCallback(() => { this.z80.setIrqLine(false); });
+      this.ym2151.setExternalTimerMode(true);
+    }
+    this.ym2151.reset();
+    this.z80Bus.loadAudioRom(romSet.audioRom);
+
+    this.z80.setBus(this.z80Bus);
+
+    this.okiRom = romSet.okiRom;
+    this.oki6295 = new OKI6295(romSet.okiRom);
+    this.z80Bus.setOkiWriteCallback((value: number) => {
+      this.oki6295!.write(value);
+    });
+
+    await this.initAudioWorker(romSet.audioRom, romSet.okiRom);
   }
 
   // ── Emulation control ─────────────────────────────────────────────────────
