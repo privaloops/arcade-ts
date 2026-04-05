@@ -43,8 +43,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Cached framebuffer Uint32Array view** — Reuse a single Uint32Array view across renderScrollLayer, renderObjects, and renderFrame instead of allocating 3 per frame
 - **Row-scroll tile-based rendering** — Scroll2 row-scroll path refactored from pixel-by-pixel (86K iterations) to tile-based (~26 cols × 224 rows), reducing gfxromBankMapper calls ~24×
 
+### Fixed
+- **Save state worker timeout** — `getWorkerState()` now rejects after 2s instead of hanging forever if the audio worker doesn't respond. Save state proceeds without audio state on timeout
+- **Save state validation** — `loadFromSlot()` validates required fields before casting, preventing silent crashes on corrupted localStorage data
+- **Tom Harte test fail-safe** — M68000 and Z80 Tom Harte tests now fail explicitly if fixtures are missing instead of silently passing with zero tests
+
 ### Removed
 - **Dead code cleanup** — Removed `nuked-opm.ts` (2,318 lines) and `ym2151.ts` (1,246 lines), both unused reference implementations replaced by WASM. Removed 8 dead exports, 2 unused imports, internalized 2 exports used only internally
+- **Production console.log** — Removed 6 informational logs from runtime paths (renderer init, audio ready, ROM loaded, GFX expand, mute/solo)
 
 ### Changed
 - **Mono-palette sprite capture** — `groupCharacter()` flood-fill restricted to the target palette only. Eliminates parasites from adjacent sprites/decor of other palettes. Cleaner captures, simpler code

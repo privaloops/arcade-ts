@@ -253,7 +253,7 @@ function onRomLoaded(gameName: string): void {
 // ── Audio init (requires user gesture) ───────────────────────────────────────
 
 const initAudio = (): void => {
-  emulator.initAudio().then(() => console.log("Audio initialized successfully"))
+  emulator.initAudio()
     .catch((e) => console.error("Audio init failed:", e));
   window.removeEventListener("click", initAudio);
   window.removeEventListener("keydown", initAudio);
