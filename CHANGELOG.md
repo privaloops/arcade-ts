@@ -47,6 +47,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **CPS-B multiplication tests** — 5 tests covering the hardware multiply used by SF2CE/SF2HF (factor writes, result reads, edge cases 0×max, max×max)
 - **M68000 interrupt tests** — 5 tests covering IRQ level masking, NMI (level 7 never masked), one-shot vs level-triggered, irqAckCallback
 - **`inspectScrollAt` tests** — 5 tests covering scroll2 tile lookup, out-of-bounds, invalid layer, transparent pixel handling, `boundsOnly` mode
+- **E2E button + shortcut tests** — 11 new tests: click pause/mute/save/load/config/step/close buttons, F/F9/Ctrl+S keyboard shortcuts, pseudo-fullscreen toggle
+
+### Fixed
+- **E2E selector 16.15** — `.ctrl-btn` → `.layer-import-btn` (broken after layer panel refactor)
+- **E2E test 10.4** — Rewrote dead layer toggle test to use `.layer-eye-btn` in layer panel (was silently skipping)
 
 ### Changed
 - **Color picker extracted** — `openColorPicker` (162 lines) moved from `SpriteEditorUI` class to standalone `color-picker.ts` module. Reduces `sprite-editor-ui.ts` from 1,521 to 1,363 lines

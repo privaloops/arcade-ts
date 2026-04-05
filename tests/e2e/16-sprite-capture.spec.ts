@@ -231,8 +231,7 @@ test.describe('Phase 16 — Sprite capture workflow', () => {
   test('16.15 Import .aseprite button exists in layer panel', async ({ page }) => {
     await page.keyboard.press('e');
 
-    // The import button is a .ctrl-btn with "Import .aseprite" text
-    const importBtn = page.locator('#layer-panel .ctrl-btn').filter({ hasText: 'Import .aseprite' });
+    const importBtn = page.locator('#layer-panel .layer-import-btn');
     await expect(importBtn).toBeAttached();
     await expect(importBtn).toBeVisible();
   });

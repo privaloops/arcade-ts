@@ -59,30 +59,30 @@ test.describe('Phase 10 — Deep verification', () => {
     expect(isUnmuted).toBe(true);
   });
 
-  test('10.4 layer toggle disables layer in debug panel', async ({ page }) => {
-    // Uncheck the first layer checkbox (scroll1)
-    const firstCb = page.locator('.dbg-layer-row input[type="checkbox"]:not(.dbg-grid-cb)').first();
-    // The debug panel may not have layer rows if no game is loaded with layers visible
-    const count = await firstCb.count();
+  test('10.4 layer eye toggle in layer panel', async ({ page }) => {
+    // Open editor to get the layer panel
+    await page.keyboard.press('e');
+    await expect(page.locator('#layer-panel')).toHaveClass(/open/);
+
+    // Find layer eye buttons (one per HW layer)
+    const eyeBtns = page.locator('#layer-panel .layer-eye-btn');
+    const count = await eyeBtns.count();
     if (count === 0) {
       test.skip();
       return;
     }
 
-    await firstCb.uncheck();
+    // Toggle first eye button off (should hide layer)
+    const firstEye = eyeBtns.first();
+    const textBefore = await firstEye.textContent();
+    await firstEye.click();
+    const textAfter = await firstEye.textContent();
+    // The eye icon should change (e.g., "👁" → "—" or similar)
+    expect(textAfter).not.toBe(textBefore);
 
-    const layerDisabled = await page.evaluate(() => {
-      const cb = document.querySelector('.dbg-layer-row input[type="checkbox"]:not(.dbg-grid-cb)') as HTMLInputElement | null;
-      return cb !== null && !cb.checked;
-    });
-    expect(layerDisabled).toBe(true);
-
-    // Re-check and verify it's enabled again
-    await firstCb.check();
-    const layerReEnabled = await page.evaluate(() => {
-      const cb = document.querySelector('.dbg-layer-row input[type="checkbox"]:not(.dbg-grid-cb)') as HTMLInputElement | null;
-      return cb !== null && cb.checked;
-    });
-    expect(layerReEnabled).toBe(true);
+    // Toggle back on
+    await firstEye.click();
+    const textRestored = await firstEye.textContent();
+    expect(textRestored).toBe(textBefore);
   });
 });
