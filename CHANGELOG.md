@@ -60,6 +60,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ### Removed
 - **Dead code cleanup** — Removed `nuked-opm.ts` (2,318 lines) and `ym2151.ts` (1,246 lines), both unused reference implementations replaced by WASM. Removed 8 dead exports, 2 unused imports, internalized 2 exports used only internally
 - **Production console.log** — Removed 6 informational logs from runtime paths (renderer init, audio ready, ROM loaded, GFX expand, mute/solo)
+- **CSS dead code** — Removed ~360 lines of orphan CSS classes (1,412 → 1,052 lines, -25%): unused debug panel viewers, sprite analyzer UI, variant gallery, head section, layer list items, synth FM operators, sprite sheet grid, edit tools/neighbors/frame
 
 ### Changed
 - **Mono-palette sprite capture** — `groupCharacter()` flood-fill restricted to the target palette only. Eliminates parasites from adjacent sprites/decor of other palettes. Cleaner captures, simpler code
