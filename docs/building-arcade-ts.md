@@ -222,7 +222,7 @@ The audio output uses an **AudioWorklet** reading from a **SharedArrayBuffer** r
 |--------|-------|
 | Lines of TypeScript | ~20,000 |
 | Games supported | 32 fully playable, 8 with known issues |
-| CPU usage | ~33% on a modern Mac |
+| CPU usage | ~22% on a modern Mac (main ~11%, audio worker ~11%) |
 | M68000 test vectors | 16,800 |
 | Z80 test vectors | 117,600 |
 | YM2151 implementations | 3 (custom → Nuked OPM TS → Nuked OPM WASM) |

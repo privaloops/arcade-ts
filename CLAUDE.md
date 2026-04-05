@@ -167,10 +167,9 @@ tests/
 
 | Component | CPU % | Notes |
 |-----------|-------|-------|
-| M68000 | ~25% | TS interpreter, ~168K instructions/frame |
-| Z80 + OPM WASM | ~8% | Autonomous Web Worker |
-| Video (CPU decode + WebGL2) | ~3% | Tile decode + texture upload |
-| **Total** | **~33%** | Mac, Chrome |
+| Main thread (M68000 + video) | ~11% | TS interpreter, median frame 0.23ms, P95 2.2ms |
+| Audio Worker (Z80 + OPM WASM + OKI) | ~11% | Autonomous Web Worker, avg 0.39ms |
+| **Total** | **~22%** | Mac, Chrome (April 2026 audit) |
 
 ## Supported games
 

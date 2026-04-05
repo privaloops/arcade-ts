@@ -72,7 +72,7 @@ The audio subsystem runs in a dedicated **Web Worker** with its own Z80+YM2151+O
 - **Autofire** per button
 - **QSound** support (Cadillacs & Dinosaurs, The Punisher, Warriors of Fate)
 - **Fullscreen** — double-click or double-tap
-- **~33% CPU** on a modern machine (M68K ~25%, Z80+audio ~8%)
+- **~22% CPU** on a modern machine (main thread ~11%, audio worker ~11%)
 
 ## ROM files
 
