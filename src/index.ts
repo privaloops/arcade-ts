@@ -4,6 +4,7 @@
  * Wires up DOM elements, creates the Emulator, and initializes UI modules.
  */
 
+import { checkBetaAccess } from "./beta-gate";
 import { Emulator } from "./emulator";
 import { DEFAULT_GP_MAPPING, DEFAULT_P1_MAPPING, DEFAULT_P2_MAPPING, type AutofireKey } from "./input/input";
 import { DebugPanel } from "./debug/debug-panel";
@@ -23,6 +24,8 @@ import { exportSaveFile, parseSaveFile, applySaveFile } from "./editor/sprixe-sa
 import { loadAutoSave, clearAutoSave, scheduleAutoSave } from "./editor/sprixe-autosave";
 import { showToast } from "./ui/toast";
 import { setTooltip } from "./ui/tooltip";
+
+checkBetaAccess();
 
 // ── DOM lookups ──────────────────────────────────────────────────────────────
 
