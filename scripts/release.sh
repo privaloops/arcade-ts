@@ -100,9 +100,10 @@ pass "Committed and tagged v$VERSION"
 
 step "Push"
 git push origin main
+git push origin main:beta
 git push origin "v$VERSION"
 
-pass "Pushed to origin"
+pass "Pushed to origin (main + beta + tag)"
 
 # ── 6. GitHub Release ──
 
