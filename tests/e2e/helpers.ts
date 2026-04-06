@@ -17,12 +17,6 @@ export async function loadTestRom(page: Page): Promise<void> {
   const buffer = readFileSync(FIXTURE_PATH);
   const b64 = buffer.toString('base64');
 
-  // Bypass beta gate (dismiss overlay + set token for future navigations)
-  await page.evaluate(() => {
-    sessionStorage.setItem('beta_access', '877429c0');
-    document.getElementById('beta-gate')?.remove();
-  });
-
   // Wait for the app JS to fully initialize (emulator instance on window)
   await page.waitForFunction(
     () => (window as unknown as Record<string, unknown>).__emu !== undefined,
