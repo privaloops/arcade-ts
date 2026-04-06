@@ -1,15 +1,15 @@
 /**
- * ROMstudio Auto-Save — IndexedDB persistence with debounce.
+ * Sprixe Auto-Save — IndexedDB persistence with debounce.
  *
- * One auto-save slot per game. Stores the same JSON structure as .romstudio files.
+ * One auto-save slot per game. Stores the same JSON structure as .sprixe files.
  * Debounced at 2 seconds after the last modification.
  */
 
 import type { RomStore } from '../rom-store';
 import type { CapturedPose } from './sprite-analyzer';
-import { buildSaveData } from './romstudio-save';
+import { buildSaveData } from './sprixe-save';
 
-const DB_NAME = 'romstudio';
+const DB_NAME = 'sprixe';
 const DB_VERSION = 1;
 const STORE_NAME = 'autosave';
 const DEBOUNCE_MS = 2000;
@@ -60,7 +60,7 @@ function idbDelete(db: IDBDatabase, key: string): Promise<void> {
 }
 
 function autoSaveKey(gameName: string): string {
-  return `romstudio-autosave-${gameName}`;
+  return `sprixe-autosave-${gameName}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -113,7 +113,7 @@ export function scheduleAutoSave(romStore: RomStore, poses: CapturedPose[]): voi
     if (gfx + prg + oki === 0) return;
     const json = JSON.stringify(data);
     writeAutoSave(romStore.name, json).catch(err => {
-      console.warn('[ROMstudio] Auto-save failed:', err);
+      console.warn('[Sprixe] Auto-save failed:', err);
     });
   }, DEBOUNCE_MS);
 }

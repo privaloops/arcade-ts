@@ -389,7 +389,7 @@ L'approche : 5 extractions atomiques, chacune validee par build + 903 tests unit
 
 **Resultat intermediaire** : 4 629 → 2 355 LOC. Le fichier est passable.
 
-### Le pivot : "Work in Aseprite, play in ROMstudio"
+### Le pivot : "Work in Aseprite, play in Sprixe"
 
 Puis vient la revelation. L'utilisateur demande : "la drop zone photo, le capture panel, c'est elimine depuis longtemps, regarde l'historique". Le systeme photo layer — import, quantize Atkinson, merge sur tiles, magic wand, drag/resize layers — est du code mort. Le workflow a pivote vers Aseprite sans que la codebase suive.
 
@@ -403,7 +403,7 @@ Puis vient la revelation. L'utilisateur demande : "la drop zone photo, le captur
 
 **sprite-editor-ui.ts** : 2 355 → **1 454 LOC**. Reduction totale depuis le debut de la session : **-69%**.
 
-Le pivot est materialise dans le code : ROMstudio est un pont entre la ROM et Aseprite. On capture, on exporte, on edite dans Aseprite, on reimporte. Zero edition in-app.
+Le pivot est materialise dans le code : Sprixe est un pont entre la ROM et Aseprite. On capture, on exporte, on edite dans Aseprite, on reimporte. Zero edition in-app.
 
 ### La palette fantome
 

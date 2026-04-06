@@ -2,7 +2,7 @@
  * Aseprite Import Integration Test — validates that importing .aseprite files
  * correctly writes tiles to the GFX ROM.
  *
- * Uses real ffight.zip ROM + real .aseprite fixture files exported from ROMstudio.
+ * Uses real ffight.zip ROM + real .aseprite fixture files exported from Sprixe.
  * Tests both scroll tilemap import and sprite import.
  */
 

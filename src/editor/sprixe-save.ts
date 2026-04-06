@@ -1,5 +1,5 @@
 /**
- * ROMstudio Save/Load — .romstudio file format.
+ * Sprixe Save/Load — .sprixe file format.
  *
  * Serializes ROM edits as sparse diffs + captured pose refs to a JSON file.
  * Previews are NOT stored — they are rebuilt from GFX ROM on load.
@@ -30,7 +30,7 @@ interface PoseEntrySerialized {
   }>;
 }
 
-interface RomStudioFile {
+interface SprixeFile {
   version: 1;
   gameName: string;
   createdAt: string;
@@ -98,13 +98,13 @@ function deserializeDiffs(entries: DiffEntrySerialized[]): DiffEntry[] {
 // ---------------------------------------------------------------------------
 
 /**
- * Build the .romstudio JSON content from current RomStore state + poses.
+ * Build the .sprixe JSON content from current RomStore state + poses.
  */
 export function buildSaveData(
   romStore: RomStore,
   poses: CapturedPose[],
   existingCreatedAt?: string,
-): RomStudioFile {
+): SprixeFile {
   const diffs = romStore.computeDiffs();
   const now = new Date().toISOString();
   return {
@@ -122,7 +122,7 @@ export function buildSaveData(
 }
 
 /**
- * Export a .romstudio file (triggers browser download).
+ * Export a .sprixe file (triggers browser download).
  */
 export function exportSaveFile(
   romStore: RomStore,
@@ -136,39 +136,39 @@ export function exportSaveFile(
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = filename ?? `${romStore.name}.romstudio`;
+  a.download = filename ?? `${romStore.name}.sprixe`;
   a.click();
   URL.revokeObjectURL(url);
 }
 
 /**
- * Parse and validate a .romstudio file.
+ * Parse and validate a .sprixe file.
  * Returns null with an error message if invalid.
  */
-export function parseSaveFile(json: string): { data: RomStudioFile } | { error: string } {
+export function parseSaveFile(json: string): { data: SprixeFile } | { error: string } {
   let parsed: unknown;
   try {
     parsed = JSON.parse(json);
   } catch {
-    return { error: 'Fichier .romstudio invalide (JSON malformé)' };
+    return { error: 'Fichier .sprixe invalide (JSON malformé)' };
   }
 
-  const file = parsed as RomStudioFile;
+  const file = parsed as SprixeFile;
   if (file.version !== 1) {
     return { error: `Version de fichier non supportée : ${file.version}` };
   }
   if (!file.gameName || !file.diffs) {
-    return { error: 'Fichier .romstudio incomplet' };
+    return { error: 'Fichier .sprixe incomplet' };
   }
   return { data: file };
 }
 
 /**
- * Apply a parsed .romstudio file to a RomStore.
+ * Apply a parsed .sprixe file to a RomStore.
  * Returns the restored poses (with rebuilt previews).
  */
 export function applySaveFile(
-  file: RomStudioFile,
+  file: SprixeFile,
   romStore: RomStore,
   vram: Uint8Array,
   paletteBase: number,

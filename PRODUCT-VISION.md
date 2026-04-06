@@ -34,12 +34,12 @@ The first arcade game development platform — create, test, and ship physical c
 
 ## Phases
 
-### Phase 1 — ROMstudio (now)
+### Phase 1 — Sprixe (now)
 CPS1 emulator + inspection + ROM editing tools in the browser.
 
-**Status:** Working. Aseprite round-trip workflow (capture → export → edit → import), sample editor, audio DAW, ROM export. In-app editing removed — Aseprite is the editor, ROMstudio is the bridge.
+**Status:** Working. Aseprite round-trip workflow (capture → export → edit → import), sample editor, audio DAW, ROM export. In-app editing removed — Aseprite is the editor, Sprixe is the bridge.
 
-**Goal:** Landing page on romstudio.app, capture GIFs, build community awareness.
+**Goal:** Landing page on sprixe.dev, capture GIFs, build community awareness.
 
 ### Phase 2 — CPS1 SDK
 The first CPS1 development kit. Write games in C targeting CPS1 hardware.
@@ -109,6 +109,6 @@ Complete the loop: browser → real hardware.
 
 ## Name
 
-- **ROMstudio** — Current emulator/editor (Phase 1)
+- **Sprixe** — Current emulator/editor (Phase 1)
 - **ArcadeStudio** — Full platform name (Phase 2+)
-- Domain: romstudio.app (acquired), arcadestudio.dev (TBD)
+- Domain: sprixe.dev (acquired), arcadestudio.dev (TBD)

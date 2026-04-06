@@ -1,9 +1,9 @@
-# ROMstudio
+# Sprixe
 
 CPS1 (Capcom Play System 1) arcade studio in the browser.
 Play, capture, and export to Aseprite — TypeScript strict + WebGL2 + Web Worker audio + WASM. Zero emulation dependencies.
 
-"Work in Aseprite, play in ROMstudio."
+"Work in Aseprite, play in Sprixe."
 
 ## Commands
 
@@ -67,8 +67,8 @@ src/
     layer-panel.ts        # Left sidebar layer panel (HW layers, REC, scroll/sprite sets)
     tile-refs.ts          # Tile reference counter + duplication
     tile-allocator.ts     # Private tile allocation, GFX ROM expansion
-    romstudio-save.ts     # .romstudio save/load (JSON diffs)
-    romstudio-autosave.ts # Auto-save to IndexedDB with debounce
+    sprixe-save.ts     # .sprixe save/load (JSON diffs)
+    sprixe-autosave.ts # Auto-save to IndexedDB with debounce
     tool-cursors.ts       # Per-tool canvas cursors
   debug/
     debug-panel.ts    # F2 debug/video panel (registers, 3D exploded view)
@@ -120,7 +120,7 @@ src/__tests__/
   palette-editor.test.ts    # Palette encode/decode tests
   rom-roundtrip.test.ts     # ROM export → re-import roundtrip (requires ffight.zip)
   rom-store.test.ts         # RomStore tests
-  romstudio-save.test.ts    # .romstudio save/load roundtrip tests (17 tests)
+  sprixe-save.test.ts       # .sprixe save/load roundtrip tests (17 tests)
   status-bar.test.ts        # Status bar DOM tests
   tile-encoder.test.ts      # Tile encoder roundtrip tests
   tile-refs.test.ts         # Tile reference counter tests
@@ -196,14 +196,14 @@ ROMs loaded from public/roms/ (not included in the repo).
 | F5 | Save state |
 | F8 | Load state |
 | F | Fullscreen |
-| Ctrl+S | Save project (.romstudio) |
-| Ctrl+O | Load project (.romstudio) |
+| Ctrl+S | Save project (.sprixe) |
+| Ctrl+O | Load project (.sprixe) |
 | Double-click | Fullscreen |
 | Escape | Close dialog |
 
 ## Aseprite Workflow
 
-ROMstudio is the bridge between CPS1 ROMs and Aseprite. Pixel artists work in Aseprite,
+Sprixe is the bridge between CPS1 ROMs and Aseprite. Pixel artists work in Aseprite,
 their edits are written back to the ROM and rendered in real-time.
 
 ### Sprites

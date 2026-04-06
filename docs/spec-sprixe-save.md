@@ -1,16 +1,16 @@
-# Spec: Fichier de sauvegarde ROMstudio (`.romstudio`)
+# Spec: Fichier de sauvegarde Sprixe (`.sprixe`)
 
 ## Contexte
 
-ROMstudio permet de modifier les graphismes (tiles), palettes (couleurs) et samples audio (OKI ADPCM) d'un jeu CPS1. Actuellement, toutes ces modifications sont perdues au rechargement de la page. L'utilisateur ne peut exporter qu'un ZIP MAME complet.
+Sprixe permet de modifier les graphismes (tiles), palettes (couleurs) et samples audio (OKI ADPCM) d'un jeu CPS1. Actuellement, toutes ces modifications sont perdues au rechargement de la page. L'utilisateur ne peut exporter qu'un ZIP MAME complet.
 
-Le fichier `.romstudio` capture l'etat des modifications de maniere legere (diffs sparse), sans inclure la ROM originale. Il est inutile sans la ROM du jeu.
+Le fichier `.sprixe` capture l'etat des modifications de maniere legere (diffs sparse), sans inclure la ROM originale. Il est inutile sans la ROM du jeu.
 
 ---
 
 ## Format
 
-Extension : `.romstudio`
+Extension : `.sprixe`
 Contenu : JSON (UTF-8)
 Compression : aucune (les diffs sparse sont deja compacts)
 
@@ -127,13 +127,13 @@ Le fichier reste leger dans tous les cas. Les samples OKI sont le plus gros cont
 1. Calculer les diffs pour chaque region (graphics, program, oki)
 2. Collecter les poses depuis les `layerGroups` de type sprite
 3. Serialiser en JSON
-4. Telecharger via `<a download="ffight.romstudio">`
+4. Telecharger via `<a download="ffight.sprixe">`
 
 L'utilisateur nomme et organise ses fichiers librement (comme tout logiciel).
 
 ### Load (import fichier)
 
-1. L'utilisateur drop ou selectionne un `.romstudio`
+1. L'utilisateur drop ou selectionne un `.sprixe`
 2. Verifier que `gameName` correspond au jeu charge (sinon erreur)
 3. Appliquer les diffs : ecrire les bytes aux offsets dans chaque region du RomStore
 4. Reconstruire les poses : creer les `CapturedPose` avec previews via `assembleCharacter()`
@@ -141,12 +141,12 @@ L'utilisateur nomme et organise ses fichiers librement (comme tout logiciel).
 
 ### Ordre de chargement
 
-Le `.romstudio` ne peut etre charge qu'APRES le ROM du jeu (il faut le RomStore initialise). Deux scenarios :
+Le `.sprixe` ne peut etre charge qu'APRES le ROM du jeu (il faut le RomStore initialise). Deux scenarios :
 
-1. **ROM deja charge** → drop/select le `.romstudio` → application immediate
-2. **ROM pas encore charge** → drop le `.romstudio` → erreur "Chargez d'abord le ROM du jeu"
+1. **ROM deja charge** → drop/select le `.sprixe` → application immediate
+2. **ROM pas encore charge** → drop le `.sprixe` → erreur "Chargez d'abord le ROM du jeu"
 
-Alternative : permettre de drop les deux fichiers ensemble (ZIP + `.romstudio`), le loader detecte l'extension et applique dans le bon ordre.
+Alternative : permettre de drop les deux fichiers ensemble (ZIP + `.sprixe`), le loader detecte l'extension et applique dans le bon ordre.
 
 ---
 
@@ -161,8 +161,8 @@ Debounce de 2 secondes apres la derniere modification (tile edit, palette edit, 
 ### Stockage
 
 - **Base** : IndexedDB (pas de limite de taille comme localStorage)
-- **Cle** : `romstudio-autosave-{gameName}`
-- **Valeur** : meme structure JSON que le `.romstudio`
+- **Cle** : `sprixe-autosave-{gameName}`
+- **Valeur** : meme structure JSON que le `.sprixe`
 - **Un seul slot** par jeu (ecrase a chaque auto-save)
 
 ### Restore
@@ -176,12 +176,12 @@ Au chargement d'un ROM, verifier si un auto-save existe pour ce jeu :
 
 L'auto-save est supprime quand :
 - L'utilisateur clique "Ignorer" au restore
-- L'utilisateur exporte un `.romstudio` manuellement (le fichier fait foi)
+- L'utilisateur exporte un `.sprixe` manuellement (le fichier fait foi)
 - L'utilisateur exporte un ZIP MAME (tout est dans le ZIP)
 
 ---
 
-## Ce qui n'est PAS dans le `.romstudio`
+## Ce qui n'est PAS dans le `.sprixe`
 
 | Donnee | Raison |
 |---|---|
@@ -199,19 +199,19 @@ L'auto-save est supprime quand :
 
 ### Boutons
 
-- **"Save"** dans le header ou menu → exporte le `.romstudio` (download navigateur)
-- **"Load"** ou drop zone → importe un `.romstudio`
+- **"Save"** dans le header ou menu → exporte le `.sprixe` (download navigateur)
+- **"Load"** ou drop zone → importe un `.sprixe`
 - Indicateur visuel "modifications non sauvegardees" (point ou asterisque dans le titre)
 
 ### Raccourcis
 
 | Raccourci | Action |
 |---|---|
-| Ctrl+S | Save `.romstudio` |
-| Ctrl+O | Load `.romstudio` |
+| Ctrl+S | Save `.sprixe` |
+| Ctrl+O | Load `.sprixe` |
 
 ### Messages
 
-- Drop d'un `.romstudio` sans ROM chargee → toast "Chargez d'abord le ROM du jeu"
-- Drop d'un `.romstudio` pour un autre jeu → toast "Ce fichier est pour {gameName}, pas pour {currentGame}"
+- Drop d'un `.sprixe` sans ROM chargee → toast "Chargez d'abord le ROM du jeu"
+- Drop d'un `.sprixe` pour un autre jeu → toast "Ce fichier est pour {gameName}, pas pour {currentGame}"
 - Auto-save restore → notification non-bloquante avec boutons Restaurer / Ignorer

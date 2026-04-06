@@ -1,5 +1,5 @@
 /**
- * ROMstudio Save/Load unit tests.
+ * Sprixe Save/Load unit tests.
  *
  * Tests diff computation, serialization round-trip, and save file validation.
  * Uses the real ffight.zip ROM for integration-level coverage.
@@ -14,7 +14,7 @@ import type { DiffEntry } from '../rom-store';
 import { writePixel, readPixel, readTile } from '../editor/tile-encoder';
 import { encodeColor } from '../editor/palette-editor';
 import { encodeSample, replaceSampleInRom, parsePhraseTable, OKI_SAMPLE_RATE } from '../audio/oki-codec';
-import { buildSaveData, parseSaveFile, applySaveFile, exportSaveFile } from '../editor/romstudio-save';
+import { buildSaveData, parseSaveFile, applySaveFile, exportSaveFile } from '../editor/sprixe-save';
 import type { CapturedPose } from '../editor/sprite-analyzer';
 
 // ImageData is not available in Node — provide a minimal stub for tests

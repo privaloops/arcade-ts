@@ -10,7 +10,7 @@ test.describe('Phase 1 — Bootstrap', () => {
   });
 
   test('1.1 page loads with title', async ({ page }) => {
-    await expect(page.locator('h1')).toHaveText('ROMstudio');
+    await expect(page.locator('h1')).toHaveText('Sprixe');
   });
 
   test('1.2 drop zone visible', async ({ page }) => {

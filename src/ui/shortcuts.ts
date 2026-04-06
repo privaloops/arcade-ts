@@ -51,7 +51,7 @@ export function initShortcuts(deps: ShortcutsDeps): void {
   window.addEventListener("keydown", (e) => {
     const key = e.key.toLowerCase();
 
-    // Ctrl+S = save .romstudio, Ctrl+O = load .romstudio
+    // Ctrl+S = save .sprixe, Ctrl+O = load .sprixe
     if (e.ctrlKey && key === 's') { e.preventDefault(); saveStudio(); return; }
     if (e.ctrlKey && key === 'o') { e.preventDefault(); loadStudio(); return; }
 

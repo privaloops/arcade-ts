@@ -54,6 +54,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **E2E test 10.4** — Rewrote dead layer toggle test to use `.layer-eye-btn` in layer panel (was silently skipping)
 
 ### Changed
+- **Rebrand ROMstudio → Sprixe** — All references renamed: file extension `.sprixe`, binary prefix `SPRIXE:`, IndexedDB `sprixe`, UI titles, landing page, docs. Files renamed (`sprixe-save.ts`, `sprixe-autosave.ts`). No backward compatibility with `.romstudio` files
+- **Hero video updated** — New 39s demo video with Sprixe branding, encoded at 720p H.264+AAC / VP9+Opus
+- **E2E test split** — `npm run test:e2e` now excludes Game Matrix (fast); `test:e2e:all` runs everything; `test:matrix` unchanged
 - **Hero video** — Replace hero GIF with 37s MP4/WebM video (with audio). Native browser controls, no autoplay. Encoded at 720p H.264+AAC / VP9+Opus (~4 MB each)
 - **Color picker extracted** — `openColorPicker` (162 lines) moved from `SpriteEditorUI` class to standalone `color-picker.ts` module. Reduces `sprite-editor-ui.ts` from 1,521 to 1,363 lines
 - **`loadRom` split** — 122-line method split into `loadQSoundAudio()` and `loadStandardAudio()` private methods in `emulator.ts`
@@ -75,7 +78,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Palette panel sprite cards + REC** — Captured sprite cards moved from left panel to right palette panel, grouped under their palette. Each palette has a REC button to start/stop capture directly
 - **Large manifest import fix** — .aseprite files with manifests >65535 bytes (UINT16 overflow) now import correctly
 - **Palette import from .aseprite** — Importing a .aseprite with modified palette colors applies them as VRAM overrides that persist across rounds (re-applied every frame)
-- **Autosave disabled** — Manual .romstudio save only (Ctrl+S). Autosave was triggering restore prompts with empty saves
+- **Autosave disabled** — Manual .sprixe save only (Ctrl+S). Autosave was triggering restore prompts with empty saves
 - **Grouping tolerance reduced** — Sprite adjacency tolerance lowered from 20px to 4px to avoid merging distinct characters
 
 ## [1.0.0-beta.1] - 2026-04-02
@@ -87,7 +90,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Sprite Sheet Viewer** — Fullscreen pose viewer with sidebar, tile grid, Export .aseprite button
 - **Scroll Set Viewer** — Fullscreen scroll reconstitution with tile strip, Export .aseprite button
 - **Layer Panel** — Left sidebar with HW layer toggles, REC buttons, sprite/scroll set cards, 3D exploded view slider, GFX ROM memory indicator, Import .aseprite button
-- **`.romstudio` save/load** — JSON save format with sparse ROM diffs (GFX, Program, OKI) + captured poses. Ctrl+S / Ctrl+O, auto-save to IndexedDB with content summary in restore prompt
+- **`.sprixe` save/load** — JSON save format with sparse ROM diffs (GFX, Program, OKI) + captured poses. Ctrl+S / Ctrl+O, auto-save to IndexedDB with content summary in restore prompt
 - **FM Patch Editor** — CPS1 sound driver parser, voice read/write, macro controls (code present, UI tab hidden — see LEARNINGS.md)
 - **Audio panel** — Mute/solo per FM/OKI channel, FM timeline, OKI waveforms, sample browser with drag-drop WAV replace, mic recording
 - **Palette editing** — Color picker with hue shift (nuances), saturation slider, transparency toggle, ROM patching for persistence

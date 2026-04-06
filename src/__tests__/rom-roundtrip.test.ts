@@ -425,7 +425,7 @@ describe.skipIf(!hasMame())('MAME validation', () => {
 
     // Export modified ROM to temp directory
     const exported = await store.exportZipAsArrayBuffer();
-    const mameDir = resolve(tmpdir(), 'romstudio-mame-test');
+    const mameDir = resolve(tmpdir(), 'sprixe-mame-test');
     mkdirSync(mameDir, { recursive: true });
     writeFileSync(resolve(mameDir, 'ffight.zip'), Buffer.from(exported));
 

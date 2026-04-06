@@ -266,10 +266,10 @@ export function readAseprite(buffer: ArrayBuffer): AsepriteFile {
             pos += textLen;
             if (!result.userDataText) {
               let manifestText = text;
-              // Decompress ROMSTUDIO: prefixed data (deflate+base64)
-              if (text.startsWith('ROMSTUDIO:')) {
+              // Decompress SPRIXE: prefixed data (deflate+base64)
+              if (text.startsWith('SPRIXE:')) {
                 try {
-                  const b64 = text.slice('ROMSTUDIO:'.length);
+                  const b64 = text.slice('SPRIXE:'.length);
                   const binary = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
                   manifestText = new TextDecoder().decode(pako.inflate(binary));
                 } catch { /* decompression failed, keep raw */ }

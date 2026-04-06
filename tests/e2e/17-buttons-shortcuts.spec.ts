@@ -138,10 +138,10 @@ test.describe('Phase 17 — Missing keyboard shortcuts', () => {
     expect(download.suggestedFilename()).toMatch(/\.png$/);
   });
 
-  test('17.15 Ctrl+S triggers .romstudio save (download)', async ({ page }) => {
+  test('17.15 Ctrl+S triggers .sprixe save (download)', async ({ page }) => {
     const downloadPromise = page.waitForEvent('download', { timeout: 5_000 });
     await page.keyboard.press('Control+s');
     const download = await downloadPromise;
-    expect(download.suggestedFilename()).toMatch(/\.romstudio$/);
+    expect(download.suggestedFilename()).toMatch(/\.sprixe$/);
   });
 });

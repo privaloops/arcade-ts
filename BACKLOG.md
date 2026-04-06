@@ -26,7 +26,7 @@
 - [x] Audio timeline ruler with frame-synced scroll (PR #30)
 - [x] Debt-based audio timing — fixes Firefox audio lag (PR #31)
 - [x] Ring buffer 8192 → 16384 samples
-- [x] Rebrand StudioROM → ROMstudio
+- [x] Rebrand StudioROM → ROMstudio → Sprixe
 - [x] UI polish: text colors boosted, backgrounds lightened
 
 ## Done (session March 25 — evening)
@@ -102,21 +102,21 @@
 - [x] **Tile allocator + GFX ROM expansion** — Private tile allocation for scroll merge, dynamic ROM expansion, reverse bank mapper
 - [x] **Shared tile indicator** — Badge ×N on shared tiles in sprite sheet viewer + warning toast on edit
 - [x] **Palette recoloring (Nuances)** — Hue shift on manually selected color group (Shift+click). Preserves saturation/luminosity. Auto-detect by hue ±30°. Reset palette.
-- [x] **Save/load (.romstudio)** — JSON with sparse ROM diffs (GFX, Program, OKI) + poses. Ctrl+S/O, drag & drop. Auto-save IndexedDB 2s debounce. Spec: `docs/spec-romstudio-save.md`
+- [x] **Save/load (.sprixe)** — JSON with sparse ROM diffs (GFX, Program, OKI) + poses. Ctrl+S/O, drag & drop. Auto-save IndexedDB 2s debounce. Spec: `docs/spec-sprixe-save.md`
 - [x] ~~**Photo Import**~~ — Added then removed. Editing now happens exclusively in Aseprite.
 - [x] ~~**Multi-layer panel**~~ — Added then removed. Layer panel now manages HW layers, REC, and capture sets only.
 - [ ] **Full undo stack** — Tile pixel undo/redo fonctionne (100 entries). Manque : undo palette, stroke grouping (1 drag = 1 undo), persistance cross-session.
 
 ### YM2151 Sequencer (browser-first, world's first)
 
-Full FM music editor integrated into ROMstudio, served on `/daw` (separate Vite multi-page entry).
+Full FM music editor integrated into Sprixe, served on `/daw` (separate Vite multi-page entry).
 No external DAW needed. No existing browser-based YM2151 sequencer exists
 (Furnace and DefleMask are desktop only, and neither targets arcade ROM editing).
 This approach bypasses the need to reverse-engineer per-game Z80 drivers entirely.
 
 **Project context for implementors:**
 
-This is part of ROMstudio, a CPS1 arcade emulator/editor built in TypeScript.
+This is part of Sprixe, a CPS1 arcade emulator/editor built in TypeScript.
 Key existing files to understand before implementing:
 
 | File | Role |
@@ -253,7 +253,7 @@ using the computer keyboard as a piano:
 - Release → key-off
 - Notes are optionally recorded into the sequence at the current frame position
 
-This makes ROMstudio a **playable FM synthesizer** using authentic game instrument sounds.
+This makes Sprixe a **playable FM synthesizer** using authentic game instrument sounds.
 
 **UI Layout:**
 
@@ -503,16 +503,16 @@ remplacer les couches hardware-spécifiques tout en gardant la logique de jeu in
 - [ ] Convertir les instruments FM (YM2612 patches → YM2151 patches)
 - [ ] Encoder les SFX en ADPCM OKI
 - [ ] Packager en ROM set MAME-compatible (.zip)
-- [ ] Tester dans ROMstudio
+- [ ] Tester dans Sprixe
 
 ### AI Tile Upscaler
 
-Pipeline d'upscale des tiles pixel art assisté par IA, intégrable dans ROMstudio.
+Pipeline d'upscale des tiles pixel art assisté par IA, intégrable dans Sprixe.
 
 **Cas d'usage :**
 - Portage Mega Drive → CPS1 : tiles 8×8 → 16×16
 - Amélioration de tiles existants (plus de détail, meilleur shading)
-- Feature standalone de ROMstudio ("enhance sprites")
+- Feature standalone de Sprixe ("enhance sprites")
 
 **Pipeline :**
 1. Extraire les tiles depuis la ROM (déjà possible via `tile-encoder.ts`)
@@ -539,7 +539,7 @@ Pipeline d'upscale des tiles pixel art assisté par IA, intégrable dans ROMstud
 **Étapes :**
 - [ ] Benchmark des modèles d'upscale existants sur des tiles Mega Drive/CPS1
 - [ ] Développer le pipeline extract → upscale → quantize → encode
-- [ ] Intégrer dans ROMstudio (bouton "AI Enhance" dans le sprite editor)
+- [ ] Intégrer dans Sprixe (bouton "AI Enhance" dans le sprite editor)
 - [ ] Gérer le contexte multi-tiles (sprites composés de plusieurs tiles)
 - [ ] Permettre la retouche manuelle post-upscale
 
@@ -553,7 +553,7 @@ Type GB Studio mais pour CPS1. Éditeur visuel pour créer des jeux CPS1 jouable
 - State machine IA basique (marcher vers joueur, attaquer à portée, reculer)
 - Moins ambitieux qu'un éditeur générique, mais déjà unique au monde
 
-**Briques existantes dans ROMstudio :**
+**Briques existantes dans Sprixe :**
 - Sprite editor (dessin, palette, tiles) ✅
 - Sample editor (OKI ADPCM) ✅
 - ROM export (.zip MAME) ✅

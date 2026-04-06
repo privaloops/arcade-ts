@@ -20,8 +20,8 @@ import { initDropZone, handleRomFile } from "./ui/drop-zone";
 import { getRendererMode, setupDomRenderer, initRendererToggle } from "./ui/renderer-toggle";
 import { initControlsBar, toggleFullscreen, toggleDebug, toggleAudio } from "./ui/controls-bar";
 import { initShortcuts } from "./ui/shortcuts";
-import { exportSaveFile, parseSaveFile, applySaveFile } from "./editor/romstudio-save";
-import { loadAutoSave, clearAutoSave, scheduleAutoSave } from "./editor/romstudio-autosave";
+import { exportSaveFile, parseSaveFile, applySaveFile } from "./editor/sprixe-save";
+import { loadAutoSave, clearAutoSave, scheduleAutoSave } from "./editor/sprixe-autosave";
 import { showToast } from "./ui/toast";
 import { setTooltip } from "./ui/tooltip";
 
@@ -107,9 +107,9 @@ const setGameScreen = (gs: GameScreen | null): void => { gameScreen = gs; };
 const getLastRomFile = (): File | null => lastRomFile;
 const setLastRomFile = (f: File | null): void => { lastRomFile = f; };
 let saveCreatedAt: string | undefined;
-let romStudioApplied = false;
+let sprixeApplied = false;
 
-// ── .romstudio save/load ────────────────────────────────────────────────────
+// ── .sprixe save/load ───────────────────────────────────────────────────────
 
 function getAllPoses() {
   return debugPanel?.getSpriteEditorUI()?.getAllPoses() ?? [];
@@ -126,15 +126,15 @@ function saveStudio(): void {
 function loadStudio(): void {
   const input = document.createElement('input');
   input.type = 'file';
-  input.accept = '.romstudio';
+  input.accept = '.sprixe';
   input.addEventListener('change', () => {
     const file = input.files?.[0];
-    if (file) handleRomStudioFile(file);
+    if (file) handleSprixeFile(file);
   });
   input.click();
 }
 
-function handleRomStudioFile(file: File): void {
+function handleSprixeFile(file: File): void {
   const romStore = emulator.getRomStore();
   if (!romStore) {
     showToast('Chargez d\'abord le ROM du jeu', false);
@@ -153,7 +153,7 @@ function handleRomStudioFile(file: File): void {
     if (editorUI) editorUI.restorePoses(applyResult.poses);
 
     saveCreatedAt = result.data.createdAt;
-    romStudioApplied = true;
+    sprixeApplied = true;
 
     // Dismiss auto-save prompt if visible, and clear auto-save
     document.querySelector('.autosave-prompt')?.remove();
@@ -172,8 +172,8 @@ function triggerAutoSave(): void {
   if (romStore) scheduleAutoSave(romStore, getAllPoses());
 }
 
-setTooltip(saveStudioBtn, "Save project (.romstudio) — Ctrl+S");
-setTooltip(loadStudioBtn, "Load project (.romstudio) — Ctrl+O");
+setTooltip(saveStudioBtn, "Save project (.sprixe) — Ctrl+S");
+setTooltip(loadStudioBtn, "Load project (.sprixe) — Ctrl+O");
 setTooltip(toggleEmuBarBtn, "Show/hide toolbar");
 saveStudioBtn.addEventListener('click', saveStudio);
 loadStudioBtn.addEventListener('click', loadStudio);
@@ -187,18 +187,18 @@ function onRomLoaded(gameName: string): void {
   saveStudioBtn.style.display = '';
   loadStudioBtn.style.display = '';
   toggleEmuBarBtn.style.display = '';
-  romStudioApplied = false;
+  sprixeApplied = false;
 
   // Reset captures from previous game
   debugPanel?.getSpriteEditorUI()?.resetCaptures();
 
-  // Auto-save disabled — manual save via Ctrl+S / .romstudio file
+  // Auto-save disabled — manual save via Ctrl+S / .sprixe file
   // const romStore = emulator.getRomStore();
   // if (romStore) romStore.onModified = triggerAutoSave;
 
   const romStore = emulator.getRomStore();
   loadAutoSave(gameName).then(json => {
-    if (!json || romStudioApplied) return;
+    if (!json || sprixeApplied) return;
 
     // Parse to build a summary of what's in the save
     const result = parseSaveFile(json);
@@ -359,7 +359,7 @@ initDropZone({
   tateToggle, gameSelect, loadBtn, romControls, exportBtn, statusEl,
   getRendererMode, setupDomRenderer: () => setupDomRenderer(rendererDeps),
   getDebugPanel, setDebugPanel, getAudioPanel: () => audioPanel, setLastRomFile, getLastRomFile, setStatus,
-  onRomStudioFile: handleRomStudioFile,
+  onSprixeFile: handleSprixeFile,
   onRomLoaded,
 });
 initShortcuts({

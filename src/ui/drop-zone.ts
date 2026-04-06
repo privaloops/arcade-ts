@@ -30,7 +30,7 @@ export interface DropZoneDeps {
   setLastRomFile(f: File | null): void;
   getLastRomFile(): File | null;
   setStatus(msg: string): void;
-  onRomStudioFile(file: File): void;
+  onSprixeFile(file: File): void;
   onRomLoaded(gameName: string): void;
 }
 
@@ -44,13 +44,13 @@ async function handleRomFile(file: File): Promise<void> {
     getDebugPanel, setDebugPanel, getAudioPanel, setLastRomFile, setStatus,
   } = _deps;
 
-  if (file.name.endsWith(".romstudio")) {
-    _deps.onRomStudioFile(file);
+  if (file.name.endsWith(".sprixe")) {
+    _deps.onSprixeFile(file);
     return;
   }
 
   if (!file.name.endsWith(".zip")) {
-    setStatus("Error: expected a .zip or .romstudio file.");
+    setStatus("Error: expected a .zip or .sprixe file.");
     return;
   }
 
