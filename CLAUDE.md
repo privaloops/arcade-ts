@@ -71,7 +71,7 @@ src/
     sprixe-autosave.ts # Auto-save to IndexedDB with debounce
     tool-cursors.ts       # Per-tool canvas cursors
   debug/
-    debug-panel.ts    # F2 debug/video panel (registers, 3D exploded view)
+    debug-panel.ts    # F2 video panel (registers, 3D exploded view)
     debug-renderer.ts # 3D exploded layer renderer (CSS 3D transforms)
   input/
     input.ts        # Keyboard + Gamepad API + device assignment + autofire
@@ -189,8 +189,7 @@ ROMs loaded from public/roms/ (not included in the repo).
 | P | Pause / Resume |
 | M | Mute |
 | F1 | Config |
-| F2 | Video/Debug panel |
-| E | Tile Viewer / Sprite Sets / Scroll Sets |
+| F2 | Toggle video panel (editor, layers, tile viewer) |
 | F3 | Audio panel |
 | F4 | Synth (FM Patch Editor) |
 | F5 | Save state |
@@ -207,7 +206,7 @@ Sprixe is the bridge between CPS1 ROMs and Aseprite. Pixel artists work in Asepr
 their edits are written back to the ROM and rendered in real-time.
 
 ### Sprites
-1. Open editor (E), click REC Sprites in the layer panel (or Shift+click a sprite)
+1. The video panel is open by default (F2 to toggle). Click REC Sprites in the layer panel (or Shift+click a sprite)
 2. Play the game — each new pose is captured automatically (cards appear live)
 3. Stop REC → sprite sets finalized in panel
 4. Click sprite set → sheet viewer with "Export .aseprite" button
@@ -215,7 +214,7 @@ their edits are written back to the ROM and rendered in real-time.
 6. Import back → tiles written to GFX ROM, immediate re-render
 
 ### Scroll / Decors
-1. Open editor (E), click REC on a scroll layer (BG1/BG2/BG3) in the layer panel
+1. The video panel is open by default (F2 to toggle). Click REC on a scroll layer (BG1/BG2/BG3) in the layer panel
 2. Play the game — scroll around to capture the full stage
 3. Stop REC → scroll sets grouped by palette (palette RGB captured at recording time)
 4. Export as **Tilemap** .aseprite (deduplicated, 16-color per palette)
