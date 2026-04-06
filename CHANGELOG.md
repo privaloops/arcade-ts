@@ -54,6 +54,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **E2E test 10.4** — Rewrote dead layer toggle test to use `.layer-eye-btn` in layer panel (was silently skipping)
 
 ### Changed
+- **Hero video** — Replace hero GIF with 37s MP4/WebM video (with audio). Native browser controls, no autoplay. Encoded at 720p H.264+AAC / VP9+Opus (~4 MB each)
 - **Color picker extracted** — `openColorPicker` (162 lines) moved from `SpriteEditorUI` class to standalone `color-picker.ts` module. Reduces `sprite-editor-ui.ts` from 1,521 to 1,363 lines
 - **`loadRom` split** — 122-line method split into `loadQSoundAudio()` and `loadStandardAudio()` private methods in `emulator.ts`
 
