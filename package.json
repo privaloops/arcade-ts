@@ -1,6 +1,6 @@
 {
   "name": "arcade-ts",
-  "version": "1.0.0-beta.1",
+  "version": "1.0.0-beta.2",
   "description": "CPS1 (Capcom Play System 1) emulator in the browser — TypeScript + WebGL2 + AudioWorklet + WASM",
   "scripts": {
     "dev": "vite",
