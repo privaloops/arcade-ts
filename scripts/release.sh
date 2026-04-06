@@ -53,8 +53,31 @@ if [[ "$CURRENT" == *"-beta."* ]]; then
     PRERELEASE=true
   fi
 else
-  VERSION="${CURRENT}-beta.1"
-  PRERELEASE=true
+  # Bump minor by default
+  MAJOR=$(echo "$CURRENT" | cut -d. -f1)
+  MINOR=$(echo "$CURRENT" | cut -d. -f2)
+  PATCH=$(echo "$CURRENT" | cut -d. -f3)
+  NEXT_MINOR="$MAJOR.$((MINOR + 1)).0"
+  NEXT_PATCH="$MAJOR.$MINOR.$((PATCH + 1))"
+
+  echo ""
+  echo "  1) beta   → ${NEXT_MINOR}-beta.1"
+  echo "  2) patch  → ${NEXT_PATCH}"
+  echo "  3) minor  → ${NEXT_MINOR}"
+  echo ""
+  read -p "Release type? (1/2/3) " -n 1 -r
+  echo
+
+  if [[ "$REPLY" == "2" ]]; then
+    VERSION="$NEXT_PATCH"
+    PRERELEASE=false
+  elif [[ "$REPLY" == "3" ]]; then
+    VERSION="$NEXT_MINOR"
+    PRERELEASE=false
+  else
+    VERSION="${NEXT_MINOR}-beta.1"
+    PRERELEASE=true
+  fi
 fi
 
 echo "Next version: $VERSION"
