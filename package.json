@@ -1,6 +1,6 @@
 {
   "name": "sprixe",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "CPS1 (Capcom Play System 1) emulator in the browser — TypeScript + WebGL2 + AudioWorklet + WASM",
   "scripts": {
     "dev": "vite",
