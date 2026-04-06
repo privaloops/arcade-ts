@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [1.0.0-beta.2] - 2026-04-06
 
 ### Added
 - **Center-bottom sprite alignment** — Multi-frame .aseprite exports align all poses by their center-bottom anchor (feet), with a canvas sized to the bounding box of all poses. Manifest stores original tile coords + per-frame `alignOffset` for correct round-trip import
