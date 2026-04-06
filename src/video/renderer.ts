@@ -1,5 +1,5 @@
 /**
- * Arcade.ts — Canvas 2D Renderer
+ * Sprixe — Canvas 2D Renderer
  *
  * Fallback renderer (Phase 1/2). Takes a 384×224 RGBA framebuffer produced by
  * the CPS-A/B emulation layer and blits it to an HTMLCanvasElement.

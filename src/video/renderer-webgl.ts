@@ -1,5 +1,5 @@
 /**
- * Arcade.ts — WebGL2 Renderer
+ * Sprixe — WebGL2 Renderer
  *
  * Uploads the 384×224 RGBA framebuffer as a GPU texture each frame,
  * then draws a fullscreen quad. Much faster than Canvas 2D putImageData

@@ -17,7 +17,7 @@
 - [x] Buttons 4-6 (kicks) for SF2 via CPS-B register 0x36
 - [x] Ring buffer 4096 → 8192 → 16384 for better audio margin
 - [x] ROM cache from public/roms/
-- [x] UI redesign, project renamed to Arcade.ts
+- [x] UI redesign, project renamed to Sprixe
 - [x] Vercel deployment with COOP/COEP headers
 
 ## Done (session March 25 — morning)
@@ -93,9 +93,9 @@
 
 ## ROM Editor
 
-- [x] **RomStore** — Central mutable ROM manager with ZIP export ([#22](https://github.com/privaloops/arcade-ts/issues/22))
-- [x] **Sprite Pixel Editor** — WYSIWYG sprite editing with palette & tile tools ([#27](https://github.com/privaloops/arcade-ts/issues/27))
-- [x] **FM Patch Editor** — Voice read/write + macro UI done, real-time playback deferred (Z80 conflict). Code in `fm-patch-editor.ts` + `cps1-sound-driver.ts`, Synth tab hidden ([#20](https://github.com/privaloops/arcade-ts/issues/20))
+- [x] **RomStore** — Central mutable ROM manager with ZIP export ([#22](https://github.com/privaloops/sprixe/issues/22))
+- [x] **Sprite Pixel Editor** — WYSIWYG sprite editing with palette & tile tools ([#27](https://github.com/privaloops/sprixe/issues/27))
+- [x] **FM Patch Editor** — Voice read/write + macro UI done, real-time playback deferred (Z80 conflict). Code in `fm-patch-editor.ts` + `cps1-sound-driver.ts`, Synth tab hidden ([#20](https://github.com/privaloops/sprixe/issues/20))
 - [ ] **FM real-time preview** — Bouton "Test" existe (playTestNote), mais pas de preview live pendant l'édition des paramètres
 - [ ] **Mute/Solo ROM export** — Requires reverse-engineering CPS1 music sequence format (note commands per-track)
 - [x] **Sprite Analyzer** — Character grouping (palette + proximity), red contour overlay, tracking, pose capture, gallery. Multi-tile expansion for complex games (WoF). Per-palette export (PNG + .aseprite). Palette visibility toggles in editor + sheet viewer. Pose deduplication

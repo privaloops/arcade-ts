@@ -1,6 +1,6 @@
 // =============================================================================
 // Motorola 68000 CPU — Cycle-accurate interpreter
-// Arcade.ts project — TypeScript strict
+// Sprixe — TypeScript strict
 // =============================================================================
 
 import type { BusInterface } from '../types';

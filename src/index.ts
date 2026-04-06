@@ -1,5 +1,5 @@
 /**
- * Arcade.ts — Entry point (bootstrap)
+ * Sprixe — Entry point (bootstrap)
  *
  * Wires up DOM elements, creates the Emulator, and initializes UI modules.
  */

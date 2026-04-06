@@ -45,7 +45,7 @@ Because everything is decoded in TypeScript, every layer, sprite, palette, and a
 
 ## Try it
 
-**[Live demo](https://arcade-ts.vercel.app)** — drop a MAME ROM (.zip) onto the screen.
+**[Live demo](https://www.sprixe.dev/play/)** — drop a MAME ROM (.zip) onto the screen.
 
 ## Under the hood
 
