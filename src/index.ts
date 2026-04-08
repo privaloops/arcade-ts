@@ -4,6 +4,9 @@
  * Wires up DOM elements, creates the Emulator, and initializes UI modules.
  */
 
+import { inject } from "@vercel/analytics";
+inject();
+
 import { Emulator } from "./emulator";
 import { DEFAULT_GP_MAPPING, DEFAULT_P1_MAPPING, DEFAULT_P2_MAPPING, type AutofireKey } from "./input/input";
 import { DebugPanel } from "./debug/debug-panel";
