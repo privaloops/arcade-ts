@@ -4,14 +4,37 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Sprixe — CPS1 arcade studio in the browser. Capture sprites and backgrounds, edit in Aseprite, export MAME-compatible ROMs." />
+    <meta name="theme-color" content="#e8003c" />
+    <link rel="canonical" href="https://www.sprixe.dev/" />
+    <link rel="manifest" href="/manifest.json" />
     <meta property="og:title" content="Sprixe — CPS1 Arcade Studio" />
     <meta property="og:description" content="The first browser-based CPS1 ROM studio. Capture sprites and backgrounds, edit in Aseprite, export MAME-compatible ROMs." />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://www.sprixe.dev/" />
     <meta property="og:image" content="https://www.sprixe.dev/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
     <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Sprixe — CPS1 Arcade Studio" />
+    <meta name="twitter:description" content="The first browser-based CPS1 ROM studio. Capture sprites and backgrounds, edit in Aseprite, export MAME-compatible ROMs." />
     <meta name="twitter:image" content="https://www.sprixe.dev/og-image.png" />
-    <title>Sprixe — CPS1 Arcade Studio</title>
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "Sprixe",
+      "description": "The first browser-based CPS1 arcade studio. Capture sprites and backgrounds, edit in Aseprite, export MAME-compatible ROMs.",
+      "url": "https://www.sprixe.dev/",
+      "applicationCategory": "GameApplication",
+      "operatingSystem": "Web",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      }
+    }
+    </script>
+    <title>Sprixe — CPS1 Arcade Studio | ROM Editor & Aseprite Workflow</title>
     <link rel="stylesheet" href="/src/styles/landing.css" />
   </head>
   <body>
@@ -28,7 +51,7 @@
     </nav>
 
     <section class="hero">
-      <h1>Sprixe</h1>
+      <h1>Sprixe — CPS1 Arcade ROM Studio</h1>
       <p class="hero-tagline">Work in Aseprite, play in Sprixe.</p>
       <p class="hero-sub">The first browser-based CPS1 arcade studio. Capture sprites and backgrounds, edit in Aseprite, export MAME-compatible ROMs.</p>
       <div class="hero-ctas">
@@ -37,7 +60,7 @@
       </div>
       <span class="hero-badge">MAME-compatible export</span>
       <div class="hero-media">
-        <iframe class="hero-video" src="https://www.youtube.com/embed/pHr8cxG041A" title="Sprixe — CPS1 Arcade Studio" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+        <iframe class="hero-video" src="https://www.youtube.com/embed/pHr8cxG041A" title="Sprixe — CPS1 Arcade Studio demo" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen loading="lazy"></iframe>
       </div>
     </section>
 
@@ -53,10 +76,13 @@
             </div>
             <p>Play the game — Sprixe auto-captures every sprite pose and scroll tile. Click REC, play, stop.</p>
           </div>
-          <video autoplay loop muted playsinline class="step-media">
-            <source src="/images/capture-flow.webm" type="video/webm" />
-            <source src="/images/capture-flow.mp4" type="video/mp4" />
-          </video>
+          <figure class="step-figure">
+            <video autoplay loop muted playsinline class="step-media">
+              <source src="/images/capture-flow.webm" type="video/webm" />
+              <source src="/images/capture-flow.mp4" type="video/mp4" />
+            </video>
+            <figcaption>Auto-capture of sprite poses and scroll tiles during gameplay</figcaption>
+          </figure>
         </div>
         <div class="workflow-step">
           <div class="step-text">
@@ -66,10 +92,13 @@
             </div>
             <p>Export .aseprite files with embedded ROM metadata. Indexed 8bpp, 16-color CPS1 palettes, tilemaps — all preserved. With actual pixel art talent, you could redesign an entire character. We clearly don't have any.</p>
           </div>
-          <video autoplay loop muted playsinline class="step-media">
-            <source src="/images/edit-aseprite.webm" type="video/webm" />
-            <source src="/images/edit-aseprite.mp4" type="video/mp4" />
-          </video>
+          <figure class="step-figure">
+            <video autoplay loop muted playsinline class="step-media">
+              <source src="/images/edit-aseprite.webm" type="video/webm" />
+              <source src="/images/edit-aseprite.mp4" type="video/mp4" />
+            </video>
+            <figcaption>Editing CPS1 sprites in Aseprite with preserved 16-color palettes</figcaption>
+          </figure>
         </div>
         <div class="workflow-step">
           <div class="step-text">
@@ -79,10 +108,13 @@
             </div>
             <p>Import back — tiles patched into GFX ROM instantly. See your edits in the running game, questionable art skills and all. Export a MAME-compatible ZIP.</p>
           </div>
-          <video autoplay loop muted playsinline class="step-media">
-            <source src="/images/import-play.webm" type="video/webm" />
-            <source src="/images/import-play.mp4" type="video/mp4" />
-          </video>
+          <figure class="step-figure">
+            <video autoplay loop muted playsinline class="step-media">
+              <source src="/images/import-play.webm" type="video/webm" />
+              <source src="/images/import-play.mp4" type="video/mp4" />
+            </video>
+            <figcaption>Modified tiles rendered in real-time, exportable as MAME-compatible ROM</figcaption>
+          </figure>
         </div>
       </div>
     </section>

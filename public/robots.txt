@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /play/
+Disallow: /roms/
+
+Sitemap: https://www.sprixe.dev/sitemap.xml

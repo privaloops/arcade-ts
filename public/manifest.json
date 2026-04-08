@@ -1,8 +1,8 @@
 {
-  "name": "Sprixe",
-  "short_name": "CPS1",
-  "description": "Capcom Play System 1 — Browser Emulator",
-  "start_url": "/",
+  "name": "Sprixe — CPS1 Arcade Studio",
+  "short_name": "Sprixe",
+  "description": "CPS1 arcade studio in the browser. Capture sprites, edit in Aseprite, export MAME-compatible ROMs.",
+  "start_url": "/play/",
   "display": "fullscreen",
   "orientation": "any",
   "background_color": "#000000",
