@@ -120,7 +120,7 @@ describe('NeoGeoBus', () => {
       const rom = new Uint8Array([0x00, 0x10, 0x00, 0x00]);
       bus.loadProgramRom(rom);
       // At reset, BIOS is at 0x000000 — switch to P-ROM first
-      bus.write8(0x3A0003, 0); // REG_SWPROM
+      bus.write8(0x3A0013, 0); // REG_SWPROM (FBNeo offset 0x13)
       expect(bus.read8(0x000000)).toBe(0x00);
       expect(bus.read8(0x000001)).toBe(0x10);
     });
@@ -142,9 +142,9 @@ describe('NeoGeoBus', () => {
       bios[0] = 0xAA;
       bus.loadBiosRom(bios);
       bus.loadProgramRom(new Uint8Array([0xBB]));
-      bus.write8(0x3A0003, 0); // Switch to P-ROM
+      bus.write8(0x3A0013, 0); // REG_SWPROM — switch to P-ROM
       expect(bus.read8(0x000000)).toBe(0xBB);
-      bus.write8(0x3A0001, 0); // Switch back to BIOS
+      bus.write8(0x3A0003, 0); // REG_SWPBIOS — switch back to BIOS
       expect(bus.read8(0x000000)).toBe(0xAA);
     });
 

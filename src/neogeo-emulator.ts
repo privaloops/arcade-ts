@@ -204,11 +204,20 @@ export class NeoGeoEmulator {
     this.m68000.reset();
     this.z80.reset();
 
-    // Patch BIOS to skip the pd4990a calendar test and force boot completion.
-    // Without full RTC emulation, the CALENDAR test fails and the BIOS loops
-    // with SR mask 7 (all IRQs blocked). We patch the error handler to lower
-    // the SR mask so VBlank IRQs can proceed to the eye catcher.
-    this.patchBiosBoot(romSet.biosRom);
+    // Only patch non-UniBIOS ROMs (UniBIOS handles boot tests internally)
+    const biosName = this.detectBiosName(romSet.biosRom);
+    if (!biosName.includes('uni-bios')) {
+      this.patchBiosBoot(romSet.biosRom);
+      // Write AES system type at BIOS offset 0x400 (FBNeo convention)
+      romSet.biosRom[0x400] = 0x80;
+      romSet.biosRom[0x401] = 0x00;
+    }
+    console.log(`[Neo-Geo] Using BIOS: ${biosName}`);
+
+    // Wire ROM banking callbacks
+    this.bus.setFixRomSwitchCallback((useBios) => {
+      this.video.setFixRomMode(useBios);
+    });
 
     console.log(`[Neo-Geo] Loaded ${romSet.name}: ${romSet.description}`);
   }
@@ -464,6 +473,21 @@ export class NeoGeoEmulator {
     }
 
     if (patched > 0) console.log(`[Neo-Geo] Applied ${patched} BIOS patches`);
+  }
+
+  /** Try to identify the BIOS by looking for known strings */
+  private detectBiosName(biosRom: Uint8Array): string {
+    // UniBIOS has "UNIVERSE BIOS" string
+    const str = String.fromCharCode(...biosRom.subarray(0, Math.min(0x200, biosRom.length))
+      .filter(b => b >= 0x20 && b < 0x7F));
+    if (str.includes('UNIVERSE') || str.includes('UNI-BIOS')) return 'uni-bios';
+    // Search more broadly
+    for (let i = 0; i < biosRom.length - 10; i++) {
+      if (biosRom[i] === 0x55 && biosRom[i+1] === 0x4E && biosRom[i+2] === 0x49) { // "UNI"
+        return 'uni-bios';
+      }
+    }
+    return 'standard';
   }
 
   getBus(): NeoGeoBus { return this.bus; }

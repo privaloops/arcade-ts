@@ -148,6 +148,11 @@ export class NeoGeoVideo {
   /** Increment auto-animation counter (call once per frame) */
   tickAutoAnim(): void { this.autoAnimCounter++; }
 
+  /** Switch fix layer ROM source (BIOS sfix.sfix vs game S-ROM) */
+  private useBiosFixRom: boolean = true;
+
+  setFixRomMode(useBios: boolean): void { this.useBiosFixRom = useBios; }
+
   // ---------------------------------------------------------------------------
   // VRAM helpers
   // ---------------------------------------------------------------------------
@@ -383,7 +388,7 @@ export class NeoGeoVideo {
     // Column-major order: tiles are stored column by column
 
     const fb32 = this.fb32;
-    const fixRom = this.fixedRom.length > 0 ? this.fixedRom : this.biosFixedRom;
+    const fixRom = this.useBiosFixRom ? this.biosFixedRom : this.fixedRom;
     const row = new Uint8Array(8);
 
     for (let col = 0; col < 40; col++) {
@@ -394,10 +399,8 @@ export class NeoGeoVideo {
         const palette = (word >> 12) & 0x0F;
         const tileCode = word & 0x0FFF;
 
-        // Use BIOS fix ROM for codes < 0x200 (typically), game fix ROM otherwise
-        const rom = tileCode < 0x200 ? this.biosFixedRom : fixRom;
         const tileOffset = tileCode * NGO_FIX_TILE_BYTES;
-        if (tileOffset + NGO_FIX_TILE_BYTES > rom.length) continue;
+        if (tileOffset + NGO_FIX_TILE_BYTES > fixRom.length) continue;
 
         const palBase = palette * 16;
         const screenX = col * 8;
@@ -410,7 +413,7 @@ export class NeoGeoVideo {
           const py = screenY + ty;
           if (py < 0 || py >= NGO_SCREEN_HEIGHT) continue;
 
-          decodeFixRow(rom, tileOffset + ty * 4, row, 0);
+          decodeFixRow(fixRom, tileOffset + ty * 4, row, 0);
           const rowBase = py * NGO_SCREEN_WIDTH;
 
           for (let p = 0; p < 8; p++) {

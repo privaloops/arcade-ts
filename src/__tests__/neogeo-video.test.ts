@@ -160,6 +160,7 @@ describe('NeoGeoVideo', () => {
       fixRom[tileOffset + 3] = 0x11; // pixels 2,3 = 1
 
       video.setRoms(new Uint8Array(0x100000), fixRom, new Uint8Array(0x20000));
+      video.setFixRomMode(false); // Use game fix ROM, not BIOS
 
       // Set palette 1 color 1 to white
       const palRam = video.getPaletteRam();

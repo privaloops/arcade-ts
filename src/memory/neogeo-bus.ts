@@ -37,6 +37,8 @@ export class NeoGeoBus implements BusInterface {
   // LSPC VRAM indirect access
   private vramAddr: number = 0;
   private vramMod: number = 0;        // auto-increment value
+  private _vramWriteCount: number = 0; // debug: count VRAM writes
+  getVramWriteCount(): number { return this._vramWriteCount; }
 
   // LSPC timer
   private timerHigh: number = 0;
@@ -272,10 +274,13 @@ export class NeoGeoBus implements BusInterface {
     }
 
     // REG_STATUS_B: 0x380000-0x380001
+    // FBNeo: bit 7 of low byte = AES flag (1=AES, 0=MVS)
     if (address >= 0x380000 && address <= 0x380001) {
-      // Various hardware flags — AES: bit 6 set = AES mode
-      // The exact value depends on BIOS version; 0x40 for AES is common
-      return (address & 1) ? (this.portStatus | 0x40) : 0x00;
+      if (address & 1) {
+        // Low byte: bit 7 = AES, bit 6 = slot count, rest = hardware type
+        return this.portStatus | 0x80; // AES mode (bit 7 set)
+      }
+      return 0x00; // High byte
     }
 
     // LSPC registers: 0x3C0000-0x3C000F (read)
@@ -436,6 +441,7 @@ export class NeoGeoBus implements BusInterface {
         this.vramAddr = value & 0xFFFF;
         break;
       case 1: // 0x3C0002: VRAM data write
+        this._vramWriteCount++;
         this.writeVramWord(this.vramAddr, value);
         this.vramAddr = (this.vramAddr + this.vramMod) & 0xFFFF;
         break;
@@ -472,40 +478,45 @@ export class NeoGeoBus implements BusInterface {
   // Control register writes (0x3A0000-0x3A001F)
   // ---------------------------------------------------------------------------
 
+  // Callbacks for ROM banking (set by emulator)
+  private _onFixRomSwitch: ((useBios: boolean) => void) | null = null;
+  private _onZ80RomSwitch: ((useBios: boolean) => void) | null = null;
+
+  setFixRomSwitchCallback(cb: (useBios: boolean) => void): void { this._onFixRomSwitch = cb; }
+  setZ80RomSwitchCallback(cb: (useBios: boolean) => void): void { this._onZ80RomSwitch = cb; }
+
   private writeControlReg(address: number, _value: number): void {
-    // Neo-Geo control registers are at even byte addresses: 0x3A00XX
-    // MAME uses the raw address for switching:
-    //   0x3A0001 = REG_SWPBIOS (map BIOS to 0x000000)
-    //   0x3A0003 = REG_SWPROM  (map P-ROM to 0x000000)
+    // Control registers per FBNeo WriteIO2 (odd byte addresses)
     const regAddr = address & 0x1F;
     switch (regAddr) {
-      case 0x00: // Watchdog (even byte) — ignore
-      case 0x01: // REG_SWPBIOS — map BIOS to 0x000000
+      case 0x00: // Watchdog kick (even byte)
+        break;
+      case 0x01: // Shadow off (normal palette)
+        break;
+      case 0x03: // SWPBIOS — map BIOS vectors to 0x000000
         this.biosMode = true;
         break;
-      case 0x02: // Watchdog (odd byte)
+      case 0x0B: // BIOS text + Z80 BIOS ROM
+        this._onFixRomSwitch?.(true);
+        this._onZ80RomSwitch?.(true);
         break;
-      case 0x03: // REG_SWPROM — map P-ROM to 0x000000
+      case 0x0D: // SRAM write protect
+        break;
+      case 0x0F: // Palette bank 1
+        break;
+      case 0x11: // Shadow on (darken palette)
+        break;
+      case 0x13: // SWPROM — map GAME vectors to 0x000000
         this.biosMode = false;
         break;
-      case 0x05: // REG_CRDUNLOCK1
-      case 0x07: // REG_CRDLOCK1
-      case 0x09: // REG_CRDLOCK2
-      case 0x0B: // REG_CRDREGSEL
-        break; // Memory card — ignore
-      case 0x0A: // 0x3A000A: unused on Neo-Geo (IRQ ack is via LSPC 0x3C000C)
-      case 0x0B:
+      case 0x1B: // Game text + Z80 game ROM
+        this._onFixRomSwitch?.(false);
+        this._onZ80RomSwitch?.(false);
         break;
-      case 0x0D: // REG_BRDFIX — use board fix (S-ROM from cartridge)
+      case 0x1D: // SRAM write enable
         break;
-      case 0x0F: // REG_CRTFIX — use BIOS fix (sfix.sfix)
+      case 0x1F: // Palette bank 0
         break;
-      case 0x11: // REG_SRAMLOCK — lock backup RAM
-      case 0x13: // REG_SRAMUNLOCK — unlock backup RAM
-        break;
-      case 0x15: // REG_PALBANK0
-      case 0x17: // REG_PALBANK1
-        break; // Palette bank — ignore for MVP
       default:
         break;
     }
