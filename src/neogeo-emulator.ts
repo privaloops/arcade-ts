@@ -95,9 +95,19 @@ export class NeoGeoEmulator {
     // Also forward to audio worker for actual sound playback.
     this.bus.setSoundLatchCallback((value: number) => {
       this.z80Bus.pushSoundLatch(value);
-      // Don't mark pending — this masks bit 7 of the reply until Z80 reads port 0x00.
-      // Our Z80 timing is too coarse for this to work correctly, so we skip the
-      // pending mechanism and let the BIOS see the full reply immediately.
+
+      // Run Z80 immediately to process the command (tight sync)
+      let z80Run = 5000;
+      while (z80Run > 0) {
+        if (this.z80Bus.shouldFireNmi()) this.z80.nmi();
+        z80Run -= this.z80.step();
+      }
+
+      // After cmd 0x03 (reset), the Z80 re-initializes.
+      // Force HELLO reply since sm1.sm1 doesn't send it naturally.
+      if (value === 0x03) {
+        this.bus.setSoundReply(0xC3);
+      }
       if (this.audioWorkerReady) {
         this.pendingSoundLatches.push(value);
       }
@@ -216,21 +226,6 @@ export class NeoGeoEmulator {
       }
     }
     this.bus.setSoundReply(0xC3);
-
-    // Skip BIOS boot — run the game directly.
-    // The BIOS test loop never completes without full pd4990a RTC emulation.
-    // We initialize the minimum state the game needs and jump to game code.
-    this.bus.write8(0x3A0013, 0); // SWPROM — P-ROM at 0x000000
-    this.bus.write8(0x3A001B, 0); // Game fix/Z80 ROM
-    this.video.setFixRomMode(false); // Use game S-ROM
-    // Clear VRAM
-    for (let i = 0; i < 0x8600; i++) {
-      this.bus.writeVramWord(i, 0);
-    }
-    // Enable IRQs via LSPC
-    this.bus.write16(0x3C000C, 0x0007);
-    // Reset 68K with game vectors (P-ROM now at 0x000000)
-    this.m68000.reset();
 
 
     console.log(`[Neo-Geo] Loaded ${romSet.name}: ${romSet.description}`);

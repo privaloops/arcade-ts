@@ -217,20 +217,13 @@ export class NeoGeoBus implements BusInterface {
     // 0x000000-0x0FFFFF: Composite vector table + BIOS or P-ROM
     if (address <= 0x0FFFFF) {
       if (this.biosMode) {
-        // FBNeo-style composite mapping:
-        // 0x000-0x07F: BIOS vectors (SSP, PC, bus error, etc.)
-        // 0x080-0x3FF: Game P-ROM vectors (exception/USER vectors)
-        // 0x400+: BIOS ROM code
-        if (address < 0x80) {
-          return address < this.biosRom.length ? this.biosRom[address]! : 0xFF;
-        }
-        if (address < 0x400) {
-          return address < this.programRom.length ? this.programRom[address]! : 0xFF;
-        }
-        // Rest of BIOS ROM
+        // BIOS mode: entire 0x000000-0x0FFFFF maps to BIOS ROM (128KB mirrored).
+        // FBNeo does a composite mapping (0x80-0x3FF from P-ROM) but only AFTER
+        // the initial boot. During boot, the BIOS needs its own full vector table.
         const off = address & 0x1FFFF;
         return off < this.biosRom.length ? this.biosRom[off]! : 0xFF;
       }
+      // P-ROM mode: game vectors at 0x000000
       return address < this.programRom.length ? this.programRom[address]! : 0xFF;
     }
 
