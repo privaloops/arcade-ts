@@ -464,7 +464,7 @@ export class NeoGeoEmulator {
       }
     }
 
-    // Patch 2: Calendar range check — NOP the two branch-to-error instructions.
+    // Patch 2: Calendar range check — safety net alongside pd4990a.
     // At 0xC11C14: BCS.W $C11D8C (6500 0176) — "count < 57" → NOP NOP
     // At 0xC11C1C: BCC.W $C11D8C (6400 016E) — "count >= 64" → NOP NOP
     for (let i = 0; i < biosRom.length - 4; i++) {
