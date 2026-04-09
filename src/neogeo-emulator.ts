@@ -210,9 +210,8 @@ export class NeoGeoEmulator {
     this.m68000.reset();
     this.z80.reset();
 
-    // No BIOS patches — pd4990a handles the CALENDAR test.
-    // The BIOS may fail tests and enter watchdog, but VBlank handlers
-    // still run and render the eye catcher animation.
+    // No BIOS patches — pd4990a handles the CALENDAR test naturally.
+    // Patching the ROM breaks the SYSTEM ROM checksum test.
 
     // Wire ROM banking callbacks
     this.bus.setFixRomSwitchCallback((useBios) => {
@@ -488,22 +487,8 @@ export class NeoGeoEmulator {
       }
     }
 
-    // Patch 3: All error handler watchdog loops — lower SR mask.
-    // Pattern: MOVE.W #$0007, ($003C000C) = 33FC 0007 003C 000C
-    for (let i = 0; i < biosRom.length - 14; i++) {
-      if (biosRom[i] === 0x33 && biosRom[i + 1] === 0xFC &&
-          biosRom[i + 2] === 0x00 && biosRom[i + 3] === 0x07 &&
-          biosRom[i + 4] === 0x00 && biosRom[i + 5] === 0x3C &&
-          biosRom[i + 6] === 0x00 && biosRom[i + 7] === 0x0C) {
-        biosRom[i + 8] = 0x02;  // ANDI #$F8FF, SR
-        biosRom[i + 9] = 0x7C;
-        biosRom[i + 10] = 0xF8;
-        biosRom[i + 11] = 0xFF;
-        biosRom[i + 12] = 0x60; // BRA.S $-8
-        biosRom[i + 13] = 0xF8;
-        patched++;
-      }
-    }
+    // Patch 3 disabled — overwriting watchdog loops caused code fallthrough crashes.
+    // VBlank handlers still run correctly with irqMask=7 (they use a lower mask internally).
 
     if (patched > 0) console.log(`[Neo-Geo] Applied ${patched} BIOS patches`);
   }
