@@ -100,8 +100,22 @@ export class NeoGeoEmulator {
 
     // Wire Z80 sound reply → 68K
     this.z80Bus.setSoundReplyCallback((value: number) => {
-      console.log(`[Neo-Geo] Z80 main-thread reply=0x${value.toString(16)}`);
       this.bus.setSoundReply(value);
+    });
+
+    // When Z80 reads port 0x00, mark command as consumed (clears pending flag)
+    this.z80Bus.setSoundConsumedCallback(() => {
+      this.bus.clearSoundPending();
+    });
+
+    // Lazy Z80 sync: when 68K reads sound reply, run Z80 to catch up
+    this.bus.setSoundReadSyncCallback(() => {
+      // Run Z80 for a burst so it can process any pending command and write reply
+      let cycles = 512;
+      while (cycles > 0) {
+        if (this.z80Bus.shouldFireNmi()) this.z80.nmi();
+        cycles -= this.z80.step();
+      }
     });
 
     // IRQ acknowledge — clear both CPU and bus pending flags

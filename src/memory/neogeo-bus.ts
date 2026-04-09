@@ -54,6 +54,7 @@ export class NeoGeoBus implements BusInterface {
   private soundLatchFromZ80: number = 0;  // Z80 reply (read in upper byte of 0x320000)
   private soundCommandPending: boolean = false; // set when 68K writes, cleared when Z80 reads
   private _soundLatchCallback: ((value: number) => void) | null = null;
+  private _onSoundReadSync: (() => void) | null = null;
 
   // pd4990a RTC stub — bit 6 of 0x320001 must toggle for BIOS calendar test
   private rtcCounter: number = 0;
@@ -100,9 +101,18 @@ export class NeoGeoBus implements BusInterface {
     this._soundLatchCallback = cb;
   }
 
-  /** Called by Z80 bus to send reply back to 68K (clears pending flag) */
+  /** Set callback for lazy Z80 sync when 68K reads sound reply */
+  setSoundReadSyncCallback(cb: () => void): void {
+    this._onSoundReadSync = cb;
+  }
+
+  /** Called by Z80 bus to send reply back to 68K */
   setSoundReply(value: number): void {
     this.soundLatchFromZ80 = value;
+  }
+
+  /** Called when Z80 reads port 0x00 — marks command as consumed */
+  clearSoundPending(): void {
     this.soundCommandPending = false;
   }
 
@@ -215,6 +225,8 @@ export class NeoGeoBus implements BusInterface {
     }
 
     // REG_SOUND / timer16: 0x320000-0x320001
+    // Lazy Z80 sync: when 68K reads, run the Z80 catch-up callback
+    this._onSoundReadSync?.();
     // Word read: upper byte = Z80 reply + pending flag, lower byte = RTC + coins
     //   Bit 15: pending_command (0 = command pending, 1 = done/idle) — active LOW
     //   Bits 14-8: Z80 sound reply value (from port $0C)
@@ -223,9 +235,12 @@ export class NeoGeoBus implements BusInterface {
     //   Bits 4-0: coin inputs (active LOW, 0xFF = no coins)
     if (address >= 0x320000 && address <= 0x320001) {
       if (!(address & 1)) {
-        // High byte: pending flag (bit 7) + Z80 reply (bits 6-0)
-        const pending = this.soundCommandPending ? 0x00 : 0x80; // bit 15 of word
-        return pending | (this.soundLatchFromZ80 & 0x7F);
+        // High byte (FBNeo protocol):
+        // If command is still pending (Z80 hasn't read it), mask bit 7 of reply
+        if (!this.soundCommandPending) {
+          return this.soundLatchFromZ80; // full reply, Z80 has consumed command
+        }
+        return this.soundLatchFromZ80 & 0x7F; // bit 7 masked while pending
       }
       // Low byte: RTC pulse (bit 6), RTC data (bit 7), coins (bits 4-0, active LOW)
       // RTC pulse toggles every ~30 VBlanks (~0.5Hz, so full cycle = ~1Hz)
@@ -419,13 +434,18 @@ export class NeoGeoBus implements BusInterface {
         this.timerLow = value;
         this.timerReload = (this.timerHigh << 16) | this.timerLow;
         break;
-      case 6: // 0x3C000C: LSPC IRQ control (NOT acknowledge)
-        // Bits 0-2 control which IRQ sources are enabled, NOT acknowledgment.
-        // Acknowledgment happens via the 68K IACK cycle (in the emulator's IACK callback).
-        this.irqControl = value & 0x07;
+      case 6: { // 0x3C000C: IRQ acknowledge register (from FBNeo NeoIRQUpdate)
+        // Bits accumulate: bit 0 = ack IRQ3, bit 1 = ack scanline IRQ, bit 2 = ack VBlank
+        // When all 3 bits set (0x07), clear all pending IRQs
+        const ack = value & 0x07;
+        if (ack & 0x01) this.irqPending &= ~0x04; // bit 0 → ack IRQ3 (coldboot)
+        if (ack & 0x02) this.irqPending &= ~0x02; // bit 1 → ack IRQ2 (timer/scanline)
+        if (ack & 0x04) this.irqPending &= ~0x01; // bit 2 → ack IRQ1 (VBlank)
+        // Timer reload
         this.timerCounter = this.timerReload;
         this.timerRunning = true;
         break;
+      }
       case 7: // 0x3C000E: LSPC timer stop
         this.timerRunning = false;
         break;

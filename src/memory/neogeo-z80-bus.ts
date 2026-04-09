@@ -52,6 +52,8 @@ export class NeoGeoZ80Bus implements Z80BusInterface {
 
   // Reply to 68K
   private onSoundReply: ((value: number) => void) | null;
+  // Called when Z80 reads port 0x00 (consumes sound command)
+  private onSoundConsumed: (() => void) | null;
 
   constructor() {
     this.audioRom = new Uint8Array(0);
@@ -71,6 +73,7 @@ export class NeoGeoZ80Bus implements Z80BusInterface {
     this.onYm2610Read = null;
     this.ym2610TimerCounter = 0;
     this.onSoundReply = null;
+    this.onSoundConsumed = null;
   }
 
   loadAudioRom(data: Uint8Array): void { this.audioRom = data; }
@@ -86,6 +89,10 @@ export class NeoGeoZ80Bus implements Z80BusInterface {
 
   setSoundReplyCallback(cb: (value: number) => void): void {
     this.onSoundReply = cb;
+  }
+
+  setSoundConsumedCallback(cb: () => void): void {
+    this.onSoundConsumed = cb;
   }
 
   /** Push a sound command from the 68K */
@@ -152,7 +159,8 @@ export class NeoGeoZ80Bus implements Z80BusInterface {
     port &= 0xFF;
 
     switch (port) {
-      case 0x00: // Sound latch (command from 68K)
+      case 0x00: // Sound latch (command from 68K) — reading clears pending
+        this.onSoundConsumed?.();
         return this.soundLatchValue;
 
       case 0x04: // YM2610 status port 0
