@@ -1,5 +1,6 @@
 /**
  * Drop zone — ROM file loading via drag & drop, file picker, and game selector.
+ * Supports both CPS1 and Neo-Geo ROMs with auto-detection.
  */
 
 import type { Emulator } from "../emulator";
@@ -7,9 +8,16 @@ import { CPS1_PARENT_GAMES, ROT270_GAMES } from "../game-catalog";
 import { DebugPanel } from "../debug/debug-panel";
 import type { AudioPanel } from "../audio/audio-panel";
 import { loadDipFromStorage } from "./dip-switch-ui";
+import { isNeoGeoRom } from "../memory/neogeo-rom-loader";
+import type { NeoGeoEmulator } from "../neogeo-emulator";
+import JSZip from "jszip";
 
 export interface DropZoneDeps {
   emulator: Emulator;
+  /** Factory to create a NeoGeoEmulator on demand, reusing the CPS1 renderer */
+  createNeoGeoEmulator?: () => NeoGeoEmulator;
+  /** Currently active Neo-Geo emulator (if a Neo-Geo ROM was loaded) */
+  neoGeoEmulator?: NeoGeoEmulator | null;
   canvas: HTMLCanvasElement;
   domScreen: HTMLDivElement;
   dropZone: HTMLDivElement;
@@ -58,52 +66,101 @@ async function handleRomFile(file: File): Promise<void> {
   setStatus(`Loading: ${file.name}...`);
 
   try {
-    await emulator.initAudio();
-    await emulator.loadRom(file);
-    emulator.resumeAudio();
-    dropZone.classList.add("hidden");
-    emuBar.classList.add("visible", "hidden-by-user");
-    _deps.exportBtn.style.display = "";
+    // Pre-inspect ZIP to detect Neo-Geo vs CPS1
+    const zipBuf = await file.arrayBuffer();
+    const zip = await JSZip.loadAsync(zipBuf);
+    const fileNames: string[] = [];
+    zip.forEach((path, entry) => {
+      if (!entry.dir) {
+        const name = path.includes('/') ? path.substring(path.lastIndexOf('/') + 1) : path;
+        fileNames.push(name);
+      }
+    });
 
-    const mode = getRendererMode();
-    if (mode !== "dom") {
+    const isNeoGeo = isNeoGeoRom(fileNames);
+
+    if (isNeoGeo && _deps.createNeoGeoEmulator) {
+      // Stop CPS1 emulator — release the canvas/WebGL context
+      emulator.stop();
+
+      // Neo-Geo path
+      let ngoEmu = _deps.neoGeoEmulator;
+      if (!ngoEmu) {
+        ngoEmu = _deps.createNeoGeoEmulator();
+        _deps.neoGeoEmulator = ngoEmu;
+      }
+      await ngoEmu.initAudio();
+      await ngoEmu.loadRomFromFile(file);
+      ngoEmu.resumeAudio();
+
+      // Expose on window for E2E tests / debugging
+      (window as unknown as Record<string, unknown>).__ngoEmu = ngoEmu;
+
+      dropZone.classList.add("hidden");
+      emuBar.classList.add("visible", "hidden-by-user");
+      _deps.exportBtn.style.display = "";
       canvas.style.visibility = "visible";
       domScreen.style.display = "none";
+
+      ngoEmu.start();
+      _deps.onRomLoaded(ngoEmu.getGameName());
+      setStatus(`Running: ${file.name} (Neo-Geo)`);
+    } else {
+      // CPS1 path (original)
+      await emulator.initAudio();
+      await emulator.loadRom(file);
+      emulator.resumeAudio();
+
+      // Stop any active Neo-Geo emulator
+      if (_deps.neoGeoEmulator) {
+        _deps.neoGeoEmulator.stop();
+        _deps.neoGeoEmulator = null;
+      }
+
+      dropZone.classList.add("hidden");
+      emuBar.classList.add("visible", "hidden-by-user");
+      _deps.exportBtn.style.display = "";
+
+      const mode = getRendererMode();
+      if (mode !== "dom") {
+        canvas.style.visibility = "visible";
+        domScreen.style.display = "none";
+      }
+
+      // Auto-detect TATE (ROT270) games
+      const romName = file.name.replace('.zip', '');
+      const isTate = ROT270_GAMES.has(romName);
+      canvasWrapper.classList.toggle("tate", isTate);
+      tateToggle.checked = isTate;
+
+      // Restore saved DIP switches before starting
+      loadDipFromStorage(emulator.getGameName(), emulator.getIoPorts());
+
+      // Open debug panel by default
+      let debugPanel = getDebugPanel();
+      if (!debugPanel) {
+        debugPanel = new DebugPanel(emulator, canvas);
+        setDebugPanel(debugPanel);
+      }
+      debugPanel.onGameChange();
+      if (!debugPanel.isOpen()) {
+        debugPanel.toggle();
+      }
+
+      // Setup DOM renderer AFTER debug panel
+      if (mode === "dom") {
+        canvas.style.visibility = "hidden";
+        domScreen.style.display = "block";
+        setupDomRenderer();
+      }
+
+      // Update audio panel
+      getAudioPanel()?.onGameChange();
+
+      emulator.start();
+      _deps.onRomLoaded(emulator.getGameName());
+      setStatus(`Running: ${file.name} (${mode}${isTate ? ', TATE' : ''})`);
     }
-
-    // Auto-detect TATE (ROT270) games
-    const romName = file.name.replace('.zip', '');
-    const isTate = ROT270_GAMES.has(romName);
-    canvasWrapper.classList.toggle("tate", isTate);
-    tateToggle.checked = isTate;
-
-    // Restore saved DIP switches before starting
-    loadDipFromStorage(emulator.getGameName(), emulator.getIoPorts());
-
-    // Open debug panel by default
-    let debugPanel = getDebugPanel();
-    if (!debugPanel) {
-      debugPanel = new DebugPanel(emulator, canvas);
-      setDebugPanel(debugPanel);
-    }
-    debugPanel.onGameChange();
-    if (!debugPanel.isOpen()) {
-      debugPanel.toggle();
-    }
-
-    // Setup DOM renderer AFTER debug panel (which installs its own render callback)
-    if (mode === "dom") {
-      canvas.style.visibility = "hidden";
-      domScreen.style.display = "block";
-      setupDomRenderer();
-    }
-
-    // Update audio panel
-    getAudioPanel()?.onGameChange();
-
-    emulator.start();
-    _deps.onRomLoaded(emulator.getGameName());
-    setStatus(`Running: ${file.name} (${mode}${isTate ? ', TATE' : ''})`);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     setStatus(`Error: ${msg}`);

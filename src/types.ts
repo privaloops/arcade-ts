@@ -16,6 +16,8 @@ export interface BusInterface {
 export interface RendererInterface {
   render(framebuffer: Uint8Array): void;
   drawText(text: string, x: number, y: number): void;
+  /** Resize for a different native resolution (e.g., CPS1 384×224 → Neo-Geo 320×224) */
+  resize?(width: number, height: number): void;
 }
 
 /** Z80 bus interface (byte access + I/O ports) */

@@ -14,10 +14,14 @@ export class WebGLRenderer implements RendererInterface {
   private readonly gl: WebGL2RenderingContext;
   private readonly texture: WebGLTexture;
   private readonly program: WebGLProgram;
+  private texWidth: number;
+  private texHeight: number;
 
-  constructor(canvas: HTMLCanvasElement) {
-    canvas.width = SCREEN_WIDTH;
-    canvas.height = SCREEN_HEIGHT;
+  constructor(canvas: HTMLCanvasElement, width = SCREEN_WIDTH, height = SCREEN_HEIGHT) {
+    this.texWidth = width;
+    this.texHeight = height;
+    canvas.width = width;
+    canvas.height = height;
 
     const gl = canvas.getContext('webgl2', { alpha: false, antialias: false, preserveDrawingBuffer: true });
     if (!gl) throw new Error('WebGL2 not available');
@@ -83,11 +87,26 @@ export class WebGLRenderer implements RendererInterface {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     // Allocate texture storage
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, SCREEN_WIDTH, SCREEN_HEIGHT, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
     this.texture = tex;
 
     gl.useProgram(prog);
-    gl.viewport(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+    gl.viewport(0, 0, width, height);
+  }
+
+  /**
+   * Resize the renderer for a different resolution (e.g., Neo-Geo 320x224).
+   * Reallocates the GPU texture and updates the viewport.
+   */
+  resize(width: number, height: number): void {
+    this.texWidth = width;
+    this.texHeight = height;
+    this.canvas.width = width;
+    this.canvas.height = height;
+    const gl = this.gl;
+    gl.bindTexture(gl.TEXTURE_2D, this.texture);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.viewport(0, 0, width, height);
   }
 
   /**
@@ -96,7 +115,7 @@ export class WebGLRenderer implements RendererInterface {
   render(framebuffer: Uint8Array): void {
     const gl = this.gl;
     gl.bindTexture(gl.TEXTURE_2D, this.texture);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, gl.RGBA, gl.UNSIGNED_BYTE, framebuffer);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, this.texWidth, this.texHeight, gl.RGBA, gl.UNSIGNED_BYTE, framebuffer);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
 

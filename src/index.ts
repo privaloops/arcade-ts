@@ -8,6 +8,7 @@ import { inject } from "@vercel/analytics";
 inject();
 
 import { Emulator } from "./emulator";
+import { NeoGeoEmulator } from "./neogeo-emulator";
 import { DEFAULT_GP_MAPPING, DEFAULT_P1_MAPPING, DEFAULT_P2_MAPPING, type AutofireKey } from "./input/input";
 import { DebugPanel } from "./debug/debug-panel";
 import { AudioPanel } from "./audio/audio-panel";
@@ -361,6 +362,8 @@ initDropZone({
   getDebugPanel, setDebugPanel, getAudioPanel: () => audioPanel, setLastRomFile, getLastRomFile, setStatus,
   onSprixeFile: handleSprixeFile,
   onRomLoaded,
+  createNeoGeoEmulator: () => new NeoGeoEmulator(canvas, emulator.getRenderer()),
+  neoGeoEmulator: null,
 });
 initShortcuts({
   emulator, canvasWrapper, emuBar, pauseBtn, muteBtn, getMuted, setMuted,

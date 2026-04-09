@@ -17,12 +17,11 @@ export { SCREEN_WIDTH, SCREEN_HEIGHT, FRAMEBUFFER_SIZE } from '../constants';
 export class Renderer implements RendererInterface {
   private readonly canvas: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D;
-  private readonly imageData: ImageData;
+  private imageData: ImageData;
 
-  constructor(canvas: HTMLCanvasElement) {
-    // Fix internal resolution regardless of how the element was sized in CSS.
-    canvas.width = SCREEN_WIDTH;
-    canvas.height = SCREEN_HEIGHT;
+  constructor(canvas: HTMLCanvasElement, width = SCREEN_WIDTH, height = SCREEN_HEIGHT) {
+    canvas.width = width;
+    canvas.height = height;
 
     const ctx = canvas.getContext("2d", { alpha: false });
     if (!ctx) {
@@ -70,7 +69,13 @@ export class Renderer implements RendererInterface {
    *
    * Call this on `window` "resize" events.
    */
-  resize(): void {
+  resize(newWidth?: number, newHeight?: number): void {
+    // Change native resolution if requested
+    if (newWidth !== undefined && newHeight !== undefined) {
+      this.canvas.width = newWidth;
+      this.canvas.height = newHeight;
+      this.imageData = this.ctx.createImageData(newWidth, newHeight);
+    }
     const parent = this.canvas.parentElement;
 
     let availableWidth: number;
