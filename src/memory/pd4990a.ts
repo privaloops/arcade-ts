@@ -56,9 +56,9 @@ export class PD4990A {
   private update(): void {
     const currentTicks = this.getTicks();
     let elapsed = (currentTicks - this.lastTicks) >>> 0;
-    // If no cycles have elapsed (tight polling loop within one 68K instruction),
-    // estimate ~76 cycles per read (one iteration of the BIOS RTC loop).
-    if (elapsed === 0) elapsed = 76;
+    // Don't estimate cycles — only real cycles from addCycles count.
+    // The BIOS tight loop will see the same TP value within one 68K step,
+    // but the transition will be visible when crossing step boundaries.
     this.lastTicks = currentTicks;
 
     // TP counter
