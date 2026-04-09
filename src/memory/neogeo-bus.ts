@@ -19,6 +19,7 @@
  */
 
 import type { BusInterface } from '../types';
+import { PD4990A } from './pd4990a';
 
 export class NeoGeoBus implements BusInterface {
   private programRom: Uint8Array;
@@ -58,9 +59,10 @@ export class NeoGeoBus implements BusInterface {
   private _soundLatchCallback: ((value: number) => void) | null = null;
   private _onSoundReadSync: (() => void) | null = null;
 
-  // pd4990a RTC stub — bit 6 of 0x320001 must toggle for BIOS calendar test
-  private rtcFrameCounter: number = 0;
-  private rtcOutputBit: boolean = false;
+  // pd4990a RTC chip
+  private rtc: PD4990A;
+  // Total 68K cycles accumulated (for RTC tick counting)
+  private totalCycles = 0;
 
   // P-ROM banking: 0x200000-0x2FFFFF region
   // Default = 0 (mirror of P-ROM start). For games > 1MB, bank switch changes this.
@@ -78,7 +80,12 @@ export class NeoGeoBus implements BusInterface {
     this.backupRam = new Uint8Array(0x10000); // 64KB
     this.paletteRam = new Uint8Array(0x2000); // 8KB
     this.vram = new Uint8Array(0x11000);      // ~68KB (slow 64KB + fast ~4KB)
+    // pd4990a RTC — uses 68K cycle count for timing
+    this.rtc = new PD4990A(12_000_000, () => this.totalCycles);
   }
+
+  /** Add 68K cycles to the total (call from emulator per step) */
+  addCycles(n: number): void { this.totalCycles += n; }
 
   loadProgramRom(data: Uint8Array): void { this.programRom = data; }
   loadBiosRom(data: Uint8Array): void { this.biosRom = data; }
@@ -135,21 +142,6 @@ export class NeoGeoBus implements BusInterface {
   /** Set MVS mode (default is AES) */
   setMvsMode(mvs: boolean): void {
     this.portStatus = mvs ? 0x01 : 0x00;
-  }
-
-  /** Tick the RTC counter — call once per VBlank (~60Hz). Toggles every 30 frames (~2Hz).
-   *  The BIOS expects 57-64 VBlanks between transitions (~1 sec at 59Hz).
-   *  We use 30 frames so the BIOS sees ~30 VBlanks per half-cycle — the BIOS
-   *  will measure ~30 frames and may accept it or fail. Some BIOS versions
-   *  are lenient. Alternatively, use 59 for exactly ~1 second. */
-  tickRtc(): void {
-    this.rtcFrameCounter++;
-    // Toggle every 5 frames for now (fast, for debugging).
-    // TODO: implement proper pd4990a with 59-frame period (57-64 expected)
-    if (this.rtcFrameCounter >= 5) {
-      this.rtcFrameCounter = 0;
-      this.rtcOutputBit = !this.rtcOutputBit;
-    }
   }
 
   /** Assert IRQ (1=VBlank, 2=timer, 3=coldboot) */
@@ -266,12 +258,9 @@ export class NeoGeoBus implements BusInterface {
         }
         return this.soundLatchFromZ80 & 0x7F; // bit 7 masked while pending
       }
-      // Low byte: RTC pulse (bit 6), coins (bits 4-0, active LOW)
-      // rtcOutputBit changes at VBlank every 59 frames.
-      // The tight polling loop crosses scanline boundaries (each scanline
-      // has ~10 loop iterations), so it WILL see the transition at the VBlank
-      // boundary where tickRtc() toggles the bit.
-      return this.rtcOutputBit ? 0xFF : 0xBF;
+      // Low byte: bits 7-6 = pd4990a (DO, TP), bits 5-0 = 0x3F (inputs)
+      const rtcBits = this.rtc.read(); // bit 1 = DO, bit 0 = TP
+      return 0x3F | ((rtcBits & 3) << 6); // map to bits 7-6
     }
 
     // REG_STATUS_A: 0x340000-0x340001 (P1 start/select, P2 directions+buttons, coins)
