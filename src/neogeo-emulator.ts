@@ -89,14 +89,12 @@ export class NeoGeoEmulator {
     this.framebuffer = new Uint8Array(NGO_FRAMEBUFFER_SIZE);
 
     // Wire sound latch: 68K → Z80
+    // Always push to main-thread Z80 (for immediate handshake visibility).
+    // Also forward to audio worker for actual sound playback.
     this.bus.setSoundLatchCallback((value: number) => {
-      if (this.frameCount < 5) {
-        console.log(`[Neo-Geo SND] 68K→Z80 latch=0x${value.toString(16)} frame=${this.frameCount} workerReady=${this.audioWorkerReady}`);
-      }
+      this.z80Bus.pushSoundLatch(value);
       if (this.audioWorkerReady) {
         this.pendingSoundLatches.push(value);
-      } else {
-        this.z80Bus.pushSoundLatch(value);
       }
     });
 
@@ -106,8 +104,10 @@ export class NeoGeoEmulator {
       this.bus.setSoundReply(value);
     });
 
-    // IRQ acknowledge
+    // IRQ acknowledge — clear both CPU and bus pending flags
     this.m68000.setIrqAckCallback(() => {
+      const level = this.bus.getPendingIrq();
+      if (level > 0) this.bus.acknowledgeIrq(level);
       this.m68000.clearAllInterrupts();
     });
   }
@@ -301,6 +301,7 @@ export class NeoGeoEmulator {
       if (scanline === NGO_VBLANK_LINE) {
         this.video.markPaletteDirty();
         this.video.tickAutoAnim();
+        this.bus.tickRtc();
         this.bus.assertIrq(1); // IRQ1 = VBlank
 
         this._vblankCallback?.();
@@ -314,12 +315,6 @@ export class NeoGeoEmulator {
       // Timer tick
       this.bus.tickTimer();
 
-      // Synthetic Z80 reply: toggle bit 6 every 8 scanlines.
-      // The 68K polls 0x320001 for a 0→1 transition on bit 6 (Z80 ready signal).
-      // TODO: replace with proper Z80 BIOS handshake once Z80 runs on main thread with YM2610.
-      if (this.frameCount < 300 && (scanline & 7) === 0) {
-        this.bus.setSoundReply((scanline & 8) ? 0x40 : 0x00);
-      }
 
 
       // Check pending IRQs — don't auto-acknowledge; the BIOS/game
@@ -329,27 +324,36 @@ export class NeoGeoEmulator {
         this.m68000.assertInterrupt(irqLevel);
       }
 
-      // Run 68000 for one scanline
-      let cyclesLeft = NGO_M68K_CYCLES_PER_SCANLINE;
-      while (cyclesLeft > 0) {
-        try {
-          const ran = this.m68000.step();
-          cyclesLeft -= ran;
-        } catch {
-          cyclesLeft = 0;
-        }
-      }
+      // Interleave 68K and Z80 in small slices (~100 cycles each) so the
+      // Z80 reply is visible to the 68K within the same scanline.
+      // This is critical for the BIOS 68K↔Z80 handshake (tight polling loop).
+      let m68kLeft = NGO_M68K_CYCLES_PER_SCANLINE;
+      let z80Left = Math.round(NGO_Z80_CLOCK / NGO_FRAME_RATE / NGO_VTOTAL);
+      const SLICE = 32; // ~32 68K cycles per slice ≈ ~10 Z80 cycles
 
-      // Run Z80 on main thread — interleaved with 68K per scanline.
-      // The Z80 reply must be visible to the 68K immediately (same JS context),
-      // so the Z80 cannot run in a separate Worker for the handshake to work.
-      {
-        let z80Cycles = Math.round(NGO_Z80_CLOCK / NGO_FRAME_RATE / NGO_VTOTAL); // ~256 cycles/scanline
-        while (z80Cycles > 0) {
+      while (m68kLeft > 0 || z80Left > 0) {
+        // 68K slice
+        let m68kSlice = Math.min(m68kLeft, SLICE);
+        while (m68kSlice > 0) {
+          try {
+            const ran = this.m68000.step();
+            m68kSlice -= ran;
+            m68kLeft -= ran;
+          } catch {
+            m68kSlice = 0;
+            m68kLeft = 0;
+          }
+        }
+
+        // Z80 slice (proportional: ~1/3 of 68K cycles at 4MHz/12MHz)
+        let z80Slice = Math.min(z80Left, Math.round(SLICE / 3));
+        while (z80Slice > 0) {
           if (this.z80Bus.shouldFireNmi()) {
             this.z80.nmi();
           }
-          z80Cycles -= this.z80.step();
+          const ran = this.z80.step();
+          z80Slice -= ran;
+          z80Left -= ran;
         }
       }
     }

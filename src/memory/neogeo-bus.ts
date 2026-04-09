@@ -51,9 +51,12 @@ export class NeoGeoBus implements BusInterface {
 
   // Sound latch
   private soundLatchToZ80: number = 0;
-  private soundLatchFromZ80: number = 0;
-  private soundLatchPending: boolean = false;
+  private soundLatchFromZ80: number = 0;  // Z80 reply (read in upper byte of 0x320000)
+  private soundCommandPending: boolean = false; // set when 68K writes, cleared when Z80 reads
   private _soundLatchCallback: ((value: number) => void) | null = null;
+
+  // pd4990a RTC stub — bit 6 of 0x320001 must toggle for BIOS calendar test
+  private rtcCounter: number = 0;
 
   // P-ROM banking: 0x200000-0x2FFFFF region
   // Default = 0 (mirror of P-ROM start). For games > 1MB, bank switch changes this.
@@ -83,6 +86,10 @@ export class NeoGeoBus implements BusInterface {
     this.vramAddr = 0;
     this.vramMod = 0;
     this.timerRunning = false;
+    // Pre-set Z80 reply to 0xC3 ("HELLO") — this is what sm1.sm1 sends at boot.
+    // The 68K BIOS checks for this before proceeding with the Z80 comm test.
+    this.soundLatchFromZ80 = 0xC3;
+    this.soundCommandPending = false;
   }
 
   getVram(): Uint8Array { return this.vram; }
@@ -93,9 +100,10 @@ export class NeoGeoBus implements BusInterface {
     this._soundLatchCallback = cb;
   }
 
-  /** Called by Z80 bus to send reply back to 68K */
+  /** Called by Z80 bus to send reply back to 68K (clears pending flag) */
   setSoundReply(value: number): void {
     this.soundLatchFromZ80 = value;
+    this.soundCommandPending = false;
   }
 
   /** Set I/O port values (called by InputManager) */
@@ -106,6 +114,11 @@ export class NeoGeoBus implements BusInterface {
   /** Set MVS mode (default is AES) */
   setMvsMode(mvs: boolean): void {
     this.portStatus = mvs ? 0x01 : 0x00;
+  }
+
+  /** Tick the RTC counter — call once per VBlank (~60Hz). Toggles every 30 calls (~1Hz). */
+  tickRtc(): void {
+    this.rtcCounter++;
   }
 
   /** Assert IRQ (1=VBlank, 2=timer, 3=coldboot) */
@@ -201,9 +214,23 @@ export class NeoGeoBus implements BusInterface {
       return 0xFF; // No DIP switches on AES
     }
 
-    // REG_SOUND: 0x320000-0x320001 (read = Z80 reply, write = Z80 command)
+    // REG_SOUND / timer16: 0x320000-0x320001
+    // Word read: upper byte = Z80 reply + pending flag, lower byte = RTC + coins
+    //   Bit 15: pending_command (0 = command pending, 1 = done/idle) — active LOW
+    //   Bits 14-8: Z80 sound reply value (from port $0C)
+    //   Bit 7: RTC data bit (stub: 0)
+    //   Bit 6: RTC time pulse (must toggle ~1Hz for BIOS calendar test)
+    //   Bits 4-0: coin inputs (active LOW, 0xFF = no coins)
     if (address >= 0x320000 && address <= 0x320001) {
-      return (address & 1) ? this.soundLatchFromZ80 : 0xFF;
+      if (!(address & 1)) {
+        // High byte: pending flag (bit 7) + Z80 reply (bits 6-0)
+        const pending = this.soundCommandPending ? 0x00 : 0x80; // bit 15 of word
+        return pending | (this.soundLatchFromZ80 & 0x7F);
+      }
+      // Low byte: RTC pulse (bit 6), RTC data (bit 7), coins (bits 4-0, active LOW)
+      // RTC pulse toggles every ~30 VBlanks (~0.5Hz, so full cycle = ~1Hz)
+      const rtcPulse = (Math.floor(this.rtcCounter / 30) & 1) ? 0x40 : 0x00;
+      return 0xBF | rtcPulse;
     }
 
     // REG_STATUS_A: 0x340000-0x340001 (P1 start/select, P2 directions+buttons, coins)
@@ -274,7 +301,7 @@ export class NeoGeoBus implements BusInterface {
     if (address >= 0x320000 && address <= 0x320001) {
       if (address & 1) {
         this.soundLatchToZ80 = value;
-        this.soundLatchPending = true;
+        this.soundCommandPending = true;
         this._soundLatchCallback?.(value);
       }
       return;
@@ -323,7 +350,7 @@ export class NeoGeoBus implements BusInterface {
     // Sound command
     if (address >= 0x320000 && address <= 0x320001) {
       this.soundLatchToZ80 = value & 0xFF;
-      this.soundLatchPending = true;
+      this.soundCommandPending = true;
       this._soundLatchCallback?.(value & 0xFF);
       return;
     }
@@ -392,12 +419,9 @@ export class NeoGeoBus implements BusInterface {
         this.timerLow = value;
         this.timerReload = (this.timerHigh << 16) | this.timerLow;
         break;
-      case 6: // 0x3C000C: IRQ acknowledge + control
-        // Writing acknowledges the IRQs whose bits are set
-        if (value & 0x01) this.irqPending &= ~0x01; // Ack IRQ1 (VBlank)
-        if (value & 0x02) this.irqPending &= ~0x02; // Ack IRQ2 (timer)
-        if (value & 0x04) this.irqPending &= ~0x04; // Ack IRQ3 (coldboot)
-        // Also controls timer enable/reload
+      case 6: // 0x3C000C: LSPC IRQ control (NOT acknowledge)
+        // Bits 0-2 control which IRQ sources are enabled, NOT acknowledgment.
+        // Acknowledgment happens via the 68K IACK cycle (in the emulator's IACK callback).
         this.irqControl = value & 0x07;
         this.timerCounter = this.timerReload;
         this.timerRunning = true;
@@ -459,10 +483,10 @@ export class NeoGeoBus implements BusInterface {
   getSoundLatch(): number { return this.soundLatchToZ80; }
 
   /** Check if sound latch has pending data */
-  isSoundLatchPending(): boolean { return this.soundLatchPending; }
+  isSoundLatchPending(): boolean { return this.soundCommandPending; }
 
   /** Clear sound latch pending flag (called by Z80 after reading) */
-  clearSoundLatchPending(): void { this.soundLatchPending = false; }
+  clearSoundLatchPending(): void { this.soundCommandPending = false; }
 
   // ---------------------------------------------------------------------------
   // Scanline counter (set by emulator during frame loop)
