@@ -209,8 +209,9 @@ export class NeoGeoEmulator {
     this.m68000.reset();
     this.z80.reset();
 
-    // Patch BIOS to skip failing boot tests (calendar, etc.)
-    this.patchBiosBoot(romSet.biosRom);
+    // No BIOS patches — pd4990a handles the CALENDAR test.
+    // The BIOS may fail tests and enter watchdog, but VBlank handlers
+    // still run and render the eye catcher animation.
 
     // Wire ROM banking callbacks
     this.bus.setFixRomSwitchCallback((useBios) => {

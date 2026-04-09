@@ -350,6 +350,13 @@ export class NeoGeoBus implements BusInterface {
       return;
     }
 
+    // pd4990a RTC write: 0x380000-0x3800FF
+    // bit 0 = DATA_IN, bit 1 = CLK, bit 2 = STB
+    if (address >= 0x380000 && address <= 0x3800FF) {
+      this.rtc.write(value & 2, value & 4, value & 1);
+      return;
+    }
+
     // Palette RAM: 0x400000-0x401FFF
     if (address >= 0x400000 && address <= 0x401FFF) {
       this.paletteRam[address - 0x400000] = value;

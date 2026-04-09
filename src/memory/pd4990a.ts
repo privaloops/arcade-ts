@@ -55,7 +55,10 @@ export class PD4990A {
   /** Update TP and second counters based on elapsed CPU cycles */
   private update(): void {
     const currentTicks = this.getTicks();
-    const elapsed = (currentTicks - this.lastTicks) >>> 0;
+    let elapsed = (currentTicks - this.lastTicks) >>> 0;
+    // If no cycles have elapsed (tight polling loop within one 68K instruction),
+    // estimate ~76 cycles per read (one iteration of the BIOS RTC loop).
+    if (elapsed === 0) elapsed = 76;
     this.lastTicks = currentTicks;
 
     // TP counter
