@@ -215,9 +215,22 @@ export class NeoGeoEmulator {
         cycles -= this.z80.step();
       }
     }
-    // After Z80 pre-boot, set the HELLO reply that the BIOS expects.
-    // sm1.sm1 doesn't send it naturally in our emulation.
     this.bus.setSoundReply(0xC3);
+
+    // Skip BIOS boot — run the game directly.
+    // The BIOS test loop never completes without full pd4990a RTC emulation.
+    // We initialize the minimum state the game needs and jump to game code.
+    this.bus.write8(0x3A0013, 0); // SWPROM — P-ROM at 0x000000
+    this.bus.write8(0x3A001B, 0); // Game fix/Z80 ROM
+    this.video.setFixRomMode(false); // Use game S-ROM
+    // Clear VRAM
+    for (let i = 0; i < 0x8600; i++) {
+      this.bus.writeVramWord(i, 0);
+    }
+    // Enable IRQs via LSPC
+    this.bus.write16(0x3C000C, 0x0007);
+    // Reset 68K with game vectors (P-ROM now at 0x000000)
+    this.m68000.reset();
 
 
     console.log(`[Neo-Geo] Loaded ${romSet.name}: ${romSet.description}`);
@@ -456,7 +469,29 @@ export class NeoGeoEmulator {
       }
     }
 
-    // Patch 2: All error handler watchdog loops — lower SR mask.
+    // Patch 2: Calendar range check — NOP the two branch-to-error instructions.
+    // At 0xC11C14: BCS.W $C11D8C (6500 0176) — "count < 57" → NOP NOP
+    // At 0xC11C1C: BCC.W $C11D8C (6400 016E) — "count >= 64" → NOP NOP
+    for (let i = 0; i < biosRom.length - 4; i++) {
+      // BCS.W to error handler
+      if (biosRom[i] === 0x65 && biosRom[i + 1] === 0x00 &&
+          biosRom[i + 2] === 0x01 && biosRom[i + 3] === 0x76) {
+        biosRom[i] = 0x4E; biosRom[i + 1] = 0x71;
+        biosRom[i + 2] = 0x4E; biosRom[i + 3] = 0x71;
+        console.log(`[Neo-Geo] Patched BIOS: NOP calendar BCS at 0x${i.toString(16)}`);
+        patched++;
+      }
+      // BCC.W to error handler
+      if (biosRom[i] === 0x64 && biosRom[i + 1] === 0x00 &&
+          biosRom[i + 2] === 0x01 && biosRom[i + 3] === 0x6E) {
+        biosRom[i] = 0x4E; biosRom[i + 1] = 0x71;
+        biosRom[i + 2] = 0x4E; biosRom[i + 3] = 0x71;
+        console.log(`[Neo-Geo] Patched BIOS: NOP calendar BCC at 0x${i.toString(16)}`);
+        patched++;
+      }
+    }
+
+    // Patch 3: All error handler watchdog loops — lower SR mask.
     // Pattern: MOVE.W #$0007, ($003C000C) = 33FC 0007 003C 000C
     for (let i = 0; i < biosRom.length - 14; i++) {
       if (biosRom[i] === 0x33 && biosRom[i + 1] === 0xFC &&
