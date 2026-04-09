@@ -93,6 +93,10 @@ export class NeoGeoZ80Bus implements Z80BusInterface {
     this.onSoundReply = cb;
   }
 
+  getSoundReplyCallback(): ((value: number) => void) | null {
+    return this.onSoundReply;
+  }
+
   setSoundConsumedCallback(cb: () => void): void {
     this.onSoundConsumed = cb;
   }

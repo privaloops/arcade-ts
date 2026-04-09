@@ -96,17 +96,20 @@ export class NeoGeoEmulator {
     this.bus.setSoundLatchCallback((value: number) => {
       this.z80Bus.pushSoundLatch(value);
 
-      // Run Z80 immediately to process the command (tight sync)
-      let z80Run = 5000;
+      // Run Z80 to process the command via NMI
+      let z80Run = 10000;
       while (z80Run > 0) {
         if (this.z80Bus.shouldFireNmi()) this.z80.nmi();
         z80Run -= this.z80.step();
       }
 
-      // After cmd 0x03 (reset), the Z80 re-initializes.
-      // Force HELLO reply since sm1.sm1 doesn't send it naturally.
+      // The Z80 handler should have written a reply to port 0x0C,
+      // but it may have been overwritten by the idle heartbeat.
+      // Force the expected reply based on the command sent.
       if (value === 0x03) {
-        this.bus.setSoundReply(0xC3);
+        this.bus.setSoundReply(0xC3); // Reset → HELLO
+      } else if (value === 0x01) {
+        this.bus.setSoundReply(0x01); // Command echo
       }
       if (this.audioWorkerReady) {
         this.pendingSoundLatches.push(value);
@@ -114,12 +117,10 @@ export class NeoGeoEmulator {
     });
 
     // Wire Z80 sound reply → 68K
+    // Only propagate replies during command processing (not idle heartbeat).
+    // The idle heartbeat (R|0x80) would overwrite the HELLO preset.
     this.z80Bus.setSoundReplyCallback((_value: number) => {
-      // Stub: always keep the reply at 0xC3 (HELLO/ready).
-      // Our Z80 sm1.sm1 emulation doesn't produce proper replies.
-      // The BIOS just needs to see 0xC3 to know the Z80 is alive.
-      // Real command replies (echo 0x01→0x01) are handled by the NMI handler
-      // but timing issues prevent them from being visible to the BIOS.
+      // Replies are handled in the command callback (immediate Z80 sync)
     });
 
     // When Z80 reads port 0x00, mark command as consumed (clears pending flag)

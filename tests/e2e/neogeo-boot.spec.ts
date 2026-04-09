@@ -71,8 +71,14 @@ test('Neo-Geo boot', async ({ page }) => {
       opcodes.push(`${(a>>>0).toString(16)}:${bus.read16(a).toString(16).padStart(4,'0')}`);
     }
 
+    // Boot step from BIOS RAM at A5+0x0A08 (A5=0x10F300)
+    const bootStep = bus.read16(0x10F300 + 0x0A08);
+    const stepNames = ['WORK RAM','BACKUP RAM','COLOR RAM 0','COLOR RAM 1','VIDEO RAM','CALENDAR','SYSTEM ROM','Z80 COMM','UNKNOWN'];
+
     return {
       pc: `0x${(pc >>> 0).toString(16)}`,
+      bootStep,
+      failedTest: stepNames[bootStep] ?? `UNKNOWN(${bootStep})`,
       opcodes,
       sr: `0x${state.sr.toString(16)}`,
       irqMask: (state.sr >> 8) & 7,
