@@ -488,12 +488,10 @@ export class NeoGeoBus implements BusInterface {
         this.timerReload = (this.timerHigh << 16) | this.timerLow;
         break;
       case 6: { // 0x3C000C: IRQ acknowledge register (from FBNeo NeoIRQUpdate)
-        // Bits accumulate: bit 0 = ack IRQ3, bit 1 = ack scanline IRQ, bit 2 = ack VBlank
-        // When all 3 bits set (0x07), clear all pending IRQs
         const ack = value & 0x07;
-        if (ack & 0x01) this.irqPending &= ~0x04; // bit 0 → ack IRQ3 (coldboot)
-        if (ack & 0x02) this.irqPending &= ~0x02; // bit 1 → ack IRQ2 (timer/scanline)
-        if (ack & 0x04) this.irqPending &= ~0x01; // bit 2 → ack IRQ1 (VBlank)
+        if (ack & 0x01) this.irqPending &= ~0x04;
+        if (ack & 0x02) this.irqPending &= ~0x02;
+        if (ack & 0x04) this.irqPending &= ~0x01;
         // Timer reload
         this.timerCounter = this.timerReload;
         this.timerRunning = true;

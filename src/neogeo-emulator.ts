@@ -343,8 +343,8 @@ export class NeoGeoEmulator {
       this.runOneFrame();
     }
 
-    // Render
-    this.video.renderFrame(this.framebuffer);
+    // Copy slice-rendered framebuffer to output
+    this.video.copyFramebuffer(this.framebuffer);
     this.renderer.render(this.framebuffer);
   };
 
@@ -360,18 +360,25 @@ export class NeoGeoEmulator {
       this.pendingSoundLatches.length = 0;
     }
 
+    // Slice rendering: render visible scanlines in chunks between IRQ2 boundaries
+    this.video.beginFrame();
+    let sliceStart = 0;
+
     // Run scanlines
     for (let scanline = 0; scanline < NGO_VTOTAL; scanline++) {
       this.bus.setScanline(scanline);
 
-      // VBlank at line 224
+      // VBlank at line 224 — flush remaining visible slice
       if (scanline === NGO_VBLANK_LINE) {
+        if (sliceStart < NGO_VBLANK_LINE) {
+          this.video.renderSlice(sliceStart, NGO_VBLANK_LINE);
+          sliceStart = NGO_VBLANK_LINE;
+        }
         this.video.markPaletteDirty();
         this.video.tickAutoAnim();
-        this.bus.tickAutoAnim(); // Sync bus counter for LSPC scanline register
+        this.bus.tickAutoAnim();
 
         this.bus.assertIrq(1); // IRQ1 = VBlank
-
 
         this._vblankCallback?.();
       }
@@ -379,8 +386,12 @@ export class NeoGeoEmulator {
       // No coldboot IRQ3 — FBNeo doesn't fire it. The BIOS reset vector
       // handles initialization, VBlank IRQ1 drives the boot state machine.
 
-      // Timer tick
-      this.bus.tickTimer();
+      // Timer tick — flush slice before IRQ2 handler modifies VRAM
+      const timerFired = this.bus.tickTimer();
+      if (timerFired && scanline < NGO_VBLANK_LINE && scanline > sliceStart) {
+        this.video.renderSlice(sliceStart, scanline);
+        sliceStart = scanline;
+      }
 
 
 

@@ -109,6 +109,8 @@ export class NeoGeoVideo {
   private paletteDirty: boolean;
   private autoAnimCounter: number;
   private tileMask: number;           // wraps tile codes to ROM range
+  private _dbgHideFrom = 0;          // debug: hide sprites in range [from, to)
+  private _dbgHideTo = 0;
 
   constructor() {
     this.vram = new Uint8Array(0x11000);  // ~68KB
@@ -306,11 +308,19 @@ export class NeoGeoVideo {
   private readonly sprSize = new Uint8Array(NGO_MAX_SPRITES + 1);   // raw size (0-63)
   private readonly sprYZoom = new Uint8Array(NGO_MAX_SPRITES + 1);  // vertical shrink (0-255)
 
-  renderFrame(framebuffer: Uint8Array): void {
+  /** Prepare framebuffer for a new frame (clear + palette). Call once before renderSlice(). */
+  beginFrame(): void {
     if (this.paletteDirty) this.rebuildPaletteCache();
+    this.fb32.fill(this.paletteCache[0]!);
+  }
 
-    const fb32 = this.fb32;
-    fb32.fill(this.paletteCache[0]!);
+  /**
+   * Render a slice of scanlines [y0, y1) using current VRAM state.
+   * Re-runs the forward pass each slice so mid-frame VRAM changes (IRQ2) are picked up.
+   */
+  renderSlice(y0: number, y1: number): void {
+    if (y0 >= y1) return;
+    if (this.paletteDirty) this.rebuildPaletteCache();
 
     // Forward pass: hardware maintains running X/Y/size registers across sticky chains
     let chainX = 0, chainYRaw = 0, chainSize = 0, chainYZoom = 0;
@@ -331,7 +341,6 @@ export class NeoGeoVideo {
         chainX += prevXZoom + 1;
       }
 
-      // Each rendered sprite updates the X zoom for the next sticky advance
       if (chainSize > 0) {
         prevXZoom = (scb2 >> 8) & 0x0F;
       }
@@ -342,12 +351,22 @@ export class NeoGeoVideo {
       this.sprYZoom[i] = chainYZoom;
     }
 
-    // Render sprites low→high: higher index overwrites = higher visual priority
     for (let i = 1; i <= NGO_MAX_SPRITES; i++) {
-      this.renderSprite(i);
+      this.renderSprite(i, y0, y1);
     }
 
-    this.renderFixLayer();
+    this.renderFixLayer(y0, y1);
+  }
+
+  /** Copy internal framebuffer to output. */
+  copyFramebuffer(framebuffer: Uint8Array): void {
+    framebuffer.set(this.fb);
+  }
+
+  /** Legacy single-pass render (no mid-frame VRAM changes). */
+  renderFrame(framebuffer: Uint8Array): void {
+    this.beginFrame();
+    this.renderSlice(0, NGO_SCREEN_HEIGHT);
     framebuffer.set(this.fb);
   }
 
@@ -362,13 +381,14 @@ export class NeoGeoVideo {
    * The zoom ROM maps each output line to a source tile + row within the sprite,
    * allowing vertical shrink from 256 lines (full) down to 1 line.
    */
-  private renderSprite(index: number): void {
+  private renderSprite(index: number, y0 = 0, y1 = NGO_SCREEN_HEIGHT): void {
     const x = this.sprX[index]!;
     const yRaw = this.sprYRaw[index]!;
     const size = this.sprSize[index]!;
     const yZoom = this.sprYZoom[index]!;
 
     if (size === 0) return;
+    if (index >= this._dbgHideFrom && index < this._dbgHideTo) return;
 
     const scb1Base = NGO_SCB1_BASE + index * 64;
     const zoomTbl = this.zoomRom;
@@ -393,6 +413,9 @@ export class NeoGeoVideo {
       if (vLine >= VLINE_BOT) { line += VLINE_TOP + 0x200 - vLine; continue; }
 
       const screenY = vLine - VLINE_TOP;
+
+      // Clamp to slice range [y0, y1)
+      if (screenY < y0 || screenY >= y1) { line++; continue; }
 
       // Which half of the sprite column (0-15 or 16-31 in tile indices)
       let tileBase = line >= 0x100 ? 16 : 0;
@@ -467,7 +490,7 @@ export class NeoGeoVideo {
     }
   }
 
-  private renderFixLayer(): void {
+  private renderFixLayer(y0 = 0, y1 = NGO_SCREEN_HEIGHT): void {
     // Fix layer: 40 columns × 32 rows of 8x8 tiles
     // VRAM layout at FIX_BASE: 1 word per tile
     //   bits 15-12 = palette (0-15)
@@ -498,7 +521,7 @@ export class NeoGeoVideo {
 
         for (let ty = 0; ty < 8; ty++) {
           const py = screenY + ty;
-          if (py < 0 || py >= NGO_SCREEN_HEIGHT) continue;
+          if (py < y0 || py >= y1) continue;
 
           decodeFixRow(fixRom, tileOffset, ty, row, 0);
           const rowBase = py * NGO_SCREEN_WIDTH;
@@ -519,6 +542,15 @@ export class NeoGeoVideo {
   // ---------------------------------------------------------------------------
   // Editor methods
   // ---------------------------------------------------------------------------
+
+  /** Debug: hide sprites in index range [from, to). Call with (0,0) to show all. */
+  hideSprites(from: number, to: number): void {
+    this._dbgHideFrom = from;
+    this._dbgHideTo = to;
+    console.log(from === 0 && to === 0
+      ? '[Sprite Debug] All sprites visible'
+      : `[Sprite Debug] Hiding sprites ${from}-${to - 1}`);
+  }
 
   /** Diagnostic: dump full sprite table with SCB2 zoom values */
   dumpSpriteTable(): void {
