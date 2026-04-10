@@ -497,7 +497,11 @@ export async function loadNeoGeoRomFromZip(
   const biosRom = biosRomRaw ? wordSwap(biosRomRaw) : new Uint8Array(0x20000);
   const biosSRom = findBiosFile(biosMap, BIOS_SROM_NAMES) ?? new Uint8Array(0x20000);
   const biosZRom = findBiosFile(biosMap, BIOS_ZROM_NAMES) ?? new Uint8Array(0x20000);
-  const loRom = findBiosFile(biosMap, BIOS_LO_NAMES) ?? new Uint8Array(0x10000);
+  const loRomFound = findBiosFile(biosMap, BIOS_LO_NAMES);
+  const loRom = loRomFound ?? new Uint8Array(0x10000);
+  if (!loRomFound) {
+    console.warn('[Neo-Geo ROM] 000-lo.lo not found in BIOS — sprite zoom will use fallback');
+  }
 
   if (biosRom.length === 0x20000 && !findBiosFile(biosMap, BIOS_68K_NAMES)) {
     console.warn('[Neo-Geo ROM] No BIOS found — the game will not boot without neogeo.zip');

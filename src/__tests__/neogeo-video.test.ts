@@ -98,7 +98,7 @@ describe('NeoGeoVideo', () => {
       expect(entry.index).toBe(1);
       expect(entry.tileCode).toBe(0x100);
       expect(entry.palette).toBe(5);
-      expect(entry.y).toBe(100);
+      expect(entry.y).toBe(84); // Y=100 in 512-line space → screen Y = 100 - 16
       expect(entry.x).toBe(50);
       expect(entry.height).toBe(2);
       expect(entry.sticky).toBe(false);

@@ -6,7 +6,7 @@
  * - Sprites are vertical columns of 16x16 tiles (up to 32 tiles tall)
  * - Sprites chain horizontally via the "sticky bit"
  * - One fix layer (40x32 grid of 8x8 tiles) composited on top
- * - Hardware sprite scaling via shrink tables (L0-ROM) — skipped in MVP
+ * - Hardware sprite scaling via shrink tables (L0-ROM, 000-lo.lo)
  *
  * VRAM layout:
  *   SCB1 (0x0000-0x6FFF): tile codes + attributes (64 words per sprite, 32 tiles max)
@@ -92,24 +92,30 @@ export interface SpriteGroup {
 // NeoGeoVideo class
 // ---------------------------------------------------------------------------
 
+// Neo-Geo visible window within the 512-line virtual scanline space
+const VLINE_TOP = 0x10;   // first visible line (16)
+const VLINE_BOT = 0xF0;   // first line below visible area (240)
+
 export class NeoGeoVideo {
   private vram: Uint8Array;
   private spritesRom: Uint8Array;
   private fixedRom: Uint8Array;
   private biosFixedRom: Uint8Array;
+  private zoomRom: Uint8Array;       // L0 ROM (000-lo.lo) — shrink lookup table
   private paletteRam: Uint8Array;
   private paletteCache: Uint32Array;  // 4096 entries, decoded ABGR
   private fb: Uint8Array;             // 320x224x4 RGBA
   private fb32: Uint32Array;          // same buffer as Uint32Array view
   private paletteDirty: boolean;
   private autoAnimCounter: number;
-  private tileMask: number;  // FBNeo nNeoTileMask — wraps tile codes to ROM range
+  private tileMask: number;           // wraps tile codes to ROM range
 
   constructor() {
     this.vram = new Uint8Array(0x11000);  // ~68KB
     this.spritesRom = new Uint8Array(0);
     this.fixedRom = new Uint8Array(0);
     this.biosFixedRom = new Uint8Array(0);
+    this.zoomRom = NeoGeoVideo.buildDefaultZoomTable();
     this.paletteRam = new Uint8Array(0x2000); // 8KB
     this.paletteCache = new Uint32Array(4096);
     const buffer = new ArrayBuffer(NGO_SCREEN_WIDTH * NGO_SCREEN_HEIGHT * 4);
@@ -120,15 +126,41 @@ export class NeoGeoVideo {
     this.tileMask = 0;
   }
 
+  /**
+   * Build a linear approximation of the L0 shrink table (000-lo.lo).
+   * 256 zoom levels × 256 entries. Each entry = (tileIndex << 4) | rowInTile.
+   * For zoom level Z, entries 0..Z map linearly across all 256 source rows.
+   */
+  private static buildDefaultZoomTable(): Uint8Array {
+    const table = new Uint8Array(0x10000);
+    for (let z = 0; z < 256; z++) {
+      const base = z << 8;
+      for (let n = 0; n <= z; n++) {
+        // Linear interpolation: n maps to source line n*255/z (0..255)
+        const src = z > 0 ? Math.round(n * 255 / z) : 0;
+        table[base + n] = src;
+      }
+    }
+    return table;
+  }
+
   setRoms(
     spritesRom: Uint8Array,
     fixedRom: Uint8Array,
     biosFixedRom: Uint8Array,
+    zoomRom?: Uint8Array,
   ): void {
     this.spritesRom = spritesRom;
     this.fixedRom = fixedRom;
     this.biosFixedRom = biosFixedRom;
-    // Compute tile mask: next power-of-2 tile count minus 1 (FBNeo nNeoTileMask)
+    // Use real L0 ROM if provided and non-empty, otherwise keep the linear fallback
+    if (zoomRom && zoomRom.length >= 0x10000 && zoomRom.some(b => b !== 0)) {
+      this.zoomRom = zoomRom;
+      console.log('[NeoGeo Video] Using real L0 zoom ROM (000-lo.lo)');
+    } else {
+      console.warn('[NeoGeo Video] No L0 ROM — using linear fallback zoom table');
+    }
+    // Compute tile mask: next power-of-2 tile count minus 1
     const tileCount = spritesRom.length / NGO_TILE_BYTES;
     let pot = 1;
     while (pot < tileCount) pot <<= 1;
@@ -185,16 +217,15 @@ export class NeoGeoVideo {
   readSpriteEntry(index: number): NeoGeoSpriteEntry {
     // SCB3: Y, sticky, height
     const scb3 = this.readVramWord(NGO_SCB3_BASE + index);
-    const yRaw = scb3 >> 7;
-    let y = 0x200 - (yRaw & 0x1FF); // 9-bit Y
-    if (y > 0x110) y -= 0x200; // Y wrapping (MAME: ypos > 272 → ypos -= 512)
+    const yVirt = (0x200 - (scb3 >> 7)) & 0x1FF; // Y in 512-line virtual space
+    const y = yVirt - VLINE_TOP; // convert to screen coordinate
     const sticky = ((scb3 >> 6) & 1) === 1;
     const height = (scb3 & 0x3F) + 1; // 6-bit height (0=1 tile)
 
-    // SCB4: X position
+    // SCB4: X position (9-bit, wraps at 480)
     const scb4 = this.readVramWord(NGO_SCB4_BASE + index);
-    const x = (scb4 >> 7) & 0x1FF; // 9-bit X, left-shifted by 7
-    const xSigned = x >= 320 ? x - 512 : x;
+    let xSigned = (scb4 >> 7) & 0x1FF;
+    if (xSigned >= 0x1E0) xSigned -= 0x200;
 
     // SCB1: first tile entry (2 words per tile)
     const scb1Base = NGO_SCB1_BASE + index * 64; // 64 words per sprite = 32 tiles max × 2
@@ -269,52 +300,54 @@ export class NeoGeoVideo {
    *   2. Render all sprites (back to front: high index = behind, low index = in front)
    *   3. Render fix layer on top
    */
-  // Pre-computed sprite positions (forward pass, reused each frame)
+  // Per-sprite state computed in the forward pass each frame
   private readonly sprX = new Int16Array(NGO_MAX_SPRITES + 1);
-  private readonly sprY = new Int16Array(NGO_MAX_SPRITES + 1);
-  private readonly sprH = new Uint8Array(NGO_MAX_SPRITES + 1);
+  private readonly sprYRaw = new Uint16Array(NGO_MAX_SPRITES + 1);  // Y in 512-line space
+  private readonly sprSize = new Uint8Array(NGO_MAX_SPRITES + 1);   // raw size (0-63)
+  private readonly sprYZoom = new Uint8Array(NGO_MAX_SPRITES + 1);  // vertical shrink (0-255)
 
   renderFrame(framebuffer: Uint8Array): void {
     if (this.paletteDirty) this.rebuildPaletteCache();
 
     const fb32 = this.fb32;
-    const backdrop = this.paletteCache[0 * 16]!;
-    fb32.fill(backdrop);
+    fb32.fill(this.paletteCache[0]!);
 
-    // Forward pass: compute sprite positions (hardware maintains running registers)
-    let chainX = 0, chainY = 0, chainH = 0;
+    // Forward pass: hardware maintains running X/Y/size registers across sticky chains
+    let chainX = 0, chainYRaw = 0, chainSize = 0, chainYZoom = 0;
+    let prevXZoom = 0;
     for (let i = 1; i <= NGO_MAX_SPRITES; i++) {
+      const scb2 = this.readVramWord(NGO_SCB2_BASE + i);
       const scb3 = this.readVramWord(NGO_SCB3_BASE + i);
-      const sticky = ((scb3 >> 6) & 1) === 1;
+      const sticky = (scb3 >> 6) & 1;
 
       if (!sticky) {
-        // Chain master: read position from VRAM
-        const yRaw = scb3 >> 7;
-        chainY = 0x200 - (yRaw & 0x1FF);
-        if (chainY > 0x110) chainY -= 0x200;
-        chainH = (scb3 & 0x3F) + 1;
+        chainYRaw = (0x200 - (scb3 >> 7)) & 0x1FF;
+        chainSize = scb3 & 0x3F;
+        chainYZoom = scb2 & 0xFF;
         const scb4 = this.readVramWord(NGO_SCB4_BASE + i);
         chainX = (scb4 >> 7) & 0x1FF;
-        if (chainX >= 320) chainX -= 512;
+        if (chainX >= 0x1E0) chainX -= 0x200;
       } else {
-        // Sticky: advance X by 16 (full column width), inherit Y and height
-        chainX += 16;
+        chainX += prevXZoom + 1;
+      }
+
+      // Each rendered sprite updates the X zoom for the next sticky advance
+      if (chainSize > 0) {
+        prevXZoom = (scb2 >> 8) & 0x0F;
       }
 
       this.sprX[i] = chainX;
-      this.sprY[i] = chainY;
-      this.sprH[i] = chainH;
+      this.sprYRaw[i] = chainYRaw;
+      this.sprSize[i] = chainSize;
+      this.sprYZoom[i] = chainYZoom;
     }
 
-    // Render sprites back to front (high index = behind)
-    for (let i = NGO_MAX_SPRITES; i >= 1; i--) {
+    // Render sprites low→high: higher index overwrites = higher visual priority
+    for (let i = 1; i <= NGO_MAX_SPRITES; i++) {
       this.renderSprite(i);
     }
 
-    // Render fix layer on top
     this.renderFixLayer();
-
-    // Copy to output framebuffer
     framebuffer.set(this.fb);
   }
 
@@ -322,38 +355,82 @@ export class NeoGeoVideo {
   private readonly rowBuf = new Uint8Array(8);
   private readonly fullRowBuf = new Uint8Array(16);
 
+  /**
+   * Render a single sprite column using the L0 zoom table.
+   *
+   * The Neo-Geo uses a 512-line virtual scanline space. Visible area = lines 16..239.
+   * The zoom ROM maps each output line to a source tile + row within the sprite,
+   * allowing vertical shrink from 256 lines (full) down to 1 line.
+   */
   private renderSprite(index: number): void {
-    // Use pre-computed positions from forward pass
     const x = this.sprX[index]!;
-    const y = this.sprY[index]!;
-    const height = this.sprH[index]!;
+    const yRaw = this.sprYRaw[index]!;
+    const size = this.sprSize[index]!;
+    const yZoom = this.sprYZoom[index]!;
 
-    // SCB2: shrink coefficients (TODO: vertical zoom with L0-ROM table)
-    // Vertical zoom disabled — many sprites have uninitialized SCB2 (0x0000)
-    // which would make them invisible. Full height for now.
+    if (size === 0) return;
+
     const scb1Base = NGO_SCB1_BASE + index * 64;
-    const maxTiles = Math.min(height, 32);
-    const totalSrcRows = maxTiles * 16;
-    const effectiveHeight = totalSrcRows;
+    const zoomTbl = this.zoomRom;
+    const zoomOff = yZoom << 8;
+    // Total virtual lines this sprite occupies (wraps full space when size >= 32)
+    const totalLines = size >= 0x20 ? 0x1FF : (size << 4) - 1;
 
     const fb32 = this.fb32;
     const rom = this.spritesRom;
     const fullRow = this.fullRowBuf;
     const halfBuf = this.rowBuf;
 
-    // Cache current tile data to avoid redundant VRAM reads
     let cachedTile = -1;
     let tileOff = 0, palBase = 0, flipV = false, flipH = false;
 
-    for (let srcRow = 0; srcRow < effectiveHeight; srcRow++) {
-      const py = y + srcRow;
-      if (py >= NGO_SCREEN_HEIGHT) break;
-      if (py < 0) continue;
+    let line = 0;
+    while (line <= totalLines) {
+      const vLine = (yRaw + line) & 0x1FF;
 
-      const tileIdx = srcRow >> 4;
-      const tileRow = srcRow & 0xF;
+      // Jump past invisible regions in the 512-line space
+      if (vLine < VLINE_TOP) { line += VLINE_TOP - vLine; continue; }
+      if (vLine >= VLINE_BOT) { line += VLINE_TOP + 0x200 - vLine; continue; }
 
-      // Read tile entry from SCB1 (cached per tile)
+      const screenY = vLine - VLINE_TOP;
+
+      // Which half of the sprite column (0-15 or 16-31 in tile indices)
+      let tileBase = line >= 0x100 ? 16 : 0;
+      let zIdx = line & 0xFF;
+
+      // Multi-section sprites with zoom: handle the gap between zoomed halves
+      if (size > 0x10 && yZoom < 0xFF) {
+        const gap = 0xFF - yZoom;
+        if (size <= 0x20) {
+          // Two-section: skip the empty zone in the second half
+          if (line >= 0x100) {
+            if (zIdx < gap) { line += gap - zIdx; continue; }
+            zIdx -= gap;
+          }
+        } else {
+          // Full-strip: tiles wrap continuously via modulo
+          if (line >= 0x100) {
+            zIdx -= gap;
+            if (zIdx < 0) {
+              zIdx = yZoom - (-zIdx - 1) % (yZoom + 1);
+              tileBase = 0;
+            }
+          } else if (zIdx > yZoom) {
+            zIdx = zIdx % (yZoom + 1);
+            tileBase = 16;
+          }
+        }
+      }
+
+      // Beyond the zoom range for this level — nothing to draw
+      if (zIdx > yZoom) { line++; continue; }
+
+      // Look up the shrink table: which source tile and row to render
+      const entry = zoomTbl[zoomOff + zIdx]!;
+      const tileIdx = tileBase + (entry >> 4);
+      const tileRow = entry & 0x0F;
+
+      // Read tile from SCB1 (cached until tile changes)
       if (tileIdx !== cachedTile) {
         cachedTile = tileIdx;
         const w0 = this.readVramWord(scb1Base + tileIdx * 2);
@@ -363,20 +440,20 @@ export class NeoGeoVideo {
         flipH = (w1 & 1) === 1;
         if (w1 & 0x08) tc = (tc & ~7) | (this.autoAnimCounter & 7);
         else if (w1 & 0x04) tc = (tc & ~3) | (this.autoAnimCounter & 3);
-        tc &= this.tileMask; // Wrap tile code to ROM range (FBNeo nNeoTileMask)
+        tc &= this.tileMask;
         tileOff = tc * NGO_TILE_BYTES;
         palBase = ((w1 >> 8) & 0xFF) * 16;
       }
 
-      // Decode the full 16-pixel row (block 64-127 = left, 0-63 = right per FBNeo)
+      // Decode the 16-pixel row (left half from block 64-127, right from 0-63)
       const fy = flipV ? (15 - tileRow) : tileRow;
       decodeNeoGeoRow(rom, tileOff + 64 + fy * 4, halfBuf, 0);
       for (let i = 0; i < 8; i++) fullRow[i] = halfBuf[i]!;
       decodeNeoGeoRow(rom, tileOff + fy * 4, halfBuf, 0);
       for (let i = 0; i < 8; i++) fullRow[8 + i] = halfBuf[i]!;
 
-      // Draw 16 source pixels
-      const rowBase = py * NGO_SCREEN_WIDTH;
+      // Blit 16 source pixels to framebuffer
+      const rowBase = screenY * NGO_SCREEN_WIDTH;
       for (let p = 0; p < 16; p++) {
         const colorIdx = fullRow[p]!;
         if (colorIdx === 0) continue;
@@ -385,6 +462,8 @@ export class NeoGeoVideo {
           fb32[rowBase + px] = this.paletteCache[palBase + colorIdx]!;
         }
       }
+
+      line++;
     }
   }
 
@@ -441,54 +520,81 @@ export class NeoGeoVideo {
   // Editor methods
   // ---------------------------------------------------------------------------
 
-  /** Diagnostic: dump sprite table state to console */
+  /** Diagnostic: dump full sprite table with SCB2 zoom values */
   dumpSpriteTable(): void {
     const romSize = this.spritesRom.length;
-    const maxTileCode = romSize / NGO_TILE_BYTES;
-    let active = 0, outOfBounds = 0, zeroTile = 0;
-    const chains: { master: number; length: number; x: number; y: number; tiles: number[] }[] = [];
-    let currentChain: typeof chains[0] | null = null;
+    const maxTile = romSize / NGO_TILE_BYTES;
 
-    console.log(`[NeoGeo Sprite Diag] ROM size: ${romSize} bytes (${maxTileCode} tiles)`);
+    interface ChainInfo {
+      master: number; width: number; x: number; yRaw: number; screenY: number;
+      size: number; yZoom: number; xZoom: number;
+      tiles: number[]; palettes: number[];
+    }
+
+    const chains: ChainInfo[] = [];
+    let cur: ChainInfo | null = null;
+    let active = 0;
 
     for (let i = 1; i <= NGO_MAX_SPRITES; i++) {
+      const scb2 = this.readVramWord(NGO_SCB2_BASE + i);
       const scb3 = this.readVramWord(NGO_SCB3_BASE + i);
-      const sticky = ((scb3 >> 6) & 1) === 1;
-      const height = (scb3 & 0x3F) + 1;
+      const scb4 = this.readVramWord(NGO_SCB4_BASE + i);
+      const sticky = (scb3 >> 6) & 1;
+      const size = scb3 & 0x3F;
+      const yRaw = (0x200 - (scb3 >> 7)) & 0x1FF;
+      const x = (scb4 >> 7) & 0x1FF;
+      const yZoom = scb2 & 0xFF;
+      const xZoom = (scb2 >> 8) & 0x0F;
+
+      // Read first tile of this sprite column
       const scb1Base = NGO_SCB1_BASE + i * 64;
       const w0 = this.readVramWord(scb1Base);
       const w1 = this.readVramWord(scb1Base + 1);
       const tc = w0 | ((w1 & 0xF0) << 12);
-      const scb4 = this.readVramWord(NGO_SCB4_BASE + i);
-      const x = (scb4 >> 7) & 0x1FF;
+      const pal = (w1 >> 8) & 0xFF;
 
-      if (tc === 0 && height === 1) { zeroTile++; continue; }
+      if (tc === 0 && size === 0) continue;
       active++;
 
-      const tileOff = tc * NGO_TILE_BYTES;
-      if (tileOff + NGO_TILE_BYTES > romSize) outOfBounds++;
-
-      if (!sticky || !currentChain) {
-        if (currentChain) chains.push(currentChain);
-        const yRaw = scb3 >> 7;
-        let y = 0x200 - (yRaw & 0x1FF);
-        if (y > 0x110) y -= 0x200;
-        currentChain = { master: i, length: 1, x, y, tiles: [tc] };
+      if (!sticky || !cur) {
+        if (cur) chains.push(cur);
+        cur = {
+          master: i, width: 1, x, yRaw, screenY: yRaw - VLINE_TOP,
+          size, yZoom, xZoom, tiles: [tc], palettes: [pal],
+        };
       } else {
-        currentChain.length++;
-        currentChain.tiles.push(tc);
+        cur.width++;
+        cur.tiles.push(tc);
+        cur.palettes.push(pal);
       }
     }
-    if (currentChain) chains.push(currentChain);
+    if (cur) chains.push(cur);
 
-    console.log(`[NeoGeo Sprite Diag] Active: ${active}, Zero: ${zeroTile}, OutOfBounds: ${outOfBounds}`);
-    console.log(`[NeoGeo Sprite Diag] Chains: ${chains.length}`);
+    console.log(`[Sprite Diag] ${active} active, ${chains.length} chains, ROM=${(romSize / 1024) | 0}KB (${maxTile} tiles)`);
+    console.log(`[Sprite Diag] L0 zoom ROM: ${this.zoomRom.length >= 0x10000 ? 'loaded' : 'fallback'}`);
 
-    // Show first 20 non-trivial chains
-    const interesting = chains.filter(c => c.tiles.some(t => t !== 0));
-    for (const c of interesting.slice(0, 20)) {
-      const oob = c.tiles.filter(t => t * NGO_TILE_BYTES + NGO_TILE_BYTES > romSize).length;
-      console.log(`  Sprite ${c.master}: chain=${c.length}, x=${c.x}, y=${c.y}, tiles=[${c.tiles.slice(0, 8).join(',')}${c.tiles.length > 8 ? '...' : ''}], OOB=${oob}`);
+    // Show all chains with size > 0 (fighters may have tile[0]=0 with data in later tiles)
+    const rendered = chains.filter(c => c.size > 0);
+    console.log(`[Sprite Diag] ${rendered.length} chains with size>0`);
+
+    for (const c of rendered) {
+      // Read up to 4 tiles deep per first sprite column to find actual tile data
+      const scb1 = NGO_SCB1_BASE + c.master * 64;
+      const deepTiles: string[] = [];
+      for (let t = 0; t < Math.min(c.size, 4); t++) {
+        const w0 = this.readVramWord(scb1 + t * 2);
+        const w1 = this.readVramWord(scb1 + t * 2 + 1);
+        const tc = w0 | ((w1 & 0xF0) << 12);
+        deepTiles.push(`0x${tc.toString(16)}`);
+      }
+
+      const tileStr = c.tiles.slice(0, 6).map(t => `0x${t.toString(16)}`).join(',');
+      const extra = c.tiles.length > 6 ? `...(${c.tiles.length})` : '';
+      console.log(
+        `  #${c.master}: w=${c.width} x=${c.x} yRaw=${c.yRaw} scrY=${c.screenY}` +
+        ` size=${c.size} yZoom=0x${c.yZoom.toString(16).toUpperCase()} xZoom=${c.xZoom}` +
+        ` pal=${c.palettes[0]} cols=[${tileStr}${extra}] depth=[${deepTiles.join(',')}]`
+      );
     }
   }
 

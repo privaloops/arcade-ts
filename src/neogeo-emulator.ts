@@ -195,8 +195,8 @@ export class NeoGeoEmulator {
     this.z80Bus.loadBiosRom(romSet.biosZRom);
     this.z80Bus.loadAudioRom(romSet.audioRom);
 
-    // Load video ROMs
-    this.video.setRoms(romSet.spritesRom, romSet.fixedRom, romSet.biosSRom);
+    // Load video ROMs (including L0 shrink table for sprite scaling)
+    this.video.setRoms(romSet.spritesRom, romSet.fixedRom, romSet.biosSRom, romSet.loRom);
     // Share VRAM and palette RAM between bus and video
     this.video.setVram(this.bus.getVram());
     this.video.setPaletteRam(this.bus.getPaletteRam());
