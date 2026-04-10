@@ -43,7 +43,7 @@ export function decodeNeoGeoRow(
   const bp1 = rom[offset + 2]!;  // bitplane 1 (C1 second byte)
   const bp3 = rom[offset + 3]!;  // bitplane 3 (C2 second byte)
 
-  // LSB first: bit 0 = pixel 0 (FBNeo: >> x, not >> (7-x))
+  // LSB first: bit 0 = pixel 0 (matches our load16_byte interleave)
   for (let x = 0; x < 8; x++) {
     out[outOffset + x] =
       ((bp3 >> x) & 1) << 3 |
@@ -63,7 +63,7 @@ export function encodeNeoGeoRow(
 ): [number, number, number, number] {
   let bp0 = 0, bp1 = 0, bp2 = 0, bp3 = 0;
 
-  // LSB first: pixel x stored at bit x
+  // LSB first: pixel 0 stored at bit 0
   for (let x = 0; x < 8; x++) {
     const pix = pixels[offset + x]!;
     if (pix & 1) bp0 |= (1 << x);
@@ -86,7 +86,7 @@ export function readNeoGeoTile(
   const pixels = new Uint8Array(256); // 16x16
   const tileOffset = tileCode * NGO_TILE_BYTES;
 
-  // Two 64-byte blocks: left (0-63) and right (64-127), row stride = 4 bytes
+  // Block 0-63 = left half (pixels 0-7), block 64-127 = right half (pixels 8-15)
   for (let y = 0; y < 16; y++) {
     decodeNeoGeoRow(rom, tileOffset + y * 4, pixels, y * 16);           // left 8 pixels
     decodeNeoGeoRow(rom, tileOffset + 64 + y * 4, pixels, y * 16 + 8); // right 8 pixels
@@ -106,7 +106,7 @@ export function writeNeoGeoPixel(
   colorIndex: number,
 ): void {
   const tileOffset = tileCode * NGO_TILE_BYTES;
-  // Two 64-byte blocks: left (localX < 8) at tileOffset, right at tileOffset+64
+  // Block 0-63 = left half (pixels 0-7), block 64-127 = right half (pixels 8-15)
   const blockBase = tileOffset + ((localX >> 3) * 64);
   const groupBase = blockBase + localY * 4;
 

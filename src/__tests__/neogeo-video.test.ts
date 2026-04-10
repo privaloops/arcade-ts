@@ -4,60 +4,50 @@ import { NGO_SCB1_BASE, NGO_SCB3_BASE, NGO_SCB4_BASE, NGO_FIX_BASE } from '../ne
 
 describe('NeoGeoVideo', () => {
   describe('Color decoding', () => {
+    // Hardware format: D R0 G0 B0 | R4 R3 R2 R1 | G4 G3 G2 G1 | B4 B3 B2 B1
+
     it('decodes black (0x0000)', () => {
       const color = decodeNeoGeoColor(0x0000);
-      // ABGR: 0xFF000000
-      expect(color & 0xFF).toBe(0);       // R
-      expect((color >> 8) & 0xFF).toBe(0); // G
-      expect((color >> 16) & 0xFF).toBe(0); // B
-      expect((color >> 24) & 0xFF).toBe(0xFF); // A
+      expect(color & 0xFF).toBe(0);
+      expect((color >> 8) & 0xFF).toBe(0);
+      expect((color >> 16) & 0xFF).toBe(0);
+      expect((color >> 24) & 0xFF).toBe(0xFF);
     });
 
-    it('decodes white (0x7FFF)', () => {
+    it('decodes white without dark (0x7FFF)', () => {
+      // All 5-bit channels maxed, dark=0 → 6-bit = 0x3E = 62
+      // Expanded: (62 << 2) | (62 >> 4) = 248 | 3 = 251
       const color = decodeNeoGeoColor(0x7FFF);
-      const r = color & 0xFF;
-      const g = (color >> 8) & 0xFF;
-      const b = (color >> 16) & 0xFF;
-      // All 5-bit components maxed (31), expanded to 8-bit: (31 << 3) | (31 >> 2) = 255
-      expect(r).toBe(255);
-      expect(g).toBe(255);
-      expect(b).toBe(255);
+      expect(color & 0xFF).toBe(251);
+      expect((color >> 8) & 0xFF).toBe(251);
+      expect((color >> 16) & 0xFF).toBe(251);
     });
 
-    it('decodes pure red', () => {
-      // Red high nibble = 0xF (bits 14-11), Red LSB = 1 (bit 2)
-      // = 0b0_1111_0000000_1_00 = 0x7804
-      const color = decodeNeoGeoColor(0x7804);
-      const r = color & 0xFF;
-      const g = (color >> 8) & 0xFF;
-      const b = (color >> 16) & 0xFF;
-      expect(r).toBe(255);
-      expect(g).toBe(0);
-      expect(b).toBe(0);
-    });
-
-    it('applies dark bit', () => {
-      // White with dark bit: 0xFFFF
+    it('decodes full white with dark (0xFFFF)', () => {
+      // All bits set, dark=1 → 6-bit = 0x3F = 63
+      // Expanded: (63 << 2) | (63 >> 4) = 252 | 3 = 255
       const color = decodeNeoGeoColor(0xFFFF);
-      const r = color & 0xFF;
-      const g = (color >> 8) & 0xFF;
-      const b = (color >> 16) & 0xFF;
-      // Dark bit halves: 255 >> 1 = 127
-      expect(r).toBe(127);
-      expect(g).toBe(127);
-      expect(b).toBe(127);
+      expect(color & 0xFF).toBe(255);
+      expect((color >> 8) & 0xFF).toBe(255);
+      expect((color >> 16) & 0xFF).toBe(255);
     });
 
-    it('decodes LSB bits correctly', () => {
-      // Only LSBs set: bit 2 (R), bit 1 (G), bit 0 (B) = 0x0007
-      const color = decodeNeoGeoColor(0x0007);
-      const r = color & 0xFF;
-      const g = (color >> 8) & 0xFF;
-      const b = (color >> 16) & 0xFF;
-      // R: 5-bit = 1, expanded: (1 << 3) | (1 >> 2) = 8
-      expect(r).toBe(8);
-      expect(g).toBe(8);
-      expect(b).toBe(8);
+    it('decodes pure red (R4-R1=0xF, R0=1)', () => {
+      // R4-R1 = bits 11-8 = 0xF, R0 = bit 14 = 1, rest 0
+      // word = 0b0_1_00_0_1111_0000_0000 = 0x4F00
+      const color = decodeNeoGeoColor(0x4F00);
+      expect(color & 0xFF).toBe(251);       // R = 62 → 251
+      expect((color >> 8) & 0xFF).toBe(0);   // G = 0
+      expect((color >> 16) & 0xFF).toBe(0);  // B = 0
+    });
+
+    it('dark bit adds minimal brightness (LSB of 6-bit DAC)', () => {
+      // Dark only (0x8000): each channel 6-bit = 1
+      // Expanded: (1 << 2) | (1 >> 4) = 4
+      const color = decodeNeoGeoColor(0x8000);
+      expect(color & 0xFF).toBe(4);
+      expect((color >> 8) & 0xFF).toBe(4);
+      expect((color >> 16) & 0xFF).toBe(4);
     });
   });
 

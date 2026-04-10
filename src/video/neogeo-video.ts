@@ -33,40 +33,31 @@ import { decodeNeoGeoRow, decodeFixRow } from '../editor/neogeo-tile-encoder';
 /**
  * Decode a Neo-Geo 16-bit color word to ABGR Uint32.
  *
- * Format:
- *   Bit 15: dark bit (halves brightness)
- *   Bits 14-11: Red high nibble
- *   Bits 10-7: Green high nibble
- *   Bits 6-3: Blue high nibble
- *   Bit 2: Red LSB
- *   Bit 1: Green LSB
- *   Bit 0: Blue LSB
+ * Hardware format (wiki.neogeodev.org):
+ *   15  14 13 12 | 11 10  9  8 |  7  6  5  4 |  3  2  1  0
+ *    D  R0 G0 B0 | R4 R3 R2 R1 | G4 G3 G2 G1 | B4 B3 B2 B1
  *
- * Each component is 5 bits (4 high + 1 low), expanded to 8 bits.
+ * Each channel = 5 bits (high nibble + LSB). The dark bit (D) acts as a
+ * 6th bit on the hardware DAC (8200 Ohm resistor, weakest weight).
+ * We expand the 6-bit value linearly to 8 bits.
  */
 export function decodeNeoGeoColor(word: number): number {
-  const rHi = (word >> 11) & 0x0F;
-  const gHi = (word >> 7) & 0x0F;
-  const bHi = (word >> 3) & 0x0F;
-  const rLo = (word >> 2) & 1;
-  const gLo = (word >> 1) & 1;
-  const bLo = word & 1;
+  const dark = (word >>> 15) & 1;
 
-  // Combine to 5-bit, expand to 8-bit: (val << 3) | (val >> 2)
-  const r5 = (rHi << 1) | rLo;
-  const g5 = (gHi << 1) | gLo;
-  const b5 = (bHi << 1) | bLo;
+  // 5-bit channels: high nibble from packed field, LSB from bits 14-12
+  const r5 = ((word >> 7) & 0x1E) | ((word >> 14) & 1);
+  const g5 = ((word >> 3) & 0x1E) | ((word >> 13) & 1);
+  const b5 = ((word << 1) & 0x1E) | ((word >> 12) & 1);
 
-  let r8 = (r5 << 3) | (r5 >> 2);
-  let g8 = (g5 << 3) | (g5 >> 2);
-  let b8 = (b5 << 3) | (b5 >> 2);
+  // 6-bit with dark as LSB (minimal contribution, matches hardware DAC)
+  const r6 = (r5 << 1) | dark;
+  const g6 = (g5 << 1) | dark;
+  const b6 = (b5 << 1) | dark;
 
-  // Dark bit halves brightness
-  if (word & 0x8000) {
-    r8 >>= 1;
-    g8 >>= 1;
-    b8 >>= 1;
-  }
+  // Expand 6-bit → 8-bit
+  const r8 = (r6 << 2) | (r6 >> 4);
+  const g8 = (g6 << 2) | (g6 >> 4);
+  const b8 = (b6 << 2) | (b6 >> 4);
 
   return (0xFF << 24) | (b8 << 16) | (g8 << 8) | r8; // ABGR for Uint32Array
 }
@@ -271,6 +262,11 @@ export class NeoGeoVideo {
    *   2. Render all sprites (back to front: high index = behind, low index = in front)
    *   3. Render fix layer on top
    */
+  // Pre-computed sprite positions (forward pass, reused each frame)
+  private readonly sprX = new Int16Array(NGO_MAX_SPRITES + 1);
+  private readonly sprY = new Int16Array(NGO_MAX_SPRITES + 1);
+  private readonly sprH = new Uint8Array(NGO_MAX_SPRITES + 1);
+
   renderFrame(framebuffer: Uint8Array): void {
     if (this.paletteDirty) this.rebuildPaletteCache();
 
@@ -278,7 +274,32 @@ export class NeoGeoVideo {
     const backdrop = this.paletteCache[0 * 16]!;
     fb32.fill(backdrop);
 
-    // Render sprites (back to front: index 381 → 1)
+    // Forward pass: compute sprite positions (hardware maintains running registers)
+    let chainX = 0, chainY = 0, chainH = 0;
+    for (let i = 1; i <= NGO_MAX_SPRITES; i++) {
+      const scb3 = this.readVramWord(NGO_SCB3_BASE + i);
+      const sticky = ((scb3 >> 6) & 1) === 1;
+
+      if (!sticky) {
+        // Chain master: read position from VRAM
+        const yRaw = scb3 >> 7;
+        chainY = 0x200 - (yRaw & 0x1FF);
+        if (chainY > 0x110) chainY -= 0x200;
+        chainH = (scb3 & 0x3F) + 1;
+        const scb4 = this.readVramWord(NGO_SCB4_BASE + i);
+        chainX = (scb4 >> 7) & 0x1FF;
+        if (chainX >= 320) chainX -= 512;
+      } else {
+        // Sticky: advance X by 16 (full column width), inherit Y and height
+        chainX += 16;
+      }
+
+      this.sprX[i] = chainX;
+      this.sprY[i] = chainY;
+      this.sprH[i] = chainH;
+    }
+
+    // Render sprites back to front (high index = behind)
     for (let i = NGO_MAX_SPRITES; i >= 1; i--) {
       this.renderSprite(i);
     }
@@ -290,93 +311,72 @@ export class NeoGeoVideo {
     framebuffer.set(this.fb);
   }
 
+  // Reusable row buffers (avoid per-row allocation)
+  private readonly rowBuf = new Uint8Array(8);
+  private readonly fullRowBuf = new Uint8Array(16);
+
   private renderSprite(index: number): void {
-    const scb3 = this.readVramWord(NGO_SCB3_BASE + index);
-    const yRaw = scb3 >> 7;
-    let y = 0x200 - (yRaw & 0x1FF);
-    if (y > 0x110) y -= 0x200; // Y wrapping
-    const sticky = ((scb3 >> 6) & 1) === 1;
-    let height = (scb3 & 0x3F) + 1;
+    // Use pre-computed positions from forward pass
+    const x = this.sprX[index]!;
+    const y = this.sprY[index]!;
+    const height = this.sprH[index]!;
 
-    const scb4 = this.readVramWord(NGO_SCB4_BASE + index);
-    let x = (scb4 >> 7) & 0x1FF;
-    if (x >= 320) x -= 512;
-
-    // Sticky sprites inherit Y, height from previous sprite and shift X +16
-    if (sticky && index > 1) {
-      const prevScb3 = this.readVramWord(NGO_SCB3_BASE + (index - 1));
-      const prevYRaw = prevScb3 >> 7;
-      y = 0x200 - (prevYRaw & 0x1FF);
-      if (y > 0x110) y -= 0x200; // Y wrapping
-      height = (prevScb3 & 0x3F) + 1;
-
-      const prevScb4 = this.readVramWord(NGO_SCB4_BASE + (index - 1));
-      let prevX = (prevScb4 >> 7) & 0x1FF;
-      if (prevX >= 320) prevX -= 512;
-      x = prevX + 16;
-    }
-
-    // Read tile entries from SCB1
+    // SCB2: shrink coefficients (TODO: vertical zoom with L0-ROM table)
+    // Vertical zoom disabled — many sprites have uninitialized SCB2 (0x0000)
+    // which would make them invisible. Full height for now.
     const scb1Base = NGO_SCB1_BASE + index * 64;
+    const maxTiles = Math.min(height, 32);
+    const totalSrcRows = maxTiles * 16;
+    const effectiveHeight = totalSrcRows;
 
-    for (let tileY = 0; tileY < height && tileY < 32; tileY++) {
-      const word0 = this.readVramWord(scb1Base + tileY * 2);
-      const word1 = this.readVramWord(scb1Base + tileY * 2 + 1);
+    const fb32 = this.fb32;
+    const rom = this.spritesRom;
+    const fullRow = this.fullRowBuf;
+    const halfBuf = this.rowBuf;
 
-      let tileCode = word0 | ((word1 & 0xF0) << 12);
-      const palette = (word1 >> 8) & 0xFF;
-      const flipV = ((word1 >> 1) & 1) === 1;
-      const flipH = (word1 & 1) === 1;
+    // Cache current tile data to avoid redundant VRAM reads
+    let cachedTile = -1;
+    let tileOff = 0, palBase = 0, flipV = false, flipH = false;
 
-      // Auto-animation
-      if (word1 & 0x08) { // 8-frame auto-anim
-        tileCode = (tileCode & ~7) | (this.autoAnimCounter & 7);
-      } else if (word1 & 0x04) { // 4-frame auto-anim
-        tileCode = (tileCode & ~3) | (this.autoAnimCounter & 3);
+    for (let srcRow = 0; srcRow < effectiveHeight; srcRow++) {
+      const py = y + srcRow;
+      if (py >= NGO_SCREEN_HEIGHT) break;
+      if (py < 0) continue;
+
+      const tileIdx = srcRow >> 4;
+      const tileRow = srcRow & 0xF;
+
+      // Read tile entry from SCB1 (cached per tile)
+      if (tileIdx !== cachedTile) {
+        cachedTile = tileIdx;
+        const w0 = this.readVramWord(scb1Base + tileIdx * 2);
+        const w1 = this.readVramWord(scb1Base + tileIdx * 2 + 1);
+        let tc = w0 | ((w1 & 0xF0) << 12);
+        flipV = ((w1 >> 1) & 1) === 1;
+        flipH = (w1 & 1) === 1;
+        if (w1 & 0x08) tc = (tc & ~7) | (this.autoAnimCounter & 7);
+        else if (w1 & 0x04) tc = (tc & ~3) | (this.autoAnimCounter & 3);
+        tileOff = tc * NGO_TILE_BYTES;
+        palBase = ((w1 >> 8) & 0xFF) * 16;
       }
 
-      const tileScreenY = y + tileY * 16;
-      this.drawTile16(tileCode, x, tileScreenY, palette, flipH, flipV);
-    }
-  }
+      if (tileOff + NGO_TILE_BYTES > rom.length) continue;
 
-  private drawTile16(
-    tileCode: number,
-    screenX: number,
-    screenY: number,
-    palette: number,
-    flipH: boolean,
-    flipV: boolean,
-  ): void {
-    const tileOffset = tileCode * NGO_TILE_BYTES;
-    if (tileOffset + NGO_TILE_BYTES > this.spritesRom.length) return;
+      // Decode the full 16-pixel row (block 0-63 = left, 64-127 = right)
+      const fy = flipV ? (15 - tileRow) : tileRow;
+      decodeNeoGeoRow(rom, tileOff + fy * 4, halfBuf, 0);
+      for (let i = 0; i < 8; i++) fullRow[i] = halfBuf[i]!;
+      decodeNeoGeoRow(rom, tileOff + 64 + fy * 4, halfBuf, 0);
+      for (let i = 0; i < 8; i++) fullRow[8 + i] = halfBuf[i]!;
 
-    const palBase = palette * 16;
-    const fb32 = this.fb32;
-    const row = new Uint8Array(8);
-
-    for (let ty = 0; ty < 16; ty++) {
-      const fy = flipV ? (15 - ty) : ty;
-      const py = screenY + ty;
-      if (py < 0 || py >= NGO_SCREEN_HEIGHT) continue;
-
+      // Draw 16 source pixels
       const rowBase = py * NGO_SCREEN_WIDTH;
-      // Two 64-byte blocks: left (0-63), right (64-127), row stride = 4
-      // Left half (pixels 0-7) and right half (pixels 8-15)
-      for (let half = 0; half < 2; half++) {
-        decodeNeoGeoRow(this.spritesRom, tileOffset + half * 64 + fy * 4, row, 0);
-
-        for (let p = 0; p < 8; p++) {
-          const colorIdx = row[flipH ? (7 - p) : p]!;
-          if (colorIdx === 0) continue; // Transparent
-
-          const px = flipH
-            ? screenX + 15 - (half * 8 + p)
-            : screenX + half * 8 + p;
-
-          if (px >= 0 && px < NGO_SCREEN_WIDTH) {
-            fb32[rowBase + px] = this.paletteCache[palBase + colorIdx]!;
-          }
+      for (let p = 0; p < 16; p++) {
+        const colorIdx = fullRow[p]!;
+        if (colorIdx === 0) continue;
+        const px = flipH ? (x + 15 - p) : (x + p);
+        if (px >= 0 && px < NGO_SCREEN_WIDTH) {
+          fb32[rowBase + px] = this.paletteCache[palBase + colorIdx]!;
         }
       }
     }
