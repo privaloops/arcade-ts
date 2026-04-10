@@ -28,6 +28,7 @@ export class NeoGeoBus implements BusInterface {
   private backupRam: Uint8Array;      // 64KB BIOS SRAM
   private paletteRam: Uint8Array;     // 8KB (4096 x 16-bit words)
   private vram: Uint8Array;           // 68KB VRAM (accessed indirectly)
+  private memCardRam: Uint8Array;     // 4KB memory card RAM
 
   // I/O port registers (active LOW for buttons)
   private portP1: number = 0xFF;
@@ -80,6 +81,7 @@ export class NeoGeoBus implements BusInterface {
     this.backupRam = new Uint8Array(0x10000); // 64KB
     this.paletteRam = new Uint8Array(0x2000); // 8KB
     this.vram = new Uint8Array(0x11000);      // ~68KB (slow 64KB + fast ~4KB)
+    this.memCardRam = new Uint8Array(0x1000); // 4KB memory card
     // pd4990a RTC — uses 68K cycle count for timing
     this.rtc = new PD4990A(12_000_000, () => this.totalCycles);
   }
@@ -288,9 +290,10 @@ export class NeoGeoBus implements BusInterface {
       return this.paletteRam[address - 0x400000]!;
     }
 
-    // Memory card: 0x800000-0x800FFF (return 0xFF = no card)
+    // Memory card RAM: 0x800000-0x800FFF (2KB, only odd bytes used)
     if (address >= 0x800000 && address <= 0x800FFF) {
-      return 0xFF;
+      const off = (address - 0x800000) & 0xFFF;
+      return this.memCardRam[off]!;
     }
 
     // BIOS ROM: 0xC00000-0xC1FFFF
@@ -363,9 +366,11 @@ export class NeoGeoBus implements BusInterface {
       return;
     }
 
-    // Memory card: 0x800000-0x800FFF
+    // Memory card RAM: 0x800000-0x800FFF
     if (address >= 0x800000 && address <= 0x800FFF) {
-      return; // Ignore writes
+      const off = (address - 0x800000) & 0xFFF;
+      this.memCardRam[off] = value;
+      return;
     }
 
     // Backup SRAM: 0xD00000-0xD0FFFF

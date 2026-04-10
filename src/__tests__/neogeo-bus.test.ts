@@ -108,9 +108,10 @@ describe('NeoGeoBus', () => {
       expect(bus.read8(0x340001)).toBe(0xFB);
     });
 
-    it('returns 0xFF for memory card', () => {
+    it('reads and writes memory card RAM', () => {
       const bus = new NeoGeoBus();
-      expect(bus.read8(0x800000)).toBe(0xFF);
+      bus.write8(0x800000, 0x42);
+      expect(bus.read8(0x800000)).toBe(0x42);
     });
   });
 
