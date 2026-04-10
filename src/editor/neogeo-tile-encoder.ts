@@ -1,23 +1,20 @@
 /**
  * Neo-Geo Tile Encoder/Decoder
  *
- * IMPORTANT: Neo-Geo does NOT use planar format like CPS1.
- * Both C-ROM and S-ROM use nibble-packed format: each nibble = one 4-bit pixel.
+ * IMPORTANT: Neo-Geo uses PLANAR format (not nibble-packed like the old code assumed).
  *
  * C-ROM (sprites): 16x16, 4bpp, 128 bytes/tile.
- *   After load16_byte interleaving: byte[0]=odd, byte[1]=even, byte[2]=odd, byte[3]=even
- *   MAME xoffset = {8, 12, 0, 4, 24, 28, 16, 20}
- *   → pixel 0 = even[0] low nib, pixel 1 = even[0] high nib,
- *     pixel 2 = odd[0] low nib,  pixel 3 = odd[0] high nib,
- *     pixel 4 = even[1] low nib, pixel 5 = even[1] high nib,
- *     pixel 6 = odd[1] low nib,  pixel 7 = odd[1] high nib
+ *   After load16_byte interleaving: [C1_0, C2_0, C1_1, C2_1] per 4-byte group.
+ *   C1 provides bitplanes 0,1: low nibble = plane 0, high nibble = plane 1.
+ *   C2 provides bitplanes 2,3: low nibble = plane 2, high nibble = plane 3.
+ *   Each C1/C2 pair decodes 4 pixels. Bit order: MSB first (bit 3 → pixel 0).
+ *   Reference: GnGeo convert_tile, FBNeo NeoDecodeGfx.
  *
  * S-ROM (fix layer): 8x8, 4bpp, 32 bytes/tile.
- *   MAME xoffset = {16, 20, 24, 28, 0, 4, 8, 12}
- *   → pixel 0 = byte[2] low nib, pixel 1 = byte[2] high nib,
- *     pixel 2 = byte[3] low nib, pixel 3 = byte[3] high nib,
- *     pixel 4 = byte[0] low nib, pixel 5 = byte[0] high nib,
- *     pixel 6 = byte[1] low nib, pixel 7 = byte[1] high nib
+ *   Pure planar: byte 0 = plane 0, byte 1 = plane 1, byte 2 = plane 2, byte 3 = plane 3.
+ *   MAME charlayout: planes {0,8,16,24}, xoffsets {3,2,1,0,7,6,5,4}.
+ *   Pixels 0-3 from bits 3,2,1,0 (low nibble, MSB first).
+ *   Pixels 4-7 from bits 7,6,5,4 (high nibble, MSB first).
  *
  * Transparent pen = index 0 (NOT 15 like CPS1).
  */
@@ -30,8 +27,10 @@ import { NGO_TILE_BYTES, NGO_FIX_TILE_BYTES } from '../neogeo-constants';
 
 /**
  * Decode a row of 8 pixels from an interleaved C-ROM tile (4 bytes → 8 pixels).
- * After load16_byte interleaving: [odd0, even0, odd1, even1]
- * Pixel order from MAME: even0_lo, even0_hi, odd0_lo, odd0_hi, even1_lo, even1_hi, odd1_lo, odd1_hi
+ * C-ROM uses PLANAR format: each byte = 1 bitplane for 8 pixels, bit 7 = pixel 0.
+ * After load16_byte interleaving: [C1_first, C2_first, C1_second, C2_second]
+ *   byte[0] = bitplane 0, byte[1] = bitplane 2, byte[2] = bitplane 1, byte[3] = bitplane 3
+ * Ref: wiki.neogeodev.org/Sprite_graphics_format, FBNeo NeoDecodeSprites.
  */
 export function decodeNeoGeoRow(
   rom: Uint8Array,
@@ -39,33 +38,41 @@ export function decodeNeoGeoRow(
   out: Uint8Array,
   outOffset: number,
 ): void {
-  const odd0  = rom[offset]!;
-  const even0 = rom[offset + 1]!;
-  const odd1  = rom[offset + 2]!;
-  const even1 = rom[offset + 3]!;
+  const bp0 = rom[offset]!;      // bitplane 0 (C1 first byte)
+  const bp2 = rom[offset + 1]!;  // bitplane 2 (C2 first byte)
+  const bp1 = rom[offset + 2]!;  // bitplane 1 (C1 second byte)
+  const bp3 = rom[offset + 3]!;  // bitplane 3 (C2 second byte)
 
-  out[outOffset]     = even0 & 0x0F;
-  out[outOffset + 1] = (even0 >> 4) & 0x0F;
-  out[outOffset + 2] = odd0 & 0x0F;
-  out[outOffset + 3] = (odd0 >> 4) & 0x0F;
-  out[outOffset + 4] = even1 & 0x0F;
-  out[outOffset + 5] = (even1 >> 4) & 0x0F;
-  out[outOffset + 6] = odd1 & 0x0F;
-  out[outOffset + 7] = (odd1 >> 4) & 0x0F;
+  // LSB first: bit 0 = pixel 0 (FBNeo: >> x, not >> (7-x))
+  for (let x = 0; x < 8; x++) {
+    out[outOffset + x] =
+      ((bp3 >> x) & 1) << 3 |
+      ((bp2 >> x) & 1) << 2 |
+      ((bp1 >> x) & 1) << 1 |
+      ((bp0 >> x) & 1);
+  }
 }
 
 /**
- * Encode a row of 8 pixels back to interleaved C-ROM format.
+ * Encode a row of 8 pixels back to interleaved C-ROM planar format.
+ * Inverse of decodeNeoGeoRow: pixels → [bp0, bp2, bp1, bp3].
  */
 export function encodeNeoGeoRow(
   pixels: Uint8Array,
   offset: number,
 ): [number, number, number, number] {
-  const odd0  = (pixels[offset + 2]! & 0x0F) | ((pixels[offset + 3]! & 0x0F) << 4);
-  const even0 = (pixels[offset]! & 0x0F)     | ((pixels[offset + 1]! & 0x0F) << 4);
-  const odd1  = (pixels[offset + 6]! & 0x0F) | ((pixels[offset + 7]! & 0x0F) << 4);
-  const even1 = (pixels[offset + 4]! & 0x0F) | ((pixels[offset + 5]! & 0x0F) << 4);
-  return [odd0, even0, odd1, even1];
+  let bp0 = 0, bp1 = 0, bp2 = 0, bp3 = 0;
+
+  // LSB first: pixel x stored at bit x
+  for (let x = 0; x < 8; x++) {
+    const pix = pixels[offset + x]!;
+    if (pix & 1) bp0 |= (1 << x);
+    if (pix & 2) bp1 |= (1 << x);
+    if (pix & 4) bp2 |= (1 << x);
+    if (pix & 8) bp3 |= (1 << x);
+  }
+
+  return [bp0, bp2, bp1, bp3]; // interleaved: C1_first, C2_first, C1_second, C2_second
 }
 
 /**
@@ -79,10 +86,10 @@ export function readNeoGeoTile(
   const pixels = new Uint8Array(256); // 16x16
   const tileOffset = tileCode * NGO_TILE_BYTES;
 
+  // Two 64-byte blocks: left (0-63) and right (64-127), row stride = 4 bytes
   for (let y = 0; y < 16; y++) {
-    const rowOffset = tileOffset + y * 8;
-    decodeNeoGeoRow(rom, rowOffset, pixels, y * 16);       // left 8 pixels
-    decodeNeoGeoRow(rom, rowOffset + 4, pixels, y * 16 + 8); // right 8 pixels
+    decodeNeoGeoRow(rom, tileOffset + y * 4, pixels, y * 16);           // left 8 pixels
+    decodeNeoGeoRow(rom, tileOffset + 64 + y * 4, pixels, y * 16 + 8); // right 8 pixels
   }
 
   return pixels;
@@ -99,7 +106,9 @@ export function writeNeoGeoPixel(
   colorIndex: number,
 ): void {
   const tileOffset = tileCode * NGO_TILE_BYTES;
-  const groupBase = tileOffset + localY * 8 + ((localX >> 3) * 4);
+  // Two 64-byte blocks: left (localX < 8) at tileOffset, right at tileOffset+64
+  const blockBase = tileOffset + ((localX >> 3) * 64);
+  const groupBase = blockBase + localY * 4;
 
   // Decode the 8 pixels of this group
   const pixels = new Uint8Array(8);
@@ -121,29 +130,35 @@ export function writeNeoGeoPixel(
 // ---------------------------------------------------------------------------
 
 /**
- * Decode a row of 8 pixels from an S-ROM fix tile (4 bytes → 8 pixels).
- * MAME xoffset = {16, 20, 24, 28, 0, 4, 8, 12}
- * → bytes 2-3 contain pixels 0-3, bytes 0-1 contain pixels 4-7
+ * Decode a row of 8 pixels from an S-ROM fix tile.
+ * S-ROM uses COLUMN-MAJOR nibble-packed format (wiki.neogeodev.org/Fix_graphics_format):
+ *   32 bytes = 4 segments of 8 bytes (column pairs), stored top-to-bottom.
+ *   Address pattern: ...nHCLLL (H=half, C=col, L=line)
+ *   Pixels 0,1 at tile+16+row, pixels 2,3 at tile+24+row,
+ *   pixels 4,5 at tile+0+row,  pixels 6,7 at tile+8+row.
+ *   Left pixel = low nibble (bits 0-3), right pixel = high nibble (bits 4-7).
+ * Ref: FBNeo NeoTextDecodeTile, NeoGeo Dev Wiki.
  */
 export function decodeFixRow(
   rom: Uint8Array,
-  offset: number,
+  tileOffset: number,
+  row: number,
   out: Uint8Array,
   outOffset: number,
 ): void {
-  const b0 = rom[offset]!;
-  const b1 = rom[offset + 1]!;
-  const b2 = rom[offset + 2]!;
-  const b3 = rom[offset + 3]!;
+  const b01 = rom[tileOffset + 16 + row]!; // pixels 0,1
+  const b23 = rom[tileOffset + 24 + row]!; // pixels 2,3
+  const b45 = rom[tileOffset + row]!;       // pixels 4,5
+  const b67 = rom[tileOffset + 8 + row]!;  // pixels 6,7
 
-  out[outOffset]     = b2 & 0x0F;
-  out[outOffset + 1] = (b2 >> 4) & 0x0F;
-  out[outOffset + 2] = b3 & 0x0F;
-  out[outOffset + 3] = (b3 >> 4) & 0x0F;
-  out[outOffset + 4] = b0 & 0x0F;
-  out[outOffset + 5] = (b0 >> 4) & 0x0F;
-  out[outOffset + 6] = b1 & 0x0F;
-  out[outOffset + 7] = (b1 >> 4) & 0x0F;
+  out[outOffset]     = b01 & 0x0F;
+  out[outOffset + 1] = (b01 >> 4) & 0x0F;
+  out[outOffset + 2] = b23 & 0x0F;
+  out[outOffset + 3] = (b23 >> 4) & 0x0F;
+  out[outOffset + 4] = b45 & 0x0F;
+  out[outOffset + 5] = (b45 >> 4) & 0x0F;
+  out[outOffset + 6] = b67 & 0x0F;
+  out[outOffset + 7] = (b67 >> 4) & 0x0F;
 }
 
 /**
@@ -154,10 +169,10 @@ export function readFixTile(
   tileCode: number,
 ): Uint8Array {
   const pixels = new Uint8Array(64);
-  const offset = tileCode * NGO_FIX_TILE_BYTES;
+  const tileOffset = tileCode * NGO_FIX_TILE_BYTES;
 
   for (let y = 0; y < 8; y++) {
-    decodeFixRow(rom, offset + y * 4, pixels, y * 8);
+    decodeFixRow(rom, tileOffset, y, pixels, y * 8);
   }
 
   return pixels;

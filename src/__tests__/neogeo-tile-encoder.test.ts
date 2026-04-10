@@ -9,27 +9,40 @@ import {
 } from '../editor/neogeo-tile-encoder';
 import { NGO_TILE_BYTES, NGO_FIX_TILE_BYTES } from '../neogeo-constants';
 
-describe('Neo-Geo Tile Encoder (nibble-packed)', () => {
-  describe('C-ROM row decode/encode roundtrip', () => {
-    it('decodes nibble-packed pixels correctly', () => {
-      // After interleaving: [odd0, even0, odd1, even1]
-      // Pixel order: even0_lo, even0_hi, odd0_lo, odd0_hi, even1_lo, even1_hi, odd1_lo, odd1_hi
-      const rom = new Uint8Array([
-        0x32, // odd0:  low=2, high=3 → pixels 2,3
-        0x10, // even0: low=0, high=1 → pixels 0,1
-        0x76, // odd1:  low=6, high=7 → pixels 6,7
-        0x54, // even1: low=4, high=5 → pixels 4,5
-      ]);
+describe('Neo-Geo Tile Encoder', () => {
+  describe('C-ROM row decode/encode (planar)', () => {
+    it('decodes planar pixels correctly', () => {
+      // Planar: [bp0, bp2, bp1, bp3] — each byte = 1 bitplane for 8 pixels, bit 7 = pixel 0
+      // Target: pixels [15, 14, 13, 12, 11, 10, 9, 8]
+      // pixel 0 = 15 = 0b1111 → all 4 planes bit 7 set
+      // pixel 7 = 8  = 0b1000 → only plane 3 bit 0 set
+      //
+      // bp0: bits 7..0 = 1,1,1,1, 1,1,1,0 = 0xFE
+      // bp1: bits 7..0 = 1,1,1,1, 0,1,0,0 = 0xF4  (wait let me redo)
+      //
+      // Actually let me just pick a simple pattern: all pixels = 5 (0b0101)
+      // bp0 = 0xFF (plane 0 all set), bp1 = 0x00, bp2 = 0xFF (plane 2 all set), bp3 = 0x00
+      // Interleaved: [bp0, bp2, bp1, bp3] = [0xFF, 0xFF, 0x00, 0x00]
+      const rom = new Uint8Array([0xFF, 0xFF, 0x00, 0x00]);
       const out = new Uint8Array(8);
       decodeNeoGeoRow(rom, 0, out, 0);
-      // pixel 0 = even0 & 0x0F = 0, pixel 1 = even0 >> 4 = 1, etc.
-      expect(Array.from(out)).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+      expect(Array.from(out)).toEqual([5, 5, 5, 5, 5, 5, 5, 5]);
+    });
+
+    it('decodes single pixel correctly', () => {
+      // LSB first: pixel 0 = bit 0. Only bit 0 set in all planes → pixel 0 = 15, rest = 0
+      // bp0 = 0x01, bp1 = 0x01, bp2 = 0x01, bp3 = 0x01
+      // Interleaved: [bp0, bp2, bp1, bp3] = [0x01, 0x01, 0x01, 0x01]
+      const rom = new Uint8Array([0x01, 0x01, 0x01, 0x01]);
+      const out = new Uint8Array(8);
+      decodeNeoGeoRow(rom, 0, out, 0);
+      expect(out[0]).toBe(15);
+      expect(out[1]).toBe(0);
     });
 
     it('roundtrips all 16 color indices', () => {
       const pixels = new Uint8Array([8, 9, 10, 11, 12, 13, 14, 15]);
       const [b0, b1, b2, b3] = encodeNeoGeoRow(pixels, 0);
-
       const rom = new Uint8Array([b0, b1, b2, b3]);
       const decoded = new Uint8Array(8);
       decodeNeoGeoRow(rom, 0, decoded, 0);
@@ -58,13 +71,11 @@ describe('Neo-Geo Tile Encoder (nibble-packed)', () => {
   describe('Full 16x16 tile', () => {
     it('reads and writes back a tile correctly', () => {
       const rom = new Uint8Array(NGO_TILE_BYTES * 2);
-
       for (let y = 0; y < 16; y++) {
         for (let x = 0; x < 16; x++) {
           writeNeoGeoPixel(rom, 0, x, y, (x + y) & 0x0F);
         }
       }
-
       const pixels = readNeoGeoTile(rom, 0);
       for (let y = 0; y < 16; y++) {
         for (let x = 0; x < 16; x++) {
@@ -77,7 +88,6 @@ describe('Neo-Geo Tile Encoder (nibble-packed)', () => {
       const rom = new Uint8Array(NGO_TILE_BYTES * 2);
       writeNeoGeoPixel(rom, 0, 0, 0, 5);
       writeNeoGeoPixel(rom, 1, 0, 0, 10);
-
       const tile0 = readNeoGeoTile(rom, 0);
       const tile1 = readNeoGeoTile(rom, 1);
       expect(tile0[0]).toBe(5);
@@ -92,29 +102,28 @@ describe('Neo-Geo Tile Encoder (nibble-packed)', () => {
     });
   });
 
-  describe('Fix layer (S-ROM, nibble-packed)', () => {
+  describe('Fix layer (S-ROM, column-major nibble-packed)', () => {
     it('decodes fix row with known values', () => {
-      // xoffset = {16, 20, 24, 28, 0, 4, 8, 12}
-      // pixels 0-3 from bytes 2-3, pixels 4-7 from bytes 0-1
-      const rom = new Uint8Array([
-        0x54, // b0: low=4, high=5 → pixels 4,5
-        0x76, // b1: low=6, high=7 → pixels 6,7
-        0x10, // b2: low=0, high=1 → pixels 0,1
-        0x32, // b3: low=2, high=3 → pixels 2,3
-      ]);
+      // S-ROM column-major: 4 segments of 8 bytes each
+      // Row 0 bytes: pixels 0,1 at offset 16, pixels 2,3 at offset 24,
+      //              pixels 4,5 at offset 0,  pixels 6,7 at offset 8
+      // Low nibble = left pixel, high nibble = right pixel
+      const rom = new Uint8Array(32);
+      rom[16] = 0x21; // pixel 0 = 1, pixel 1 = 2
+      rom[24] = 0x43; // pixel 2 = 3, pixel 3 = 4
+      rom[0]  = 0x65; // pixel 4 = 5, pixel 5 = 6
+      rom[8]  = 0x87; // pixel 6 = 7, pixel 7 = 8
       const out = new Uint8Array(8);
-      decodeFixRow(rom, 0, out, 0);
-      expect(Array.from(out)).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+      decodeFixRow(rom, 0, 0, out, 0);
+      expect(Array.from(out)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
     });
 
-    it('reads full 8x8 fix tile', () => {
+    it('reads full 8x8 fix tile with all color 5', () => {
       const rom = new Uint8Array(NGO_FIX_TILE_BYTES);
-      // Fill all pixels with color 5: low nibble=5, high nibble=5 → 0x55
-      for (let y = 0; y < 8; y++) {
-        rom[y * 4 + 0] = 0x55; // pixels 4,5
-        rom[y * 4 + 1] = 0x55; // pixels 6,7
-        rom[y * 4 + 2] = 0x55; // pixels 0,1
-        rom[y * 4 + 3] = 0x55; // pixels 2,3
+      // Color 5 = low nibble 5, high nibble 5 = 0x55
+      // All 4 segments, all 8 rows
+      for (let i = 0; i < 32; i++) {
+        rom[i] = 0x55;
       }
       const pixels = readFixTile(rom, 0);
       for (let i = 0; i < 64; i++) {

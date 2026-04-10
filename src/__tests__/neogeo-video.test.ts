@@ -81,9 +81,9 @@ describe('NeoGeoVideo', () => {
       const spriteIdx = 1;
 
       // SCB3: Y=100, sticky=0, height=2 tiles (stored as 1)
-      // Y raw = 496 - 100 = 396 = 0x18C, shifted left 7: 0x18C << 7 = 0xC600
+      // Y raw = 0x200 - 100 = 412 = 0x19C, shifted left 7
       // sticky = 0, height = 1 (2 tiles - 1)
-      const yRaw = 396;
+      const yRaw = 0x200 - 100;
       const scb3 = (yRaw << 7) | (0 << 6) | 1; // height=1 means 2 tiles
       const scb3Off = (NGO_SCB3_BASE + spriteIdx) * 2;
       vram[scb3Off] = (scb3 >> 8) & 0xFF;
@@ -151,13 +151,12 @@ describe('NeoGeoVideo', () => {
 
       // Create a minimal S-ROM with a visible tile
       const fixRom = new Uint8Array(0x20000);
-      // Tile 0x200: first row all color 1 (nibble-packed)
-      // S-ROM: pixels 0-3 from bytes 2-3, pixels 4-7 from bytes 0-1
+      // Tile 0x200: all pixels color 1 (column-major nibble-packed)
+      // Color 1 in both nibbles = 0x11. Fill all 32 bytes of the tile.
       const tileOffset = 0x200 * 32;
-      fixRom[tileOffset]     = 0x11; // pixels 4,5 = 1
-      fixRom[tileOffset + 1] = 0x11; // pixels 6,7 = 1
-      fixRom[tileOffset + 2] = 0x11; // pixels 0,1 = 1
-      fixRom[tileOffset + 3] = 0x11; // pixels 2,3 = 1
+      for (let i = 0; i < 32; i++) {
+        fixRom[tileOffset + i] = 0x11; // low nibble = 1, high nibble = 1
+      }
 
       video.setRoms(new Uint8Array(0x100000), fixRom, new Uint8Array(0x20000));
       video.setFixRomMode(false); // Use game fix ROM, not BIOS
@@ -203,7 +202,7 @@ function writeSCB(
   palette: number,
 ): void {
   // SCB3: Y, sticky, height
-  const yRaw = 496 - y;
+  const yRaw = 0x200 - y;
   const scb3 = (yRaw << 7) | ((sticky ? 1 : 0) << 6) | ((height - 1) & 0x3F);
   const scb3Off = (NGO_SCB3_BASE + index) * 2;
   vram[scb3Off] = (scb3 >> 8) & 0xFF;

@@ -188,7 +188,8 @@ export class NeoGeoVideo {
     // SCB3: Y, sticky, height
     const scb3 = this.readVramWord(NGO_SCB3_BASE + index);
     const yRaw = scb3 >> 7;
-    const y = 496 - (yRaw & 0x1FF); // 9-bit Y
+    let y = 0x200 - (yRaw & 0x1FF); // 9-bit Y
+    if (y > 0x110) y -= 0x200; // Y wrapping (MAME: ypos > 272 → ypos -= 512)
     const sticky = ((scb3 >> 6) & 1) === 1;
     const height = (scb3 & 0x3F) + 1; // 6-bit height (0=1 tile)
 
@@ -292,7 +293,8 @@ export class NeoGeoVideo {
   private renderSprite(index: number): void {
     const scb3 = this.readVramWord(NGO_SCB3_BASE + index);
     const yRaw = scb3 >> 7;
-    let y = 496 - (yRaw & 0x1FF);
+    let y = 0x200 - (yRaw & 0x1FF);
+    if (y > 0x110) y -= 0x200; // Y wrapping
     const sticky = ((scb3 >> 6) & 1) === 1;
     let height = (scb3 & 0x3F) + 1;
 
@@ -304,7 +306,8 @@ export class NeoGeoVideo {
     if (sticky && index > 1) {
       const prevScb3 = this.readVramWord(NGO_SCB3_BASE + (index - 1));
       const prevYRaw = prevScb3 >> 7;
-      y = 496 - (prevYRaw & 0x1FF);
+      y = 0x200 - (prevYRaw & 0x1FF);
+      if (y > 0x110) y -= 0x200; // Y wrapping
       height = (prevScb3 & 0x3F) + 1;
 
       const prevScb4 = this.readVramWord(NGO_SCB4_BASE + (index - 1));
@@ -358,11 +361,10 @@ export class NeoGeoVideo {
       if (py < 0 || py >= NGO_SCREEN_HEIGHT) continue;
 
       const rowBase = py * NGO_SCREEN_WIDTH;
-      const romRowOffset = tileOffset + fy * 8;
-
+      // Two 64-byte blocks: left (0-63), right (64-127), row stride = 4
       // Left half (pixels 0-7) and right half (pixels 8-15)
       for (let half = 0; half < 2; half++) {
-        decodeNeoGeoRow(this.spritesRom, romRowOffset + half * 4, row, 0);
+        decodeNeoGeoRow(this.spritesRom, tileOffset + half * 64 + fy * 4, row, 0);
 
         for (let p = 0; p < 8; p++) {
           const colorIdx = row[flipH ? (7 - p) : p]!;
@@ -413,7 +415,7 @@ export class NeoGeoVideo {
           const py = screenY + ty;
           if (py < 0 || py >= NGO_SCREEN_HEIGHT) continue;
 
-          decodeFixRow(fixRom, tileOffset + ty * 4, row, 0);
+          decodeFixRow(fixRom, tileOffset, ty, row, 0);
           const rowBase = py * NGO_SCREEN_WIDTH;
 
           for (let p = 0; p < 8; p++) {
