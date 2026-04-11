@@ -101,7 +101,11 @@ export class NeoGeoBus implements BusInterface {
   /** Increment auto-animation counter (call once per VBlank from emulator) */
   tickAutoAnim(): void { this.autoAnimCounter++; }
 
-  loadProgramRom(data: Uint8Array): void { this.programRom = data; }
+  loadProgramRom(data: Uint8Array): void {
+    this.programRom = data;
+    // Default bank: if P-ROM > 1MB, bank 0 maps P2 (offset 0x100000) into 0x200000-0x2FFFFF
+    this.pRomBankOffset = data.length > 0x100000 ? 0x100000 : 0;
+  }
   loadBiosRom(data: Uint8Array): void { this.biosRom = data; }
 
   /** Switch to game mode (P-ROM at 0x000000) for direct boot */
@@ -361,6 +365,14 @@ export class NeoGeoBus implements BusInterface {
   write8(address: number, value: number): void {
     address = (address >>> 0) & 0xFFFFFF;
     value &= 0xFF;
+
+    // P-ROM bankswitch: write to 0x200000-0x2FFFFF latches D0/D1 for bank select
+    // Only odd byte writes or word writes trigger the latch (PORTWEL signal)
+    if (address >= 0x200000 && address <= 0x2FFFFF && (address & 1)) {
+      const bank = value & 0x03;
+      this.pRomBankOffset = 0x100000 + bank * 0x100000;
+      return;
+    }
 
     // Work RAM: 0x100000-0x10FFFF
     if (address >= 0x100000 && address <= 0x10FFFF) {
