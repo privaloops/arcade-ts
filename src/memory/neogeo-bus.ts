@@ -33,11 +33,13 @@ export class NeoGeoBus implements BusInterface {
   // I/O port registers (active LOW for buttons)
   private portP1: number = 0xFF;
   private portP2: number = 0xFF;
-  private portSystem: number = 0xFF;
+  private portSystem: number = 0xFF;  // Start/Select at 0x340001
+  private portCoins: number = 0xFF;   // Coins/Service at 0x380001
   private portStatus: number = 0x00;  // bit 0: 0=AES, 1=MVS
 
-  // LSPC VRAM indirect access
-  private vramAddr: number = 0;
+  // LSPC VRAM indirect access (hardware has separate read/write pointers)
+  private vramAddr: number = 0;       // write pointer (incremented on data write)
+  private vramReadAddr: number = 0;   // read pointer (latched on addr set, incremented on data read)
   private vramMod: number = 0;        // auto-increment value
   private _vramWriteCount: number = 0; // debug: count VRAM writes
   getVramWriteCount(): number { return this._vramWriteCount; }
@@ -158,6 +160,7 @@ export class NeoGeoBus implements BusInterface {
   setPortP1(value: number): void { this.portP1 = value; }
   setPortP2(value: number): void { this.portP2 = value; }
   setPortSystem(value: number): void { this.portSystem = value; }
+  setPortCoins(value: number): void { this.portCoins = value; }
 
   /** Set MVS mode. Bit 7: 0=MVS, 1=AES. Bit 6: 0=1-slot, 1=multi-slot */
   setMvsMode(mvs: boolean): void {
@@ -281,16 +284,15 @@ export class NeoGeoBus implements BusInterface {
       return 0x3F | ((rtcBits & 3) << 6); // map to bits 7-6
     }
 
-    // REG_STATUS_A: 0x340000-0x340001 (P1 start/select, P2 directions+buttons, coins)
+    // REG_STATUS_A: 0x340000-0x340001 (P2 + system starts/selects)
     if (address >= 0x340000 && address <= 0x340001) {
       return (address & 1) ? this.portSystem : this.portP2;
     }
 
     // REG_STATUS_B: 0x380000-0x380001
-    // FBNeo ReadInput3: even = ~NeoInputBank[2], odd = ~0
-    // With no special inputs, both bytes return 0xFF
+    // Even: bit 7: 0=MVS, 1=AES. Odd: Coin1/Coin2/Service (active LOW)
     if (address >= 0x380000 && address <= 0x380001) {
-      return 0xFF;
+      return (address & 1) ? this.portCoins : 0x00;
     }
 
     // LSPC registers: 0x3C0000-0x3C000F (read)
@@ -437,8 +439,12 @@ export class NeoGeoBus implements BusInterface {
     const reg = (address & 0xE) >> 1;
     switch (reg) {
       case 0: // 0x3C0000-0x3C0001: VRAM data (same as 0x3C0002, per FBNeo)
-      case 1: { // 0x3C0002-0x3C0003: VRAM data read (no auto-increment)
-        const word = this.readVramWord(this.vramAddr);
+      case 1: { // 0x3C0002-0x3C0003: VRAM data read (uses separate read pointer)
+        const word = this.readVramWord(this.vramReadAddr);
+        // Auto-increment read pointer on low byte (once per word read)
+        if (address & 1) {
+          this.vramReadAddr = (this.vramReadAddr + this.vramMod) & 0xFFFF;
+        }
         return (address & 1) ? (word & 0xFF) : ((word >> 8) & 0xFF);
       }
       case 2: { // 0x3C0004-0x3C0005: VRAM modulo read
@@ -465,8 +471,9 @@ export class NeoGeoBus implements BusInterface {
   private writeLspcWord(address: number, value: number): void {
     const reg = (address & 0xE) >> 1;
     switch (reg) {
-      case 0: // 0x3C0000: VRAM address
+      case 0: // 0x3C0000: VRAM address — latches both write and read pointers
         this.vramAddr = value & 0xFFFF;
+        this.vramReadAddr = value & 0xFFFF;
         break;
       case 1: // 0x3C0002: VRAM data write
         this._vramWriteCount++;

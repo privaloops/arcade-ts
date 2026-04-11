@@ -457,28 +457,58 @@ export class NeoGeoEmulator {
   // ── Input mapping ─────────────────────────────────────────────────────────
 
   private updateInputPorts(): void {
-    // Neo-Geo uses same active LOW convention as CPS1.
-    // InputManager.readPort() returns bytes with pressed buttons as 0.
-    // Port 0 = P1 low (directions + buttons 1-3), Port 1 = P1 high (buttons 4-6)
-    // Port 2 = P2 low, Port 3 = P2 high, Port 4 = system (coins, starts)
+    // CPS1 InputManager bit layout (active LOW):
+    //   readPlayerLow: bit 0=Right, 1=Left, 2=Down, 3=Up, 4=Btn1(A), 5=Btn2(B), 6=Btn3(C)
+    //   readPlayerHigh: bit 0=Btn4(D)
+    //   readSystem: bit 0=Coin1, 1=Coin2, 4=Start1, 5=Start2
+    //
+    // Neo-Geo MVS port layout (active LOW):
+    //   0x300001 P1: bit 0=Up, 1=Down, 2=Left, 3=Right, 4=A, 5=B, 6=C, 7=D
+    //   0x340000 P2: same as P1
+    //   0x340001 System: bit 0=Start1, 1=Start2, 2=Select1, 3=Select2
+    //   0x380001 Coins: bit 0=Coin1, 1=Coin2, 2=Service
 
-    // P1: directions + A/B/C from port 0, D from port 1 bit 4
     const p1Lo = this.input.readPort(0);
     const p1Hi = this.input.readPort(1);
-    // Map CPS1 6-button layout to Neo-Geo 4-button:
-    // port 0 bits: 0=up, 1=down, 2=left, 3=right, 4=btn1(A), 5=btn2(B), 6=btn3(C)
-    // Neo-Geo P1: 0=up, 1=down, 2=left, 3=right, 4=A, 5=B, 6=C, 7=D
-    const p1 = (p1Lo & 0x7F) | ((p1Hi & 0x10) ? 0x80 : 0); // D from btn4
-    this.bus.setPortP1(p1);
+    // Remap CPS1 directions (R/L/D/U bits 0-3) → Neo-Geo (U/D/L/R bits 0-3)
+    const up1    = (p1Lo >> 3) & 1;  // CPS1 bit 3 (Up)
+    const down1  = (p1Lo >> 2) & 1;  // CPS1 bit 2 (Down)
+    const left1  = (p1Lo >> 1) & 1;  // CPS1 bit 1 (Left)
+    const right1 = (p1Lo >> 0) & 1;  // CPS1 bit 0 (Right)
+    const a1 = (p1Lo >> 4) & 1;      // Btn1 = A
+    const b1 = (p1Lo >> 5) & 1;      // Btn2 = B
+    const c1 = (p1Lo >> 6) & 1;      // Btn3 = C
+    const d1 = (p1Hi >> 0) & 1;      // Btn4 = D
+    const p1Neo = (up1) | (down1 << 1) | (left1 << 2) | (right1 << 3) |
+                  (a1 << 4) | (b1 << 5) | (c1 << 6) | (d1 << 7);
+    this.bus.setPortP1(p1Neo);
 
     const p2Lo = this.input.readPort(2);
     const p2Hi = this.input.readPort(3);
-    const p2 = (p2Lo & 0x7F) | ((p2Hi & 0x10) ? 0x80 : 0);
-    this.bus.setPortP2(p2);
+    const up2    = (p2Lo >> 3) & 1;
+    const down2  = (p2Lo >> 2) & 1;
+    const left2  = (p2Lo >> 1) & 1;
+    const right2 = (p2Lo >> 0) & 1;
+    const a2 = (p2Lo >> 4) & 1;
+    const b2 = (p2Lo >> 5) & 1;
+    const c2 = (p2Lo >> 6) & 1;
+    const d2 = (p2Hi >> 0) & 1;
+    const p2Neo = (up2) | (down2 << 1) | (left2 << 2) | (right2 << 3) |
+                  (a2 << 4) | (b2 << 5) | (c2 << 6) | (d2 << 7);
+    this.bus.setPortP2(p2Neo);
 
-    // System: coin/start
+    // System: Start/Select at 0x340001
     const sys = this.input.readPort(4);
-    this.bus.setPortSystem(sys);
+    const start1 = (sys >> 4) & 1;  // CPS1 bit 4
+    const start2 = (sys >> 5) & 1;  // CPS1 bit 5
+    const sysNeo = 0xFC | start1 | (start2 << 1); // bits 2-7 = 1 (released)
+    this.bus.setPortSystem(sysNeo);
+
+    // Coins at 0x380001
+    const coin1 = (sys >> 0) & 1;   // CPS1 bit 0
+    const coin2 = (sys >> 1) & 1;   // CPS1 bit 1
+    const coinsNeo = 0xF8 | coin1 | (coin2 << 1); // bit 2=service(released)
+    this.bus.setPortCoins(coinsNeo);
   }
 
   // ── Public accessors ──────────────────────────────────────────────────────
