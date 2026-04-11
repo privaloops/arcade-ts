@@ -281,38 +281,47 @@ const SMA_BANKS: Record<string, { offsets: number[]; bits: number[] }> = {
   },
 };
 
+// Per-game SMA addresses (MAME: sma.cpp memory maps)
+const SMA_ADDRS: Record<string, { bankWrite: number; rng: number[] }> = {
+  kof99:  { bankWrite: 0x2FFFF0, rng: [0x2FFFF8, 0x2FFFFA] },
+  garou:  { bankWrite: 0x2FFFC0, rng: [0x2FFFCC, 0x2FFFF0] },
+  garouh: { bankWrite: 0x2FFFC0, rng: [0x2FFFCC, 0x2FFFF0] },
+  mslug3: { bankWrite: 0x2FFFE4, rng: [] },
+  mslug3a:{ bankWrite: 0x2FFFE4, rng: [] },
+  mslug3h:{ bankWrite: 0x2FFFE4, rng: [] },
+  kof2000:{ bankWrite: 0x2FFFEC, rng: [0x2FFFD8, 0x2FFFDA] },
+};
+
 /** SMA runtime protection — bankswitch + 0x9A37 read + LFSR RNG */
 export class SmaProtection implements NeoGeoProtection {
   private smaRng = 0x2345;
   private bankConfig: { offsets: number[]; bits: number[] };
   private onBankSwitch: (offset: number) => void;
-  // Addresses for protection reads/writes vary per game
-  private protReadAddr: number;   // 0x2FE446 for all SMA games
-  private rngAddr: number;        // game-specific
+  private bankWriteAddr: number;
+  private rngAddrs: number[];
 
   constructor(
     gameName: string,
     onBankSwitch: (offset: number) => void,
-    rngAddr: number,
   ) {
     const key = gameName === 'mslug3h' ? 'mslug3a' : gameName;
     this.bankConfig = SMA_BANKS[key] ?? SMA_BANKS['kof99']!;
     this.onBankSwitch = onBankSwitch;
-    this.protReadAddr = 0x2FE446;
-    this.rngAddr = rngAddr;
+    const addrs = SMA_ADDRS[gameName] ?? SMA_ADDRS[key] ?? SMA_ADDRS['kof99']!;
+    this.bankWriteAddr = addrs.bankWrite;
+    this.rngAddrs = addrs.rng;
   }
 
   read16(address: number): number | undefined {
-    // Protection magic value
-    if (address === this.protReadAddr) return 0x9A37;
-    // LFSR random number generator
-    if (address === this.rngAddr) return this.nextRandom();
+    // Protection magic value (0x2FE400-0x2FE7FF range, all return 0x9A37)
+    if (address >= 0x2FE400 && address <= 0x2FE7FF) return 0x9A37;
+    // LFSR random number generator (per-game addresses)
+    if (this.rngAddrs.includes(address)) return this.nextRandom();
     return undefined;
   }
 
   write16(address: number, value: number): boolean {
-    // Bankswitch writes to 0x2FFFF0
-    if (address === 0x2FFFF0) {
+    if (address === this.bankWriteAddr) {
       const idx = bitswap(value, ...this.bankConfig.bits);
       const offset = this.bankConfig.offsets[idx] ?? 0;
       this.onBankSwitch(0x100000 + offset);
@@ -460,22 +469,6 @@ function relocateFixed(rom: Uint8Array, romView: DataView, cfg: SmaDecryptConfig
   for (let i = 0; i < fixedWords; i++) {
     romView.setUint16(i * 2, buf[i]!, true);
   }
-}
-
-// SMA game RNG addresses (MAME memory maps)
-const SMA_RNG_ADDR: Record<string, number> = {
-  kof99: 0x2FFFF8,
-  garou: 0x2FFFCC,
-  garouh: 0x2FFFCC,
-  mslug3: 0x2FFF00,
-  mslug3a: 0x2FFF00,
-  mslug3h: 0x2FFF00,
-  kof2000: 0x2FFFD8,
-};
-
-/** Get the RNG read address for an SMA game */
-export function getSmaRngAddr(gameName: string): number {
-  return SMA_RNG_ADDR[gameName] ?? 0x2FFFF8;
 }
 
 // ---------------------------------------------------------------------------

@@ -24,7 +24,7 @@ import { Renderer } from './video/renderer';
 import { AudioOutput } from './audio/audio-output';
 import {
   getProtectionType, Kof98Protection, kof98Decrypt68k,
-  MslugxProtection, SmaProtection, smaDecrypt68k, getSmaRngAddr,
+  MslugxProtection, SmaProtection, smaDecrypt68k,
 } from './memory/neogeo-protection';
 import { CMC42_KEYS, CMC50_KEYS, cmcGfxDecrypt, cmcSfixDecrypt } from './memory/neogeo-cmc';
 import { initYM2610Wasm, YM2610Wasm } from './audio/ym2610-wasm';
@@ -209,7 +209,6 @@ export class NeoGeoEmulator {
       const prot = new SmaProtection(
         romSet.name,
         (offset) => { this.bus.setPRomBankOffset(offset); },
-        getSmaRngAddr(romSet.name),
       );
       this.bus.setProtection(prot);
       console.log(`[Neo-Geo] SMA protection: P-ROM decrypted, bankswitch + RNG active`);
