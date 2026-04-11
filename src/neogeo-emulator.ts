@@ -22,6 +22,11 @@ import { NeoGeoVideo } from './video/neogeo-video';
 import { WebGLRenderer } from './video/renderer-webgl';
 import { Renderer } from './video/renderer';
 import { AudioOutput } from './audio/audio-output';
+import {
+  getProtectionType, Kof98Protection, kof98Decrypt68k,
+  MslugxProtection, SmaProtection, smaDecrypt68k, getSmaRngAddr,
+} from './memory/neogeo-protection';
+import { CMC42_KEYS, CMC50_KEYS, cmcGfxDecrypt, cmcSfixDecrypt } from './memory/neogeo-cmc';
 import { initYM2610Wasm, YM2610Wasm } from './audio/ym2610-wasm';
 import { InputManager } from './input/input';
 import type { RendererInterface } from './types';
@@ -186,6 +191,47 @@ export class NeoGeoEmulator {
 
     // Resize the renderer for Neo-Geo resolution (320x224)
     this.renderer.resize?.(NGO_SCREEN_WIDTH, NGO_SCREEN_HEIGHT);
+
+    // Apply game-specific protection (ROM decrypt + runtime handler)
+    const protType = getProtectionType(romSet.name);
+    if (protType === 'kof98') {
+      const defaults = kof98Decrypt68k(romSet.programRom, romSet.programRom.length);
+      const prot = new Kof98Protection();
+      prot.setDefaultRom(defaults[0], defaults[1]);
+      this.bus.setProtection(prot);
+      console.log(`[Neo-Geo] KOF98 protection: P-ROM decrypted, runtime overlay active`);
+    } else if (protType === 'mslugx') {
+      const prot = new MslugxProtection((addr) => this.bus.read16(addr));
+      this.bus.setProtection(prot);
+      console.log(`[Neo-Geo] MSLUGX protection: bit counter active`);
+    } else if (protType === 'sma') {
+      smaDecrypt68k(romSet.programRom, romSet.name);
+      const prot = new SmaProtection(
+        romSet.name,
+        (offset) => { this.bus.setPRomBankOffset(offset); },
+        getSmaRngAddr(romSet.name),
+      );
+      this.bus.setProtection(prot);
+      console.log(`[Neo-Geo] SMA protection: P-ROM decrypted, bankswitch + RNG active`);
+    } else {
+      this.bus.setProtection(null);
+    }
+
+    // CMC GFX decryption — applies to C-ROM (sprites) + S-ROM (fix layer)
+    // SMA games also need CMC (they have both P-ROM and C-ROM encryption)
+    const cmcKey42 = CMC42_KEYS[romSet.name];
+    const cmcKey50 = CMC50_KEYS[romSet.name];
+    if (cmcKey42 !== undefined) {
+      console.log(`[Neo-Geo] CMC42 GFX decrypt (key=0x${cmcKey42.toString(16)}): ${romSet.spritesRom.length / 1024 / 1024}MB`);
+      cmcGfxDecrypt(romSet.spritesRom, romSet.spritesRom.length, cmcKey42, false);
+      cmcSfixDecrypt(romSet.spritesRom, romSet.spritesRom.length, romSet.fixedRom, romSet.fixedRom.length);
+      console.log(`[Neo-Geo] CMC42 GFX + SFIX decrypt complete`);
+    } else if (cmcKey50 !== undefined) {
+      console.log(`[Neo-Geo] CMC50 GFX decrypt (key=0x${cmcKey50.toString(16)}): ${romSet.spritesRom.length / 1024 / 1024}MB`);
+      cmcGfxDecrypt(romSet.spritesRom, romSet.spritesRom.length, cmcKey50, true);
+      cmcSfixDecrypt(romSet.spritesRom, romSet.spritesRom.length, romSet.fixedRom, romSet.fixedRom.length);
+      console.log(`[Neo-Geo] CMC50 GFX + SFIX decrypt complete`);
+    }
 
     // Load ROMs into bus
     this.bus.loadProgramRom(romSet.programRom);

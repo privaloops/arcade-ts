@@ -20,6 +20,7 @@
 
 import type { BusInterface } from '../types';
 import { PD4990A } from './pd4990a';
+import type { NeoGeoProtection } from './neogeo-protection';
 
 export class NeoGeoBus implements BusInterface {
   private programRom: Uint8Array;
@@ -81,6 +82,9 @@ export class NeoGeoBus implements BusInterface {
   private watchdogCounter: number = 8;
   private _watchdogResetCallback: (() => void) | null = null;
 
+  // Runtime protection handler (KOF98, MSLUGX, SMA, etc.)
+  private protection: NeoGeoProtection | null = null;
+
   // P-ROM banking: 0x200000-0x2FFFFF region
   // Default = 0 (mirror of P-ROM start). For games > 1MB, bank switch changes this.
   private pRomBankOffset: number = 0;
@@ -115,6 +119,9 @@ export class NeoGeoBus implements BusInterface {
   }
   loadBiosRom(data: Uint8Array): void { this.biosRom = data; }
 
+  /** Set P-ROM bank offset for 0x200000-0x2FFFFF region (SMA protection) */
+  setPRomBankOffset(offset: number): void { this.pRomBankOffset = offset; }
+
   /** Switch to game mode (P-ROM at 0x000000) for direct boot */
   switchToGameMode(): void {
     this.biosMode = false;
@@ -136,6 +143,9 @@ export class NeoGeoBus implements BusInterface {
     this.soundCommandPending = false;
     this.watchdogCounter = 8;
   }
+
+  /** Set runtime protection handler for the current game */
+  setProtection(prot: NeoGeoProtection | null): void { this.protection = prot; }
 
   getVram(): Uint8Array { return this.vram; }
   getPaletteRam(): Uint8Array { return this.paletteRam; }
@@ -381,6 +391,11 @@ export class NeoGeoBus implements BusInterface {
   }
 
   read16(address: number): number {
+    // Check protection handler first (ROM overlay, bit counters, etc.)
+    if (this.protection?.read16) {
+      const val = this.protection.read16(address, (a) => this.read16(a));
+      if (val !== undefined) return val;
+    }
     return (this.read8(address) << 8) | this.read8(address + 1);
   }
 
@@ -468,6 +483,9 @@ export class NeoGeoBus implements BusInterface {
   write16(address: number, value: number): void {
     // LSPC and palette are best handled as word writes
     address = (address >>> 0) & 0xFFFFFF;
+
+    // Check protection handler first
+    if (this.protection?.write16?.(address, value)) return;
 
     // LSPC registers — handle as word directly
     if (address >= 0x3C0000 && address <= 0x3C000F) {
