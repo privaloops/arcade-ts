@@ -26,6 +26,7 @@ interface YM2610Module {
   _ym2610_drain_samples(count: number): void;
   _ym2610_get_sample_rate(): number;
   _ym2610_alloc_rom(size: number): number;  // returns pointer
+  _ym2610_set_adpcm_a_size(size: number): void;
   _ym2610_get_irq(): boolean;
   _malloc(size: number): number;
   _free(ptr: number): void;
@@ -61,11 +62,15 @@ export class YM2610Wasm {
 
   /**
    * Load V-ROM (ADPCM samples) into WASM heap.
-   * Must be called before any ADPCM playback.
+   * For games with split ADPCM-A/B pools (separate V1/V2 ROMs),
+   * pass adpcmASize to set the split point. ADPCM-B reads are
+   * offset by adpcmASize in the combined buffer.
    */
-  loadVRom(vromData: Uint8Array): void {
+  loadVRom(vromData: Uint8Array, adpcmASize?: number): void {
     const ptr = wasmModule!._ym2610_alloc_rom(vromData.length);
     wasmModule!.HEAPU8.set(vromData, ptr);
+    // Set ADPCM-A/B split: default = full ROM (no split)
+    wasmModule!._ym2610_set_adpcm_a_size(adpcmASize ?? vromData.length);
   }
 
   /** Write to YM2610 port (0=addr_lo, 1=data_lo, 2=addr_hi, 3=data_hi) */

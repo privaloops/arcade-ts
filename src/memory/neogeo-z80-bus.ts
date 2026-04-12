@@ -1,11 +1,13 @@
 /**
  * Neo-Geo Z80 Audio CPU Memory Bus
  *
- * Memory map:
+ * Memory map (ref: MAME neogeo.cpp audio_map):
  *   0x0000-0x7FFF : M-ROM fixed (32KB)
- *   0x8000-0xBFFF : M-ROM banked (16KB window, NEO-ZMC2)
- *   0xC000-0xDFFF : Work RAM (8KB)
- *   0xE000-0xFFFF : Work RAM mirror
+ *   0x8000-0xBFFF : M-ROM banked window 3 (16KB, NEO-ZMC2)
+ *   0xC000-0xDFFF : M-ROM banked window 2 (8KB)
+ *   0xE000-0xEFFF : M-ROM banked window 1 (4KB)
+ *   0xF000-0xF7FF : M-ROM banked window 0 (2KB)
+ *   0xF800-0xFFFF : Work RAM (2KB)
  *
  * I/O ports (critical — all YM2610 access goes through ports):
  *   0x00 : Sound latch read / clear pending (write)
@@ -13,7 +15,8 @@
  *   0x05 : YM2610 data port 0 / status read
  *   0x06 : YM2610 address port 1 (regs 0x100-0x1FF)
  *   0x07 : YM2610 data port 1 / status read
- *   0x08 : NMI enable / bank switch
+ *   0x08 : NMI enable (write) / bank switch (read, NEO-ZMC2)
+ *   0x09-0x0B : Bank switch (read, NEO-ZMC2)
  *   0x0C : Sound reply to 68K
  *   0x18 : NMI disable
  */
@@ -21,7 +24,7 @@
 import type { Z80BusInterface } from '../types';
 
 export interface NeoGeoZ80BusState {
-  currentBank: number;
+  bankRegisters: number[];
   soundLatchValue: number;
   soundLatchQueue: number[];
   nmiEnabled: boolean;
@@ -30,9 +33,11 @@ export interface NeoGeoZ80BusState {
 export class NeoGeoZ80Bus implements Z80BusInterface {
   private audioRom: Uint8Array;        // Game M-ROM
   private biosRom: Uint8Array;        // BIOS Z80 ROM (sm1.sm1)
-  private workRam: Uint8Array;        // 8KB
-  private currentBank: number;        // current 16KB bank for 0x8000-0xBFFF
-  private bankRegisters: number[];    // 4 bank registers
+  private workRam: Uint8Array;        // 2KB (0xF800-0xFFFF)
+  // NEO-ZMC2 bank registers: 4 windows into M-ROM
+  // Window 0: 0xF000-0xF7FF (2KB), Window 1: 0xE000-0xEFFF (4KB)
+  // Window 2: 0xC000-0xDFFF (8KB), Window 3: 0x8000-0xBFFF (16KB)
+  private bankRegisters: number[];    // 4 bank registers (bank entry per window)
 
   // Sound latch
   private soundLatchValue: number;
@@ -62,9 +67,13 @@ export class NeoGeoZ80Bus implements Z80BusInterface {
   constructor() {
     this.audioRom = new Uint8Array(0);
     this.biosRom = new Uint8Array(0);
-    this.workRam = new Uint8Array(0x2000); // 8KB
-    this.currentBank = 0;
-    this.bankRegisters = [0, 0, 0, 0];
+    this.workRam = new Uint8Array(0x0800); // 2KB
+    // FBNeo: initial banks = linear identity mapping (addr = ROM offset)
+    // Window 0 (2KB): bank 0x1E → 0x1E * 0x800 = 0xF000
+    // Window 1 (4KB): bank 0x0E → 0x0E * 0x1000 = 0xE000
+    // Window 2 (8KB): bank 0x06 → 0x06 * 0x2000 = 0xC000
+    // Window 3 (16KB): bank 0x02 → 0x02 * 0x4000 = 0x8000
+    this.bankRegisters = [0x1E, 0x0E, 0x06, 0x02];
 
     this.soundLatchValue = 0;
     this.soundLatchQueue = [];
@@ -133,38 +142,47 @@ export class NeoGeoZ80Bus implements Z80BusInterface {
   read(address: number): number {
     address &= 0xFFFF;
 
-    // Fixed ROM: 0x0000-0x7FFF
-    // On Neo-Geo, the BIOS Z80 ROM (sm1.sm1) is mapped here at boot.
-    // It contains the bootloader that copies the game M-ROM into Work RAM.
-    // If no BIOS ROM available, fall back to game M-ROM directly.
+    // Fixed ROM: 0x0000-0x7FFF (32KB)
     if (address <= 0x7FFF) {
-      // BIOS ROM at boot, game M-ROM after REG_BRDFIX switch (0x3A001B)
       const rom = (this.useGameRom || this.biosRom.length === 0)
         ? this.audioRom : this.biosRom;
       return address < rom.length ? rom[address]! : 0xFF;
     }
 
-    // Banked ROM: 0x8000-0xBFFF (16KB window into game M-ROM)
-    if (address <= 0xBFFF) {
-      const bankOffset = this.currentBank * 0x4000;
-      const romAddr = bankOffset + (address - 0x8000);
+    // Work RAM: 0xF800-0xFFFF (2KB)
+    if (address >= 0xF800) {
+      return this.workRam[address & 0x07FF]!;
+    }
+
+    // Banked ROM windows (NEO-ZMC2) — all read from game M-ROM
+    // Window 0: 0xF000-0xF7FF (2KB)
+    if (address >= 0xF000) {
+      const romAddr = this.bankRegisters[0]! * 0x0800 + (address - 0xF000);
       return romAddr < this.audioRom.length ? this.audioRom[romAddr]! : 0xFF;
     }
-
-    // Work RAM: 0xC000-0xDFFF (8KB) + mirror 0xE000-0xFFFF
-    if (address >= 0xC000) {
-      return this.workRam[(address - 0xC000) & 0x1FFF]!;
+    // Window 1: 0xE000-0xEFFF (4KB)
+    if (address >= 0xE000) {
+      const romAddr = this.bankRegisters[1]! * 0x1000 + (address - 0xE000);
+      return romAddr < this.audioRom.length ? this.audioRom[romAddr]! : 0xFF;
     }
-
-    return 0xFF;
+    // Window 2: 0xC000-0xDFFF (8KB)
+    if (address >= 0xC000) {
+      const romAddr = this.bankRegisters[2]! * 0x2000 + (address - 0xC000);
+      return romAddr < this.audioRom.length ? this.audioRom[romAddr]! : 0xFF;
+    }
+    // Window 3: 0x8000-0xBFFF (16KB)
+    {
+      const romAddr = this.bankRegisters[3]! * 0x4000 + (address - 0x8000);
+      return romAddr < this.audioRom.length ? this.audioRom[romAddr]! : 0xFF;
+    }
   }
 
   write(address: number, value: number): void {
     address &= 0xFFFF;
 
-    // Work RAM: 0xC000-0xDFFF + mirror 0xE000-0xFFFF
-    if (address >= 0xC000) {
-      this.workRam[(address - 0xC000) & 0x1FFF] = value & 0xFF;
+    // Work RAM: 0xF800-0xFFFF (2KB)
+    if (address >= 0xF800) {
+      this.workRam[address & 0x07FF] = value & 0xFF;
       return;
     }
     // ROM area — ignore writes
@@ -175,25 +193,38 @@ export class NeoGeoZ80Bus implements Z80BusInterface {
   // ---------------------------------------------------------------------------
 
   ioRead(port: number): number {
-    port &= 0xFF;
+    // NEO-ZMC2 bank switching uses the full 16-bit port address:
+    // Z80 "IN A,(n)" puts A on bits 8-15, n on bits 0-7.
+    // The bank value comes from the upper byte.
+    const lowPort = port & 0xFF;
 
-    switch (port) {
+    switch (lowPort) {
       case 0x00: // Sound latch (command from 68K) — reading clears NMI pending
-        this.soundLatchPending = false; // Stop NMI re-triggering
+        this.soundLatchPending = false;
         this.onSoundConsumed?.();
         return this.soundLatchValue;
 
       case 0x04: // YM2610 status port 0
       case 0x05: // YM2610 data port 0 read
-        if (this.onYm2610Read) return this.onYm2610Read(port & 1);
-        // No real YM2610: return "not busy, no timer pending" (0x00).
-        // Timer flags (bits 0-1) should be 0 unless a timer was explicitly set.
+        if (this.onYm2610Read) return this.onYm2610Read(lowPort & 1);
         return 0x00;
 
       case 0x06: // YM2610 status port 1
       case 0x07: // YM2610 data port 1 read
-        if (this.onYm2610Read) return this.onYm2610Read((port & 1) + 2);
+        if (this.onYm2610Read) return this.onYm2610Read((lowPort & 1) + 2);
         return 0;
+
+      // NEO-ZMC2 bank switch — triggered by READ (IN instruction)
+      // Bank value = upper byte of port address (bits 8-15)
+      case 0x08: // Window 0 (0xF000-0xF7FF, 2KB)
+      case 0x09: // Window 1 (0xE000-0xEFFF, 4KB)
+      case 0x0A: // Window 2 (0xC000-0xDFFF, 8KB)
+      case 0x0B: { // Window 3 (0x8000-0xBFFF, 16KB)
+        const window = lowPort - 0x08;
+        const bankValue = (port >> 8) & 0xFF;
+        this.bankRegisters[window] = bankValue;
+        return 0;
+      }
 
       default:
         return 0xFF;
@@ -207,10 +238,11 @@ export class NeoGeoZ80Bus implements Z80BusInterface {
     switch (port) {
       case 0x00: // Clear sound latch pending
         this.soundLatchPending = false;
-        // Dequeue next command if available
+        // Dequeue next command if available — fire NMI for it
         if (this.soundLatchQueue.length > 0) {
           this.soundLatchValue = this.soundLatchQueue.shift()!;
           this.soundLatchPending = true;
+          this.nmiPulse = true;
         }
         break;
 
@@ -232,10 +264,8 @@ export class NeoGeoZ80Bus implements Z80BusInterface {
         this.onYm2610Write?.(3, value); // port 3 = data high
         break;
 
-      case 0x08: // NMI enable + bank switch
+      case 0x08: // NMI enable (bank switching is on READ, not write)
         this.nmiEnabled = true;
-        // Bank switch: value selects the bank
-        this.updateBank(value);
         break;
 
       case 0x0C: // Sound reply to 68K
@@ -248,19 +278,8 @@ export class NeoGeoZ80Bus implements Z80BusInterface {
         break;
 
       default:
-        // Bank switch registers (0x08-0x0B)
-        if (port >= 0x08 && port <= 0x0B) {
-          this.bankRegisters[port - 0x08] = value;
-          this.updateBank(value);
-        }
         break;
     }
-  }
-
-  private updateBank(value: number): void {
-    // NEO-ZMC2 banking: bank = value, maps 16KB window at 0x8000
-    // Simple banking: skip the first 32KB (fixed area), then 16KB banks
-    this.currentBank = ((value & 0x1F) + 2); // +2 to skip the fixed 32KB (banks 0-1)
   }
 
   // ---------------------------------------------------------------------------
@@ -278,7 +297,7 @@ export class NeoGeoZ80Bus implements Z80BusInterface {
 
   getState(): NeoGeoZ80BusState {
     return {
-      currentBank: this.currentBank,
+      bankRegisters: [...this.bankRegisters],
       soundLatchValue: this.soundLatchValue,
       soundLatchQueue: [...this.soundLatchQueue],
       nmiEnabled: this.nmiEnabled,
@@ -286,7 +305,7 @@ export class NeoGeoZ80Bus implements Z80BusInterface {
   }
 
   setState(state: NeoGeoZ80BusState): void {
-    this.currentBank = state.currentBank;
+    this.bankRegisters = [...(state.bankRegisters ?? [0, 0, 0, 0])];
     this.soundLatchValue = state.soundLatchValue;
     this.soundLatchQueue = [...state.soundLatchQueue];
     this.nmiEnabled = state.nmiEnabled;

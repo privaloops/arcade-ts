@@ -122,10 +122,8 @@ function runOneFrame(): void {
     // Clock YM2610 proportionally (8 MHz = 2× Z80's 4 MHz)
     ym2610.clockCycles(ran * YM_CLOCK_RATIO);
 
-    // Check YM2610 IRQ → Z80 IRQ
-    if (ym2610.getIrq()) {
-      z80.irq(0xFF); // RST 38h
-    }
+    // YM2610 IRQ → Z80 INT (level-triggered, like real hardware)
+    z80.setIrqLine(ym2610.getIrq());
   }
 
   // Read generated YM2610 samples
@@ -172,10 +170,25 @@ self.onmessage = async (e: MessageEvent) => {
         z80Bus = new NeoGeoZ80Bus();
         z80 = new Z80(z80Bus);
 
-        // Wire Z80 bus to YM2610
+        // Wire Z80 bus to YM2610 + classify writes for diagnostics
+        let ymFmWrites = 0, ymSsgWrites = 0, ymAdpcmAWrites = 0, ymAdpcmBWrites = 0, ymTimerWrites = 0;
+        let lastAddr0 = 0, lastAddr1 = 0;
         z80Bus.setYm2610WriteCallback((port, value) => {
           ym2610!.write(port, value);
+          if (port === 0) lastAddr0 = value; // addr port 0
+          if (port === 2) lastAddr1 = value; // addr port 1
+          if (port === 1) { // data port 0: SSG(0x00-0x0F), ADPCM-B(0x10-0x1C), FM(0x21+), Timer(0x24-0x27)
+            if (lastAddr0 <= 0x0F) ymSsgWrites++;
+            else if (lastAddr0 >= 0x10 && lastAddr0 <= 0x1C) ymAdpcmBWrites++;
+            else if (lastAddr0 >= 0x24 && lastAddr0 <= 0x27) ymTimerWrites++;
+            else ymFmWrites++;
+          }
+          if (port === 3) { // data port 1: ADPCM-A(0x00-0x2F), FM ch4-6(0x30+)
+            if (lastAddr1 <= 0x2F) ymAdpcmAWrites++;
+            else ymFmWrites++;
+          }
         });
+        (self as any).__getYmStats = () => ({ fm: ymFmWrites, ssg: ymSsgWrites, adpcmA: ymAdpcmAWrites, adpcmB: ymAdpcmBWrites, timer: ymTimerWrites });
         z80Bus.setYm2610ReadCallback((port) => {
           return ym2610!.read(port);
         });
@@ -195,9 +208,9 @@ self.onmessage = async (e: MessageEvent) => {
           z80Bus.loadAudioRom(new Uint8Array(msg.audioRom));
         }
 
-        // Load V-ROM into WASM
+        // Load V-ROM into WASM (with ADPCM-A/B split point)
         if (msg.voiceRom) {
-          ym2610!.loadVRom(new Uint8Array(msg.voiceRom));
+          ym2610!.loadVRom(new Uint8Array(msg.voiceRom), msg.adpcmASize);
         }
 
         // Set up ring buffer
@@ -228,16 +241,16 @@ self.onmessage = async (e: MessageEvent) => {
       break;
 
     case 'rom-switch':
-      // 68K switched Z80 ROM between BIOS and game M-ROM.
-      // Reset Z80 + latch state so the sound driver reinitializes.
-      if (z80Bus && z80) {
+      // MAME/FBNeo: only change the ROM mapping, never reset Z80 or YM2610.
+      // The Z80 continues executing from wherever it was (typically RAM idle loop).
+      if (z80Bus) {
         z80Bus.setUseGameRom(msg.useGameRom);
-        z80Bus.resetLatchState();
-        z80.reset();
-        ym2610?.reset();
-        lastAudioTime = 0;
-        audioDebt = 0;
       }
+      break;
+
+
+    case 'diag':
+      self.postMessage({ type: 'diag', ymStats: (self as any).__getYmStats?.() ?? {}, frame: workerFrameCount });
       break;
 
     case 'reset':

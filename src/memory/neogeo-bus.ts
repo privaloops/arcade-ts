@@ -162,9 +162,6 @@ export class NeoGeoBus implements BusInterface {
 
   /** Called by Z80 bus to send reply back to 68K */
   setSoundReply(value: number): void {
-    if (this.soundLatchFromZ80 === 0xC3 && value !== 0xC3) {
-      console.log(`[Neo-Geo BUS] soundReply overwritten: 0xC3 → 0x${value.toString(16)}`, new Error().stack?.split('\n')[2]);
-    }
     this.soundLatchFromZ80 = value;
   }
 

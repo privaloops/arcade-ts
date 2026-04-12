@@ -19,6 +19,7 @@ export interface NeoGeoRomSet {
   spritesRom: Uint8Array;     // C-ROM assembled (interleaved pairs)
   audioRom: Uint8Array;       // M-ROM (Z80 code)
   voiceRom: Uint8Array;       // V-ROM (ADPCM samples, concatenated)
+  adpcmASize: number;         // Size of ADPCM-A pool (ADPCM-B starts after)
   fixedRom: Uint8Array;       // S-ROM (fix layer tiles)
   biosRom: Uint8Array;        // BIOS 68K (sp-s2.sp1, 128KB)
   biosSRom: Uint8Array;       // BIOS S-ROM (sfix.sfix, 128KB)
@@ -209,13 +210,14 @@ export function assembleSpritesRom(
 
 /**
  * Assemble V-ROM (voice/ADPCM samples).
- * Simple linear concatenation based on offsets.
+ * Returns the combined buffer + ADPCM-A pool size for the WASM split.
  * Voice data can come from ymsnd:adpcma and ymsnd:adpcmb — different pools.
+ * The YM2610 has separate ROM interfaces for ADPCM-A and ADPCM-B.
  */
 export function assembleVoiceRom(
   entries: NeoGeoRomEntry[],
   fileMap: Map<string, Uint8Array>,
-): Uint8Array {
+): { data: Uint8Array; adpcmASize: number } {
   // Calculate total size
   let totalSize = 0;
   for (const entry of entries) {
@@ -223,9 +225,8 @@ export function assembleVoiceRom(
     if (end > totalSize) totalSize = end;
   }
 
-  // ADPCM-A and ADPCM-B have separate address spaces in the XML.
-  // We detect split pools by counting entries starting at offset 0.
-  // If there are two, we concatenate ADPCM-B after ADPCM-A.
+  // ADPCM-A and ADPCM-B have separate address spaces on the YM2610.
+  // Detect split pools by counting entries starting at offset 0.
   const zeroOffsetIndices: number[] = [];
   for (let i = 0; i < entries.length; i++) {
     if (entries[i]!.offset === 0) zeroOffsetIndices.push(i);
@@ -261,10 +262,11 @@ export function assembleVoiceRom(
       result.set(data.subarray(0, Math.min(data.length, entry.size)), adpcmASize + entry.offset);
     }
 
-    return result;
+    console.log(`[Neo-Geo V-ROM] Split pools: ADPCM-A=${adpcmASize/1024}KB, ADPCM-B=${adpcmBSize/1024}KB`);
+    return { data: result, adpcmASize };
   }
 
-  // Simple case: single address space
+  // Single pool: both ADPCM-A and ADPCM-B share the same ROM
   const result = new Uint8Array(totalSize);
   for (const entry of entries) {
     const data = fileMap.get(entry.name.toLowerCase());
@@ -273,7 +275,7 @@ export function assembleVoiceRom(
     result.set(data.subarray(0, len), entry.offset);
   }
 
-  return result;
+  return { data: result, adpcmASize: totalSize };
 }
 
 /** Assemble linear ROM (M-ROM, S-ROM). */
@@ -501,7 +503,9 @@ export async function loadNeoGeoRomFromZip(
   const programRom = assembleProgramRom(gameDef.program, fileMap);
   const spritesRom = assembleSpritesRom(gameDef.sprites, fileMap);
   const audioRom = assembleLinearRom(gameDef.audio, fileMap);
-  const voiceRom = assembleVoiceRom(gameDef.voice, fileMap);
+  const voiceResult = assembleVoiceRom(gameDef.voice, fileMap);
+  const voiceRom = voiceResult.data;
+  const adpcmASize = voiceResult.adpcmASize;
   const fixedRom = gameDef.fixed
     ? assembleLinearRom(gameDef.fixed, fileMap)
     : new Uint8Array(0);
@@ -528,6 +532,7 @@ export async function loadNeoGeoRomFromZip(
     spritesRom,
     audioRom,
     voiceRom,
+    adpcmASize,
     fixedRom,
     biosRom,
     biosSRom,

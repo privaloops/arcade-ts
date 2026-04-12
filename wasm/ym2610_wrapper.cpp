@@ -16,9 +16,12 @@
 
 class NeoGeoYmInterface : public ymfm::ymfm_interface {
 public:
-    // V-ROM for ADPCM-A and ADPCM-B
+    // V-ROM for ADPCM-A and ADPCM-B (concatenated: A first, then B)
     uint8_t* combined_rom = nullptr;
     uint32_t combined_rom_size = 0;
+    // ADPCM-A occupies [0..adpcm_a_size), ADPCM-B occupies [adpcm_a_size..combined_rom_size)
+    // For games with no split (single V-ROM), adpcm_a_size = combined_rom_size
+    uint32_t adpcm_a_size = 0;
 
     // Timer tracking (ymfm external timer model)
     bool timer_active[2] = {false, false};
@@ -27,9 +30,18 @@ public:
     bool irq_state = false;
 
     virtual uint8_t ymfm_external_read(ymfm::access_class type, uint32_t address) override {
-        if (type == ymfm::ACCESS_ADPCM_A || type == ymfm::ACCESS_ADPCM_B) {
-            if (combined_rom && address < combined_rom_size)
+        if (!combined_rom) return 0;
+        if (type == ymfm::ACCESS_ADPCM_A) {
+            // ADPCM-A reads from [0..adpcm_a_size)
+            if (address < adpcm_a_size)
                 return combined_rom[address];
+            return 0;
+        }
+        if (type == ymfm::ACCESS_ADPCM_B) {
+            // ADPCM-B reads from [adpcm_a_size..combined_rom_size)
+            uint32_t rom_addr = adpcm_a_size + address;
+            if (rom_addr < combined_rom_size)
+                return combined_rom[rom_addr];
             return 0;
         }
         return 0;
@@ -91,6 +103,8 @@ EMSCRIPTEN_KEEPALIVE
 void ym2610_init() {
     if (ym_chip) delete ym_chip;
     ym_chip = new ymfm::ym2610(ym_interface);
+    // MIN fidelity: generate() outputs at clock/144 = 55556 Hz (not clock/16 = 500 kHz)
+    ym_chip->set_fidelity(ymfm::OPN_FIDELITY_MIN);
     ym_chip->reset();
     sample_buf_pos = 0;
     clock_counter = 0;
@@ -135,7 +149,7 @@ int ym2610_generate(int num_samples) {
         ym_chip->generate(&output, 1);
         float fm_l = output.data[0] / 32768.0f;
         float fm_r = output.data[1] / 32768.0f;
-        float ssg = output.data[2] / 32768.0f * 0.5f;
+        float ssg = output.data[2] / 32768.0f * 0.20f;
         sample_buf_l[sample_buf_pos] = fm_l + ssg;
         sample_buf_r[sample_buf_pos] = fm_r + ssg;
         sample_buf_pos++;
@@ -150,32 +164,27 @@ int ym2610_clock_cycles(int num_cycles) {
     int irq_flags = 0;
     ymfm::ym2610::output_data output;
 
-    // Tick timers for the full cycle batch
-    bool irq_before = ym_interface.irq_state;
-    ym_interface.tick_timers(num_cycles);
-    bool irq_after_timers = ym_interface.irq_state;
-    if (!irq_before && irq_after_timers) irq_flags |= 1;
-    if (irq_before && !irq_after_timers) irq_flags |= 2;
-
-    // Generate audio samples
+    // Tick timers and generate samples together (synchronized)
     for (int c = 0; c < num_cycles; c++) {
+        bool irq_before = ym_interface.irq_state;
+        ym_interface.tick_timers(1);
+        bool irq_after = ym_interface.irq_state;
+        if (!irq_before && irq_after) irq_flags |= 1;
+        if (irq_before && !irq_after) irq_flags |= 2;
+
         clock_counter++;
         if (clock_counter >= CLOCKS_PER_SAMPLE) {
             clock_counter = 0;
-            irq_before = ym_interface.irq_state;
             output.clear();
             ym_chip->generate(&output, 1);
             if (sample_buf_pos < SAMPLE_BUF_SIZE) {
                 float fm_l = output.data[0] / 32768.0f;
                 float fm_r = output.data[1] / 32768.0f;
-                float ssg = output.data[2] / 32768.0f * 0.5f;
+                float ssg = output.data[2] / 32768.0f * 0.20f;
                 sample_buf_l[sample_buf_pos] = fm_l + ssg;
                 sample_buf_r[sample_buf_pos] = fm_r + ssg;
                 sample_buf_pos++;
             }
-            bool irq_after = ym_interface.irq_state;
-            if (!irq_before && irq_after) irq_flags |= 1;
-            if (irq_before && !irq_after) irq_flags |= 2;
         }
     }
     return irq_flags;
@@ -200,7 +209,14 @@ uint8_t* ym2610_alloc_rom(uint32_t size) {
     uint8_t* ptr = new uint8_t[size];
     memset(ptr, 0, size);
     ym2610_set_rom(ptr, size);
+    // Default: single pool (no ADPCM-B split)
+    ym_interface.adpcm_a_size = size;
     return ptr;
+}
+
+EMSCRIPTEN_KEEPALIVE
+void ym2610_set_adpcm_a_size(uint32_t size) {
+    ym_interface.adpcm_a_size = size;
 }
 
 EMSCRIPTEN_KEEPALIVE

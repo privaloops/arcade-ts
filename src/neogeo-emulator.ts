@@ -82,7 +82,6 @@ export class NeoGeoEmulator {
   private firstFrame = true;
   private m68kErrorCount = 0;
   private mainYm2610: YM2610Wasm | null = null;
-  private soundCmdLogCount = 0;
 
   // Callbacks
   private _vblankCallback: (() => void) | null = null;
@@ -112,24 +111,21 @@ export class NeoGeoEmulator {
         z80Run -= this.z80.step();
       }
 
-      // The Z80 handler should have written a reply to port 0x0C,
-      // but it may have been overwritten by the idle heartbeat.
-      // Force the expected reply based on the command sent.
+      // Force known BIOS handshake replies (Z80 may not have had enough
+      // cycles to process them during the 10k burst above)
       if (value === 0x03) {
         this.bus.setSoundReply(0xC3); // Reset → HELLO
       } else if (value === 0x01) {
-        this.bus.setSoundReply(0x01); // Command echo
+        this.bus.setSoundReply(0x01); // Slot switch echo
       }
       if (this.audioWorkerReady) {
         this.pendingSoundLatches.push(value);
       }
     });
 
-    // Wire Z80 sound reply → 68K
-    // Only propagate replies during command processing (not idle heartbeat).
-    // The idle heartbeat (R|0x80) would overwrite the HELLO preset.
-    this.z80Bus.setSoundReplyCallback((_value: number) => {
-      // Replies are handled in the command callback (immediate Z80 sync)
+    // Wire Z80 sound reply → 68K (port 0x0C writes propagate to 68K bus)
+    this.z80Bus.setSoundReplyCallback((value: number) => {
+      this.bus.setSoundReply(value);
     });
 
     // When Z80 reads port 0x00, mark command as consumed (clears pending flag)
@@ -297,7 +293,7 @@ export class NeoGeoEmulator {
     try {
       await initYM2610Wasm();
       this.mainYm2610 = new YM2610Wasm();
-      this.mainYm2610.loadVRom(romSet.voiceRom);
+      this.mainYm2610.loadVRom(romSet.voiceRom, romSet.adpcmASize);
       // Wire YM2610 to Z80 bus
       this.z80Bus.setYm2610WriteCallback((port, value) => {
         this.mainYm2610!.write(port, value);
@@ -311,17 +307,14 @@ export class NeoGeoEmulator {
 
     // Pre-run the Z80 with YM2610 connected to complete sm1.sm1 init
     {
-      let cycles = 500000; // More cycles with real YM2610
+      let cycles = 500000;
       while (cycles > 0) {
         if (this.z80Bus.shouldFireNmi()) this.z80.nmi();
         const ran = this.z80.step();
         cycles -= ran;
-        // Clock YM2610 at 8 MHz (2× Z80's 4 MHz) + check IRQ
         if (this.mainYm2610) {
           this.mainYm2610.clockCycles(ran * YM_CLOCK_RATIO);
-          if (this.mainYm2610.getIrq()) {
-            this.z80.irq(0xFF);
-          }
+          this.z80.setIrqLine(this.mainYm2610.getIrq());
         }
       }
     }
@@ -349,9 +342,10 @@ export class NeoGeoEmulator {
         if (e.data.type === 'ready') {
           this.audioWorkerReady = true;
           console.log('[Neo-Geo] Audio worker ready');
+        } else if (e.data.type === 'error') {
+          console.error('[Neo-Geo] Audio worker error:', e.data.message);
         } else if (e.data.type === 'reply') {
-          // Worker Z80 replies are ignored — the main-thread Z80 handles the
-          // BIOS handshake. Worker heartbeat (R|0x80) would overwrite the preset.
+          // Worker replies ignored — main-thread Z80 handles BIOS handshake
         } else if (e.data.type === 'z80debug') {
           const ram = e.data.ram?.map((b: number) => b.toString(16).padStart(2, '0')).join(' ') ?? '';
           console.log(`[Neo-Geo] Worker Z80: PC=0x${e.data.pc.toString(16)} SP=0x${e.data.sp.toString(16)} frame=${e.data.frame} nmi=${e.data.nmiEnabled} latch=0x${e.data.soundLatch?.toString(16)} RAM@PC=[${ram}]`);
@@ -363,6 +357,7 @@ export class NeoGeoEmulator {
         audioRom: romSet.audioRom.buffer,
         biosZRom: romSet.biosZRom.buffer,
         voiceRom: romSet.voiceRom.buffer,
+        adpcmASize: romSet.adpcmASize,
         sab,
         sampleRate: this.audioOutput.getSampleRate(),
       });
@@ -525,12 +520,9 @@ export class NeoGeoEmulator {
           const ran = this.z80.step();
           z80Slice -= ran;
           z80Left -= ran;
-          // Clock YM2610 at 8 MHz (2× Z80's 4 MHz) + check IRQ
           if (this.mainYm2610) {
             this.mainYm2610.clockCycles(ran * YM_CLOCK_RATIO);
-            if (this.mainYm2610.getIrq()) {
-              this.z80.irq(0xFF);
-            }
+            this.z80.setIrqLine(this.mainYm2610.getIrq());
           }
         }
       }
