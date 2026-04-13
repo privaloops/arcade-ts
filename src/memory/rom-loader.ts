@@ -6,9 +6,10 @@
  * and performs CPS1 graphics interleaving.
  */
 
-import JSZip from 'jszip';
 import { GAME_DEFS } from './game-defs';
 import type { GameDef, ProgramDef, GraphicsDef, GfxBankDef, ProgramRomEntry, ProgramWordSwapEntry, CpsBConfig, GfxMapperConfig } from './game-defs';
+import { extractZip, buildFileMap } from './rom-utils';
+import type { RomFileEntry } from './rom-utils';
 
 export type { CpsBConfig, GfxMapperConfig, GameDef } from './game-defs';
 
@@ -26,11 +27,6 @@ export interface RomSet {
   originalFiles: Map<string, Uint8Array>;
   /** Game definition, needed for ROM reconstruction on export */
   gameDef: GameDef;
-}
-
-interface RomFileEntry {
-  name: string;
-  data: Uint8Array;
 }
 
 // ---------------------------------------------------------------------------
@@ -90,44 +86,6 @@ function identifyGame(fileNames: string[]): GameDef | null {
   return null;
 }
 
-/**
- * Extract all files from a ZIP as RomFileEntry[].
- */
-async function extractZip(file: File | ArrayBuffer): Promise<RomFileEntry[]> {
-  const arrayBuffer = file instanceof ArrayBuffer ? file : await file.arrayBuffer();
-  const zip = await JSZip.loadAsync(arrayBuffer);
-  const entries: RomFileEntry[] = [];
-
-  const promises: Promise<void>[] = [];
-
-  zip.forEach((relativePath, zipEntry) => {
-    if (zipEntry.dir) return;
-    // Strip directory prefix — MAME ROMs are sometimes nested
-    const name = relativePath.includes('/')
-      ? relativePath.substring(relativePath.lastIndexOf('/') + 1)
-      : relativePath;
-
-    promises.push(
-      zipEntry.async('uint8array').then(data => {
-        entries.push({ name, data });
-      })
-    );
-  });
-
-  await Promise.all(promises);
-  return entries;
-}
-
-/**
- * Build a filename -> data map from the extracted entries.
- */
-function buildFileMap(entries: RomFileEntry[]): Map<string, Uint8Array> {
-  const map = new Map<string, Uint8Array>();
-  for (const entry of entries) {
-    map.set(entry.name.toLowerCase(), entry.data);
-  }
-  return map;
-}
 
 /**
  * Concatenate ROM files into a single Uint8Array in definition order.

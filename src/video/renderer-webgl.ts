@@ -6,7 +6,7 @@
  * because the upload + draw happens via DMA, not pixel-by-pixel JS copy.
  */
 
-import { SCREEN_WIDTH, SCREEN_HEIGHT, FRAMEBUFFER_SIZE } from './renderer';
+import { SCREEN_WIDTH, SCREEN_HEIGHT } from './renderer';
 import type { RendererInterface } from '../types';
 
 export class WebGLRenderer implements RendererInterface {

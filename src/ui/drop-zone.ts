@@ -6,7 +6,7 @@
 import type { Emulator } from "../emulator";
 import { CPS1_PARENT_GAMES, ROT270_GAMES } from "../game-catalog";
 import { DebugPanel } from "../debug/debug-panel";
-import type { AudioPanel } from "../audio/audio-panel";
+import { AudioPanel } from "../audio/audio-panel";
 import { loadDipFromStorage } from "./dip-switch-ui";
 import { isNeoGeoRom } from "../memory/neogeo-rom-loader";
 import type { NeoGeoEmulator } from "../neogeo-emulator";
@@ -35,6 +35,7 @@ export interface DropZoneDeps {
   getDebugPanel(): DebugPanel | null;
   setDebugPanel(p: DebugPanel | null): void;
   getAudioPanel(): AudioPanel | null;
+  setAudioPanel(p: AudioPanel | null): void;
   setLastRomFile(f: File | null): void;
   getLastRomFile(): File | null;
   setStatus(msg: string): void;
@@ -105,6 +106,14 @@ async function handleRomFile(file: File): Promise<void> {
       ngoEmu.start();
       _deps.onRomLoaded(ngoEmu.getGameName());
       setStatus(`Running: ${file.name} (Neo-Geo)`);
+
+      // Reconnect audio panel to the Neo-Geo emulator
+      const oldPanel = getAudioPanel();
+      const wasOpen = oldPanel?.isOpen() ?? false;
+      oldPanel?.destroy();
+      const ngoPanel = new AudioPanel(ngoEmu);
+      _deps.setAudioPanel(ngoPanel);
+      if (wasOpen) ngoPanel.toggle();
     } else {
       // CPS1 path (original)
       await emulator.initAudio();
@@ -154,8 +163,14 @@ async function handleRomFile(file: File): Promise<void> {
         setupDomRenderer();
       }
 
-      // Update audio panel
-      getAudioPanel()?.onGameChange();
+      // Reconnect audio panel to CPS1 emulator (may have been on Neo-Geo)
+      const curPanel = getAudioPanel();
+      const panelWasOpen = curPanel?.isOpen() ?? false;
+      curPanel?.destroy();
+      const cpsPanel = new AudioPanel(emulator);
+      _deps.setAudioPanel(cpsPanel);
+      if (panelWasOpen) cpsPanel.toggle();
+      cpsPanel.onGameChange();
 
       emulator.start();
       _deps.onRomLoaded(emulator.getGameName());

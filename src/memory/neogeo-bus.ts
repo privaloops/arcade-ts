@@ -8,8 +8,8 @@
  *   0x300000-0x300001 : Port P1 (joystick + A/B/C/D, active LOW)
  *   0x300080-0x300081 : REG_DIPSW
  *   0x320000-0x320001 : REG_SOUND (read=Z80 reply, write=Z80 command)
- *   0x340000-0x340001 : Port system (start, coin, select)
- *   0x380000-0x380001 : REG_STATUS_B (MVS/AES flag)
+ *   0x340000-0x340001 : REG_STATUS_A (P2 joystick)
+ *   0x380000-0x380001 : REG_STATUS_B (system starts/selects)
  *   0x3A0000-0x3A001F : Control registers (watchdog, IRQ ack)
  *   0x3C0000-0x3C000F : LSPC registers (VRAM addr/data/mod, timer, IRQ)
  *   0x400000-0x401FFF : Palette RAM (8KB)
@@ -20,24 +20,28 @@
 
 import type { BusInterface } from '../types';
 import { PD4990A } from './pd4990a';
+import type { NeoGeoProtection } from './neogeo-protection';
 
 export class NeoGeoBus implements BusInterface {
   private programRom: Uint8Array;
   private biosRom: Uint8Array;
   private workRam: Uint8Array;        // 64KB
   private backupRam: Uint8Array;      // 64KB BIOS SRAM
-  private paletteRam: Uint8Array;     // 8KB (4096 x 16-bit words)
+  private paletteRam: Uint8Array;     // 16KB (2 banks × 4096 × 16-bit words)
+  private paletteBankOffset: number = 0; // 0 or 0x2000 bytes (0x1000 words)
   private vram: Uint8Array;           // 68KB VRAM (accessed indirectly)
   private memCardRam: Uint8Array;     // 4KB memory card RAM
 
   // I/O port registers (active LOW for buttons)
   private portP1: number = 0xFF;
   private portP2: number = 0xFF;
-  private portSystem: number = 0xFF;
+  private portSystem: number = 0xFF;  // Start/Select at 0x340001
+  private portCoins: number = 0xFF;   // Coins/Service at 0x380001
   private portStatus: number = 0x00;  // bit 0: 0=AES, 1=MVS
 
-  // LSPC VRAM indirect access
-  private vramAddr: number = 0;
+  // LSPC VRAM indirect access (hardware has separate read/write pointers)
+  private vramAddr: number = 0;       // write pointer (incremented on data write)
+  private vramReadAddr: number = 0;   // read pointer (latched on addr set, incremented on data read)
   private vramMod: number = 0;        // auto-increment value
   private _vramWriteCount: number = 0; // debug: count VRAM writes
   getVramWriteCount(): number { return this._vramWriteCount; }
@@ -72,6 +76,15 @@ export class NeoGeoBus implements BusInterface {
   // Total 68K cycles accumulated (for RTC tick counting)
   private totalCycles = 0;
 
+  // Watchdog timer: counts down each VBlank, triggers reset at 0.
+  // MAME: 3244030 ticks / 24MHz = ~0.135s ≈ 8 frames at 59.185 Hz.
+  // Kicked by writing to 0x300001 (MAME: watchdog_timer_device).
+  private watchdogCounter: number = 8;
+  private _watchdogResetCallback: (() => void) | null = null;
+
+  // Runtime protection handler (KOF98, MSLUGX, SMA, etc.)
+  private protection: NeoGeoProtection | null = null;
+
   // P-ROM banking: 0x200000-0x2FFFFF region
   // Default = 0 (mirror of P-ROM start). For games > 1MB, bank switch changes this.
   private pRomBankOffset: number = 0;
@@ -86,7 +99,7 @@ export class NeoGeoBus implements BusInterface {
     this.biosRom = new Uint8Array(0);
     this.workRam = new Uint8Array(0x10000);   // 64KB
     this.backupRam = new Uint8Array(0x10000); // 64KB
-    this.paletteRam = new Uint8Array(0x2000); // 8KB
+    this.paletteRam = new Uint8Array(0x4000); // 16KB (2 banks)
     this.vram = new Uint8Array(0x11000);      // ~68KB (slow 64KB + fast ~4KB)
     this.memCardRam = new Uint8Array(0x1000); // 4KB memory card
     // pd4990a RTC — uses 68K cycle count for timing
@@ -99,8 +112,15 @@ export class NeoGeoBus implements BusInterface {
   /** Increment auto-animation counter (call once per VBlank from emulator) */
   tickAutoAnim(): void { this.autoAnimCounter++; }
 
-  loadProgramRom(data: Uint8Array): void { this.programRom = data; }
+  loadProgramRom(data: Uint8Array): void {
+    this.programRom = data;
+    // Default bank: if P-ROM > 1MB, bank 0 maps P2 (offset 0x100000) into 0x200000-0x2FFFFF
+    this.pRomBankOffset = data.length > 0x100000 ? 0x100000 : 0;
+  }
   loadBiosRom(data: Uint8Array): void { this.biosRom = data; }
+
+  /** Set P-ROM bank offset for 0x200000-0x2FFFFF region (SMA protection) */
+  setPRomBankOffset(offset: number): void { this.pRomBankOffset = offset; }
 
   /** Switch to game mode (P-ROM at 0x000000) for direct boot */
   switchToGameMode(): void {
@@ -121,7 +141,11 @@ export class NeoGeoBus implements BusInterface {
     // but our Z80 emulation doesn't reach the OUT instruction during init.
     this.soundLatchFromZ80 = 0xC3;
     this.soundCommandPending = false;
+    this.watchdogCounter = 8;
   }
+
+  /** Set runtime protection handler for the current game */
+  setProtection(prot: NeoGeoProtection | null): void { this.protection = prot; }
 
   getVram(): Uint8Array { return this.vram; }
   getPaletteRam(): Uint8Array { return this.paletteRam; }
@@ -138,9 +162,6 @@ export class NeoGeoBus implements BusInterface {
 
   /** Called by Z80 bus to send reply back to 68K */
   setSoundReply(value: number): void {
-    if (this.soundLatchFromZ80 === 0xC3 && value !== 0xC3) {
-      console.log(`[Neo-Geo BUS] soundReply overwritten: 0xC3 → 0x${value.toString(16)}`, new Error().stack?.split('\n')[2]);
-    }
     this.soundLatchFromZ80 = value;
   }
 
@@ -154,10 +175,33 @@ export class NeoGeoBus implements BusInterface {
     this.soundCommandPending = true;
   }
 
+  /** Register callback for watchdog-triggered system reset */
+  setWatchdogResetCallback(cb: () => void): void {
+    this._watchdogResetCallback = cb;
+  }
+
+  /** Tick watchdog — call once per VBlank. Returns true if reset triggered. */
+  tickWatchdog(): boolean {
+    if (this.watchdogCounter > 0) {
+      this.watchdogCounter--;
+      if (this.watchdogCounter === 0) {
+        this._watchdogResetCallback?.();
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Kick watchdog (reset counter to 8 frames). Called on write to 0x300001. */
+  private kickWatchdog(): void {
+    this.watchdogCounter = 8;
+  }
+
   /** Set I/O port values (called by InputManager) */
   setPortP1(value: number): void { this.portP1 = value; }
   setPortP2(value: number): void { this.portP2 = value; }
   setPortSystem(value: number): void { this.portSystem = value; }
+  setPortCoins(value: number): void { this.portCoins = value; }
 
   /** Set MVS mode. Bit 7: 0=MVS, 1=AES. Bit 6: 0=1-slot, 1=multi-slot */
   setMvsMode(mvs: boolean): void {
@@ -211,12 +255,30 @@ export class NeoGeoBus implements BusInterface {
     return 0;
   }
 
+  // Debug: trace VRAM writes to SCB2/3/4 for specific sprites
+  private _vramTraceSprites: Set<number> | null = null;
+  enableVramTrace(spriteIndices: number[]): void {
+    this._vramTraceSprites = new Set(spriteIndices);
+    console.log(`[VRAM Trace] Watching sprites: ${spriteIndices.join(',')}`);
+  }
+  disableVramTrace(): void { this._vramTraceSprites = null; }
+
   /** Write VRAM word at given address */
   writeVramWord(addr: number, value: number): void {
-    const off = (addr & 0xFFFF) * 2;
+    const a = addr & 0xFFFF;
+    const off = a * 2;
     if (off + 1 < this.vram.length) {
       this.vram[off] = (value >> 8) & 0xFF;
       this.vram[off + 1] = value & 0xFF;
+    }
+    // Trace ALL SCB2 writes (zoom values) — log only non-full-zoom writes
+    if (this._vramTraceSprites) {
+      if (a >= 0x8000 && a < 0x8200) {
+        const sprIdx = a - 0x8000;
+        const xz = (value >> 8) & 0xF;
+        const yz = value & 0xFF;
+        console.log(`[VRAM] SCB2[${sprIdx}] = 0x${value.toString(16).padStart(4,'0')} xZoom=${xz} yZoom=${yz}`);
+      }
     }
   }
 
@@ -249,8 +311,9 @@ export class NeoGeoBus implements BusInterface {
     }
 
     // Port P1: 0x300000-0x300001
+    // FBNeo: even byte = P1 joystick+buttons, odd byte = test/service (MVS) or 0xFF
     if (address >= 0x300000 && address <= 0x300001) {
-      return (address & 1) ? this.portP1 : 0xFF;
+      return (address & 1) ? 0xFF : this.portP1;
     }
 
     // REG_DIPSW: 0x300080-0x300081
@@ -276,21 +339,22 @@ export class NeoGeoBus implements BusInterface {
         }
         return this.soundLatchFromZ80 & 0x7F; // bit 7 masked while pending
       }
-      // Low byte: bits 7-6 = pd4990a (DO, TP), bits 5-0 = 0x3F (inputs)
+      // Low byte: bits 7-6 = pd4990a (DO, TP), bits 5-0 = coin/service inputs
       const rtcBits = this.rtc.read(); // bit 1 = DO, bit 0 = TP
-      return 0x3F | ((rtcBits & 3) << 6); // map to bits 7-6
+      return (this.portCoins & 0x3F) | ((rtcBits & 3) << 6);
     }
 
-    // REG_STATUS_A: 0x340000-0x340001 (P1 start/select, P2 directions+buttons, coins)
+    // REG_STATUS_A: 0x340000-0x340001 (P2 joystick only)
+    // FBNeo: even byte = P2 joystick+buttons, odd byte = 0xFF
     if (address >= 0x340000 && address <= 0x340001) {
-      return (address & 1) ? this.portSystem : this.portP2;
+      return (address & 1) ? 0xFF : this.portP2;
     }
 
     // REG_STATUS_B: 0x380000-0x380001
-    // FBNeo ReadInput3: even = ~NeoInputBank[2], odd = ~0
-    // With no special inputs, both bytes return 0xFF
+    // Even byte: bit 7 = MVS/AES (0=MVS, 1=AES), bits 0-6 = starts/selects
     if (address >= 0x380000 && address <= 0x380001) {
-      return 0xFF;
+      if (address & 1) return 0xFF;
+      return (this.portSystem & 0x7F) | (this.portStatus & 0x80);
     }
 
     // LSPC registers: 0x3C0000-0x3C000F (read)
@@ -298,9 +362,9 @@ export class NeoGeoBus implements BusInterface {
       return this.readLspc(address);
     }
 
-    // Palette RAM: 0x400000-0x401FFF
+    // Palette RAM: 0x400000-0x401FFF (banked, 2 × 8KB)
     if (address >= 0x400000 && address <= 0x401FFF) {
-      return this.paletteRam[address - 0x400000]!;
+      return this.paletteRam[this.paletteBankOffset + (address - 0x400000)]!;
     }
 
     // Memory card RAM: 0x800000-0x800FFF (2KB, only odd bytes used)
@@ -324,6 +388,11 @@ export class NeoGeoBus implements BusInterface {
   }
 
   read16(address: number): number {
+    // Check protection handler first (ROM overlay, bit counters, etc.)
+    if (this.protection?.read16) {
+      const val = this.protection.read16(address, (a) => this.read16(a));
+      if (val !== undefined) return val;
+    }
     return (this.read8(address) << 8) | this.read8(address + 1);
   }
 
@@ -340,9 +409,24 @@ export class NeoGeoBus implements BusInterface {
     address = (address >>> 0) & 0xFFFFFF;
     value &= 0xFF;
 
+    // P-ROM bankswitch: write to 0x200000-0x2FFFFF latches D0/D1 for bank select
+    // Only odd byte writes or word writes trigger the latch (PORTWEL signal)
+    if (address >= 0x200000 && address <= 0x2FFFFF && (address & 1)) {
+      const bank = value & 0x03;
+      this.pRomBankOffset = 0x100000 + bank * 0x100000;
+      return;
+    }
+
     // Work RAM: 0x100000-0x10FFFF
     if (address >= 0x100000 && address <= 0x10FFFF) {
       this.workRam[address - 0x100000] = value;
+      return;
+    }
+
+    // Watchdog kick: write to 0x300001 (odd byte, mirrored 0x300000-0x31FFFF)
+    // MAME: map(0x300001).mirror(0x01fffe).w("watchdog", reset_w)
+    if (address >= 0x300000 && address <= 0x31FFFF && (address & 1)) {
+      this.kickWatchdog();
       return;
     }
 
@@ -373,9 +457,9 @@ export class NeoGeoBus implements BusInterface {
       return;
     }
 
-    // Palette RAM: 0x400000-0x401FFF
+    // Palette RAM: 0x400000-0x401FFF (banked, 2 × 8KB)
     if (address >= 0x400000 && address <= 0x401FFF) {
-      this.paletteRam[address - 0x400000] = value;
+      this.paletteRam[this.paletteBankOffset + (address - 0x400000)] = value;
       return;
     }
 
@@ -396,6 +480,9 @@ export class NeoGeoBus implements BusInterface {
   write16(address: number, value: number): void {
     // LSPC and palette are best handled as word writes
     address = (address >>> 0) & 0xFFFFFF;
+
+    // Check protection handler first
+    if (this.protection?.write16?.(address, value)) return;
 
     // LSPC registers — handle as word directly
     if (address >= 0x3C0000 && address <= 0x3C000F) {
@@ -437,8 +524,12 @@ export class NeoGeoBus implements BusInterface {
     const reg = (address & 0xE) >> 1;
     switch (reg) {
       case 0: // 0x3C0000-0x3C0001: VRAM data (same as 0x3C0002, per FBNeo)
-      case 1: { // 0x3C0002-0x3C0003: VRAM data read (no auto-increment)
-        const word = this.readVramWord(this.vramAddr);
+      case 1: { // 0x3C0002-0x3C0003: VRAM data read (uses separate read pointer)
+        const word = this.readVramWord(this.vramReadAddr);
+        // Auto-increment read pointer on low byte (once per word read)
+        if (address & 1) {
+          this.vramReadAddr = (this.vramReadAddr + this.vramMod) & 0xFFFF;
+        }
         return (address & 1) ? (word & 0xFF) : ((word >> 8) & 0xFF);
       }
       case 2: { // 0x3C0004-0x3C0005: VRAM modulo read
@@ -457,16 +548,30 @@ export class NeoGeoBus implements BusInterface {
     }
   }
 
+  private _lspcByteBuffer: number = -1; // pending high byte for byte-pair writes
   private writeLspc(address: number, value: number): void {
-    // Byte writes to LSPC are unusual — typically word writes
-    // Buffer and handle via writeLspcWord when second byte arrives
+    // Log byte writes — they may be critical for VRAM addressing
+    if (this._vramTraceSprites) {
+      console.log(`[LSPC BYTE] addr=0x${address.toString(16)} val=0x${value.toString(16).padStart(2,'0')}`);
+    }
+    // Buffer byte writes and assemble into word when both bytes arrive
+    if (!(address & 1)) {
+      // Even byte (high byte) — buffer it
+      this._lspcByteBuffer = value;
+    } else if (this._lspcByteBuffer >= 0) {
+      // Odd byte (low byte) — assemble word and dispatch
+      const word = (this._lspcByteBuffer << 8) | value;
+      this._lspcByteBuffer = -1;
+      this.writeLspcWord(address & 0xFFFFFE, word);
+    }
   }
 
   private writeLspcWord(address: number, value: number): void {
     const reg = (address & 0xE) >> 1;
     switch (reg) {
-      case 0: // 0x3C0000: VRAM address
+      case 0: // 0x3C0000: VRAM address — latches both write and read pointers
         this.vramAddr = value & 0xFFFF;
+        this.vramReadAddr = value & 0xFFFF;
         break;
       case 1: // 0x3C0002: VRAM data write
         this._vramWriteCount++;
@@ -488,12 +593,10 @@ export class NeoGeoBus implements BusInterface {
         this.timerReload = (this.timerHigh << 16) | this.timerLow;
         break;
       case 6: { // 0x3C000C: IRQ acknowledge register (from FBNeo NeoIRQUpdate)
-        // Bits accumulate: bit 0 = ack IRQ3, bit 1 = ack scanline IRQ, bit 2 = ack VBlank
-        // When all 3 bits set (0x07), clear all pending IRQs
         const ack = value & 0x07;
-        if (ack & 0x01) this.irqPending &= ~0x04; // bit 0 → ack IRQ3 (coldboot)
-        if (ack & 0x02) this.irqPending &= ~0x02; // bit 1 → ack IRQ2 (timer/scanline)
-        if (ack & 0x04) this.irqPending &= ~0x01; // bit 2 → ack IRQ1 (VBlank)
+        if (ack & 0x01) this.irqPending &= ~0x04;
+        if (ack & 0x02) this.irqPending &= ~0x02;
+        if (ack & 0x04) this.irqPending &= ~0x01;
         // Timer reload
         this.timerCounter = this.timerReload;
         this.timerRunning = true;
@@ -509,12 +612,14 @@ export class NeoGeoBus implements BusInterface {
   // Control register writes (0x3A0000-0x3A001F)
   // ---------------------------------------------------------------------------
 
-  // Callbacks for ROM banking (set by emulator)
+  // Callbacks for ROM banking and palette (set by emulator)
   private _onFixRomSwitch: ((useBios: boolean) => void) | null = null;
   private _onZ80RomSwitch: ((useBios: boolean) => void) | null = null;
+  private _onPaletteBankSwitch: ((bank: number) => void) | null = null;
 
   setFixRomSwitchCallback(cb: (useBios: boolean) => void): void { this._onFixRomSwitch = cb; }
   setZ80RomSwitchCallback(cb: (useBios: boolean) => void): void { this._onZ80RomSwitch = cb; }
+  setPaletteBankCallback(cb: (bank: number) => void): void { this._onPaletteBankSwitch = cb; }
 
   private writeControlReg(address: number, _value: number): void {
     // Control registers per FBNeo WriteIO2 (odd byte addresses)
@@ -533,7 +638,9 @@ export class NeoGeoBus implements BusInterface {
         break;
       case 0x0D: // SRAM write protect
         break;
-      case 0x0F: // Palette bank 1
+      case 0x0F: // Palette bank 1 (HC259 Q7 set)
+        this.paletteBankOffset = 0x2000;
+        this._onPaletteBankSwitch?.(1);
         break;
       case 0x11: // Shadow on (darken palette)
         break;
@@ -546,7 +653,9 @@ export class NeoGeoBus implements BusInterface {
         break;
       case 0x1D: // SRAM write enable
         break;
-      case 0x1F: // Palette bank 0
+      case 0x1F: // Palette bank 0 (HC259 Q7 clear)
+        this.paletteBankOffset = 0;
+        this._onPaletteBankSwitch?.(0);
         break;
       default:
         break;
