@@ -90,6 +90,19 @@ const ADPCM_B_TTL_FRAMES = 120;
 let lastAddr0 = 0;
 let lastAddr1 = 0;
 
+// ADPCM-A per-channel start/end address registers (for sample capture)
+const adpcmAStartH = new Uint8Array(6);
+const adpcmAStartL = new Uint8Array(6);
+const adpcmAEndH = new Uint8Array(6);
+const adpcmAEndL = new Uint8Array(6);
+// ADPCM-B start/end
+let adpcmBStartH = 0, adpcmBStartL = 0, adpcmBEndH = 0, adpcmBEndL = 0;
+
+// Captured sample addresses: Map<"start:end", {start, end, channel, type}>
+interface CapturedSample { startByte: number; endByte: number; type: 'A' | 'B'; }
+const capturedSamples = new Map<string, CapturedSample>();
+let workerAdpcmASize = 0; // ADPCM-A pool size for B offset correction
+
 // Mute/Solo state (read from vizSAB each frame)
 // Bit layout: bits 0-3 = FM ch 0-3, bits 4-6 = SSG ch 0-2, bits 7-13 = PCM 0-6
 const chMuted = new Uint8Array(14);  // 1 = muted
@@ -298,8 +311,25 @@ function updateYm2610Shadow(port: number, value: number): void {
       vizWriter?.updateFmTl(FM_CHANNELS + ch, 127 - ((ssgVolume[ch]! * 127 / 15) | 0));
       vizWriter?.updateFmKon(FM_CHANNELS + ch, ssgKon[ch]!);
     }
-    // ADPCM-B
+    // ADPCM-B address registers
+    if (reg === 0x12) adpcmBStartL = value;
+    if (reg === 0x13) adpcmBStartH = value;
+    if (reg === 0x14) adpcmBEndL = value;
+    if (reg === 0x15) adpcmBEndH = value;
+    // ADPCM-B control
     if (reg === 0x10) {
+      // Capture sample on start
+      if (value & 0x80) {
+        // ADPCM-B addresses are relative to B pool — offset by A size
+        const startAddr = ((adpcmBStartH << 8) | adpcmBStartL) * 256 + workerAdpcmASize;
+        const endAddr = (((adpcmBEndH << 8) | adpcmBEndL) + 1) * 256 + workerAdpcmASize;
+        if (endAddr > startAddr) {
+          const key = `B:${startAddr}:${endAddr}`;
+          if (!capturedSamples.has(key)) {
+            capturedSamples.set(key, { startByte: startAddr, endByte: endAddr, type: 'B' });
+          }
+        }
+      }
       if (value & 0x80) { adpcmBPlaying.value = 1; adpcmBTtl = ADPCM_B_TTL_FRAMES; }
       if (value & 0x01) { adpcmBPlaying.value = 0; adpcmBTtl = 0; }
       vizWriter?.updatePcm(6, adpcmBPlaying.value, 0, adpcmBVolume.value, 128);
@@ -323,13 +353,30 @@ function updateYm2610Shadow(port: number, value: number): void {
 
   if (port === 3) {
     const reg = lastAddr1;
+    // ADPCM-A address registers
+    if (reg >= 0x10 && reg <= 0x15) adpcmAStartL[reg - 0x10] = value;
+    if (reg >= 0x18 && reg <= 0x1D) adpcmAStartH[reg - 0x18] = value;
+    if (reg >= 0x20 && reg <= 0x25) adpcmAEndL[reg - 0x20] = value;
+    if (reg >= 0x28 && reg <= 0x2D) adpcmAEndH[reg - 0x28] = value;
     // ADPCM-A key on/off
     if (reg === 0x00) {
       const isKeyOn = (value & 0x80) === 0;
       for (let ch = 0; ch < 6; ch++) {
         if (value & (1 << ch)) {
-          if (isKeyOn) { adpcmAPlaying[ch] = 1; adpcmATtl[ch] = ADPCM_A_TTL_FRAMES; }
-          else { adpcmAPlaying[ch] = 0; adpcmATtl[ch] = 0; }
+          if (isKeyOn) {
+            adpcmAPlaying[ch] = 1; adpcmATtl[ch] = ADPCM_A_TTL_FRAMES;
+            // Capture sample address on key-on
+            const startAddr = ((adpcmAStartH[ch]! << 8) | adpcmAStartL[ch]!) * 256;
+            const endAddr = (((adpcmAEndH[ch]! << 8) | adpcmAEndL[ch]!) + 1) * 256;
+            if (endAddr > startAddr) {
+              const key = `A:${startAddr}:${endAddr}`;
+              if (!capturedSamples.has(key)) {
+                capturedSamples.set(key, { startByte: startAddr, endByte: endAddr, type: 'A' });
+              }
+            }
+          } else {
+            adpcmAPlaying[ch] = 0; adpcmATtl[ch] = 0;
+          }
           const vol = Math.round(((63 - adpcmATotalVol.value) / 63) * ((31 - (adpcmAVolume[ch] ?? 0)) / 31) * 255);
           vizWriter?.updatePcm(ch, adpcmAPlaying[ch]!, 0, vol, 128);
         }
@@ -493,7 +540,8 @@ self.onmessage = async (e: MessageEvent) => {
 
         // Load V-ROM into WASM (with ADPCM-A/B split point)
         if (msg.voiceRom) {
-          ym2610!.loadVRom(new Uint8Array(msg.voiceRom), msg.adpcmASize);
+          workerAdpcmASize = msg.adpcmASize ?? 0;
+          ym2610!.loadVRom(new Uint8Array(msg.voiceRom), workerAdpcmASize);
         }
 
         // Set up ring buffer
@@ -529,6 +577,117 @@ self.onmessage = async (e: MessageEvent) => {
         z80Bus.setUseGameRom(msg.useGameRom);
       }
       break;
+
+    case 'scan-samples': {
+      // Create a SEPARATE Z80 + bus to scan without affecting the live game
+      if (!msg.biosZRom && !msg.audioRom) break;
+
+      try {
+        const scanBus = new NeoGeoZ80Bus();
+        const scanZ80 = new Z80(scanBus);
+
+        if (msg.biosZRom) scanBus.loadBiosRom(new Uint8Array(msg.biosZRom));
+        if (msg.audioRom) scanBus.loadAudioRom(new Uint8Array(msg.audioRom));
+        const scanAdpcmASize = msg.adpcmASize ?? 0;
+
+        // Shadow ADPCM register writes from the scan Z80
+        const scanSamples = new Map<string, CapturedSample>();
+        const sAdpcmAStartH = new Uint8Array(6), sAdpcmAStartL = new Uint8Array(6);
+        const sAdpcmAEndH = new Uint8Array(6), sAdpcmAEndL = new Uint8Array(6);
+        let sAdpcmBStartH = 0, sAdpcmBStartL = 0, sAdpcmBEndH = 0, sAdpcmBEndL = 0;
+        let sLastAddr1 = 0, sLastAddr0 = 0;
+
+        // Intercept YM2610 writes to capture ADPCM addresses
+        scanBus.setYm2610WriteCallback((port, value) => {
+          // We don't have a real YM2610 for the scan — just capture registers
+          if (port === 0) sLastAddr0 = value;
+          if (port === 2) sLastAddr1 = value;
+
+          if (port === 1) {
+            const reg = sLastAddr0;
+            // ADPCM-B address regs
+            if (reg === 0x12) sAdpcmBStartL = value;
+            if (reg === 0x13) sAdpcmBStartH = value;
+            if (reg === 0x14) sAdpcmBEndL = value;
+            if (reg === 0x15) sAdpcmBEndH = value;
+            if (reg === 0x10 && (value & 0x80)) {
+              // ADPCM-B addresses are relative to the B pool — offset by ADPCM-A size in combined V-ROM
+              const s = ((sAdpcmBStartH << 8) | sAdpcmBStartL) * 256 + scanAdpcmASize;
+              const e = (((sAdpcmBEndH << 8) | sAdpcmBEndL) + 1) * 256 + scanAdpcmASize;
+              if (e > s) scanSamples.set(`B:${s}:${e}`, { startByte: s, endByte: e, type: 'B' });
+            }
+          }
+
+          if (port === 3) {
+            const reg = sLastAddr1;
+            if (reg >= 0x10 && reg <= 0x15) sAdpcmAStartL[reg - 0x10] = value;
+            if (reg >= 0x18 && reg <= 0x1D) sAdpcmAStartH[reg - 0x18] = value;
+            if (reg >= 0x20 && reg <= 0x25) sAdpcmAEndL[reg - 0x20] = value;
+            if (reg >= 0x28 && reg <= 0x2D) sAdpcmAEndH[reg - 0x28] = value;
+            if (reg === 0x00 && (value & 0x80) === 0) {
+              for (let ch = 0; ch < 6; ch++) {
+                if (value & (1 << ch)) {
+                  const s = ((sAdpcmAStartH[ch]! << 8) | sAdpcmAStartL[ch]!) * 256;
+                  const e = (((sAdpcmAEndH[ch]! << 8) | sAdpcmAEndL[ch]!) + 1) * 256;
+                  if (e > s) scanSamples.set(`A:${s}:${e}`, { startByte: s, endByte: e, type: 'A' });
+                }
+              }
+            }
+          }
+        });
+        // Stub YM2610 read: simulate timer overflow periodically
+        let scanReadCount = 0;
+        scanBus.setYm2610ReadCallback((port) => {
+          scanReadCount++;
+          if (port === 0) {
+            // Status register: simulate Timer A overflow every ~50 reads
+            return (scanReadCount % 50 < 5) ? 0x01 : 0x00;
+          }
+          return 0;
+        });
+
+        // Helper: run scan Z80 for N cycles with NMI + periodic IRQ
+        function runScanZ80(cycles: number): void {
+          let c = 0;
+          let irqTimer = 0;
+          while (c < cycles) {
+            if (scanBus.shouldFireNmi()) scanZ80.nmi();
+            const ran = scanZ80.step();
+            c += ran;
+            irqTimer += ran;
+            // Simulate YM2610 timer IRQ every ~4000 cycles (~1ms at 4MHz)
+            if (irqTimer >= 4000) {
+              irqTimer -= 4000;
+              scanZ80.setIrqLine(true);
+              scanZ80.step(); // let it acknowledge
+              scanZ80.setIrqLine(false);
+            }
+          }
+        }
+
+        // Init: let Z80 boot from BIOS
+        scanZ80.reset();
+        runScanZ80(300000);
+
+        // Switch to game ROM
+        scanBus.setUseGameRom(true);
+        scanZ80.reset();
+        runScanZ80(300000);
+
+        // Send all possible sound commands
+        for (let cmd = 0x01; cmd <= 0xFF; cmd++) {
+          scanBus.pushSoundLatch(cmd);
+          runScanZ80(30000);
+        }
+
+        const samples = Array.from(scanSamples.values()).sort((a, b) => a.startByte - b.startByte);
+        self.postMessage({ type: 'samples', samples });
+      } catch (err) {
+        self.postMessage({ type: 'samples', samples: [] });
+        console.error('[Scan] Error:', err);
+      }
+      break;
+    }
 
     case 'patch-vrom':
       if (ym2610) {

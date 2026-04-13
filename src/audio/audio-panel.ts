@@ -26,10 +26,12 @@ export interface AudioPanelEmulator {
   getOkiRom?(): Uint8Array | null;
   updateOkiRom?(rom: Uint8Array): void;
   getRomStore?(): { onModified?: (() => void) | null } | null;
-  // Neo-Geo: ADPCM-A samples
+  // Neo-Geo: ADPCM-A/B samples
   getVoiceRom?(): Uint8Array | null;
   getAudioRom?(): Uint8Array | null;
   getAdpcmASize?(): number;
+  getScannedSamples?(): { startByte: number; endByte: number; type: 'A' | 'B' }[];
+  scanSamples?(): void;
   updateVoiceRom?(offset: number, data: Uint8Array): void;
 }
 
@@ -400,7 +402,21 @@ export class AudioPanel {
     if (this.samplesContent) this.samplesContent.style.display = tab === "samples" ? "" : "none";
     this.tracksTabBtn?.classList.toggle("active", tab === "tracks");
     this.samplesTabBtn?.classList.toggle("active", tab === "samples");
-    if (tab === "samples") this.refreshSampleTable();
+    if (tab === "samples") {
+      // Trigger sample scan for Neo-Geo (if not already done)
+      if (this.isNeoGeo && (this.emulator.getScannedSamples?.()?.length ?? 0) === 0) {
+        this.emulator.scanSamples?.();
+        // Poll for results (scan is async in worker)
+        const pollId = setInterval(() => {
+          const samples = this.emulator.getScannedSamples?.() ?? [];
+          if (samples.length > 0 || this.activeTab !== 'samples') {
+            clearInterval(pollId);
+            if (samples.length > 0) this.refreshSampleTable();
+          }
+        }, 500);
+      }
+      this.refreshSampleTable();
+    }
   }
 
   private sortSamples(key: "id" | "duration" | "size"): void {
@@ -429,9 +445,24 @@ export class AudioPanel {
       return;
     }
     if (this.isNeoGeo) {
-      const mRom = this.emulator.getAudioRom?.();
-      if (!mRom) { this.sampleTableBody.innerHTML = ''; return; }
-      this.phrases = parseAdpcmASampleTable(mRom, rom.length, rom);
+      const scanned = this.emulator.getScannedSamples?.() ?? [];
+      if (scanned.length === 0) {
+        this.sampleTableBody.innerHTML = `<tr><td colspan="5" style="color:#555;text-align:center;padding:12px;">Scanning samples...</td></tr>`;
+        return;
+      }
+      this.phrases = scanned
+        .filter(s => s.endByte > s.startByte && s.startByte < rom.length)
+        .map((s, i) => {
+          const sizeBytes = Math.min(s.endByte, rom.length) - s.startByte;
+          return {
+            id: i,
+            startByte: s.startByte,
+            endByte: s.startByte + sizeBytes,
+            sizeBytes,
+            numSamples: sizeBytes * 2,
+            durationMs: Math.round(sizeBytes * 2 / ADPCM_A_SAMPLE_RATE * 1000),
+          };
+        });
     } else {
       this.phrases = parsePhraseTable(rom);
     }

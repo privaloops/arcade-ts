@@ -12,6 +12,7 @@
  */
 
 import { decodeSample as okiDecode, encodeSample as okiEncode, type PhraseInfo, type ReplaceResult } from './oki-codec';
+export type { PhraseInfo, ReplaceResult } from './oki-codec';
 
 // ADPCM-A native sample rate: 8 MHz / 432 = 18518.5 Hz
 export const ADPCM_A_SAMPLE_RATE = 18519;
@@ -154,7 +155,7 @@ function tryParseTableAt(
   return phrases;
 }
 
-// ── Decode / Encode (delegate to OKI codec — same ADPCM algorithm) ──────
+// ── Decode / Encode (same ADPCM algorithm as OKI — tables are identical) ──
 
 /** Decode an ADPCM-A sample to PCM Float32Array (mono, 18519 Hz). */
 export function decodeAdpcmASample(vRom: Uint8Array, phrase: PhraseInfo): Float32Array {

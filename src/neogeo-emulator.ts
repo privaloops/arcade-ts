@@ -93,6 +93,8 @@ export class NeoGeoEmulator {
   private voiceRom: Uint8Array | null = null;
   private audioRom: Uint8Array | null = null;
   private adpcmASize = 0;
+  private biosZRom: Uint8Array | null = null;
+  private scannedSamples: { startByte: number; endByte: number; type: 'A' | 'B' }[] = [];
   private mainYm2610: YM2610Wasm | null = null;
 
   // Callbacks
@@ -260,6 +262,7 @@ export class NeoGeoEmulator {
     this.romLoaded = true;
     this.voiceRom = romSet.voiceRom;
     this.audioRom = romSet.audioRom;
+    this.biosZRom = romSet.biosZRom;
     this.adpcmASize = romSet.adpcmASize;
 
     // Initialize audio worker
@@ -355,7 +358,9 @@ export class NeoGeoEmulator {
       this.audioWorker.onmessage = (e) => {
         if (e.data.type === 'ready') {
           this.audioWorkerReady = true;
-          console.log('[Neo-Geo] Audio worker ready');
+        } else if (e.data.type === 'samples') {
+          this.scannedSamples = e.data.samples;
+          console.log(`[Neo-Geo] Sample scan: ${this.scannedSamples.length} samples discovered`);
         } else if (e.data.type === 'error') {
           console.error('[Neo-Geo] Audio worker error:', e.data.message);
         } else if (e.data.type === 'reply') {
@@ -620,6 +625,19 @@ export class NeoGeoEmulator {
   getVoiceRom(): Uint8Array | null { return this.voiceRom; }
   getAudioRom(): Uint8Array | null { return this.audioRom; }
   getAdpcmASize(): number { return this.adpcmASize; }
+  getScannedSamples(): { startByte: number; endByte: number; type: 'A' | 'B' }[] { return this.scannedSamples; }
+
+  /** Trigger ADPCM sample scan (sends all sound commands to Z80, captures addresses) */
+  scanSamples(): void {
+    if (this.audioWorker && this.audioWorkerReady && this.audioRom) {
+      this.audioWorker.postMessage({
+        type: 'scan-samples',
+        audioRom: this.audioRom.buffer.slice(0),
+        biosZRom: this.biosZRom?.buffer.slice(0),
+        adpcmASize: this.adpcmASize,
+      });
+    }
+  }
 
   /** Update V-ROM after sample replacement and sync to worker WASM */
   updateVoiceRom(offset: number, data: Uint8Array): void {
