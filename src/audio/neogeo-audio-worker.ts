@@ -7,6 +7,7 @@
  * - YM2610 outputs stereo FM+SSG+ADPCM mixed internally
  * - Single stereo resampler (55556 Hz → AudioContext rate)
  * - Output to SharedArrayBuffer ring buffer
+ * - Register shadow → vizSAB for audio panel visualization
  */
 
 import { Z80 } from '../cpu/z80';
@@ -15,6 +16,7 @@ import { initYM2610Wasm, YM2610Wasm, YM2610_SAMPLE_RATE } from './ym2610-wasm';
 import { LinearResampler } from './resampler';
 import { NGO_Z80_CLOCK, NGO_YM2610_CLOCK, NGO_FRAME_RATE } from '../neogeo-constants';
 import { RingBufferWriter, clip } from './audio-shared';
+import { VizWriter, ssgPeriodToKc } from './audio-viz';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -22,6 +24,12 @@ const FRAME_MS = 1000 / NGO_FRAME_RATE;
 const Z80_CYCLES_PER_FRAME = Math.round(NGO_Z80_CLOCK / NGO_FRAME_RATE);
 // YM2610 runs at 8 MHz, Z80 at 4 MHz → multiply Z80 T-states by this ratio
 const YM_CLOCK_RATIO = NGO_YM2610_CLOCK / NGO_Z80_CLOCK; // = 2
+
+// YM2610: 4 FM channels, 3 SSG, 6 ADPCM-A, 1 ADPCM-B
+const FM_CHANNELS = 4;
+const SSG_CHANNELS = 3;
+// SSG clock = YM2610 clock / 4 = 2 MHz
+const SSG_CLOCK = NGO_YM2610_CLOCK / 4;
 
 // ── Worker state ─────────────────────────────────────────────────────────
 
@@ -44,6 +52,315 @@ let lastAudioTime = 0;
 let audioDebt = 0;
 let contextSampleRate = 48000;
 let workerFrameCount = 0;
+
+// Visualization
+let vizWriter: VizWriter | null = null;
+
+// ── YM2610 register shadow (for visualization) ──────────────────────────
+
+// FM shadow: 4 channels
+const fmKc = new Uint8Array(4);
+const fmKon = new Uint8Array(4);
+const fmTl = new Uint8Array(16);      // 4 ch × 4 ops
+const fmRl = new Uint8Array(4);
+const fmConnect = new Uint8Array(4);
+const fmFnum = new Uint16Array(4);
+const fmBlock = new Uint8Array(4);
+
+// SSG shadow: 3 channels
+const ssgPeriod = new Uint16Array(3);
+const ssgVolume = new Uint8Array(3);
+const ssgToneEn = new Uint8Array(3);
+const ssgKon = new Uint8Array(3);     // computed: toneEn && vol > 0
+
+// ADPCM-A shadow: 6 channels
+const adpcmAPlaying = new Uint8Array(6);
+const adpcmAVolume = new Uint8Array(6);
+const adpcmATotalVol = { value: 0 };
+const adpcmATtl = new Int16Array(6);
+const ADPCM_A_TTL_FRAMES = 20;
+
+// ADPCM-B shadow
+const adpcmBPlaying = { value: 0 };
+const adpcmBVolume = { value: 0 };
+let adpcmBTtl = 0;
+const ADPCM_B_TTL_FRAMES = 120;
+
+// Port address latches
+let lastAddr0 = 0;
+let lastAddr1 = 0;
+
+// Mute/Solo state (read from vizSAB each frame)
+// Bit layout: bits 0-3 = FM ch 0-3, bits 4-6 = SSG ch 0-2, bits 7-13 = PCM 0-6
+const chMuted = new Uint8Array(14);  // 1 = muted
+let lastChannelMask = 0xFFFF;
+
+function applyChannelMask(mask: number): void {
+  if (mask === lastChannelMask) return;
+  lastChannelMask = mask;
+  for (let i = 0; i < 14; i++) {
+    const wasMuted = chMuted[i]!;
+    const nowMuted = (mask & (1 << i)) === 0 ? 1 : 0;
+    chMuted[i] = nowMuted;
+    // Mute FM: key-off + max TL
+    if (nowMuted && !wasMuted && i < FM_CHANNELS && ym2610) {
+      const slot = i < 2 ? (i + 1) : (i - 2); // viz ch → OPN slot
+      const portBit = i < 2 ? 0 : 4;
+      ym2610.write(0, 0x28); ym2610.write(1, slot | portBit); // key-off
+      for (let op = 0; op < 4; op++) {
+        const opReg = 0x40 + (op << 2) + slot;
+        if (i < 2) { ym2610.write(0, opReg); ym2610.write(1, 0x7F); }
+        else { ym2610.write(2, opReg); ym2610.write(3, 0x7F); }
+      }
+    }
+    // Mute SSG: set volume 0
+    if (nowMuted && !wasMuted && i >= FM_CHANNELS && i < FM_CHANNELS + SSG_CHANNELS && ym2610) {
+      const ssgCh = i - FM_CHANNELS;
+      ym2610.write(0, 0x08 + ssgCh); ym2610.write(1, 0);
+    }
+    // Mute ADPCM-A: dump (key-off)
+    if (nowMuted && !wasMuted && i >= FM_CHANNELS + SSG_CHANNELS && i < FM_CHANNELS + SSG_CHANNELS + 6 && ym2610) {
+      const aCh = i - FM_CHANNELS - SSG_CHANNELS;
+      ym2610.write(2, 0x00); ym2610.write(3, 0x80 | (1 << aCh)); // dump bit
+    }
+    // Mute ADPCM-B: stop
+    if (nowMuted && !wasMuted && i === FM_CHANNELS + SSG_CHANNELS + 6 && ym2610) {
+      ym2610.write(0, 0x10); ym2610.write(1, 0x01); // reset/stop
+    }
+  }
+}
+
+/**
+ * Intercept a YM2610 write and modify/block it if the target channel is muted.
+ * Returns: modified value (>=0) to write, or -1 to block the write entirely.
+ */
+function interceptMutedWrite(port: number, value: number): number {
+  // Address port writes always pass through (we need them for register selection)
+  if (port === 0 || port === 2) return value;
+
+  // Data write to port 0
+  if (port === 1) {
+    const reg = lastAddr0;
+
+    // FM Key On (reg 0x28): block operator bits for muted FM channels
+    if (reg === 0x28) {
+      const fmCh = slotToFmCh((value & 4) !== 0, value & 3);
+      if (fmCh >= 0 && chMuted[fmCh]!) {
+        return value & 0x07; // keep channel select, clear operator bits (= key-off)
+      }
+    }
+
+    // FM TL (reg 0x40-0x4F) on port 0: max attenuation for muted channels
+    if (reg >= 0x40 && reg <= 0x4F) {
+      const fmCh = slotToFmCh(false, reg & 3);
+      if (fmCh >= 0 && chMuted[fmCh]!) return 0x7F;
+    }
+
+    // SSG volume (reg 0x08-0x0A): zero for muted channels
+    if (reg >= 0x08 && reg <= 0x0A) {
+      if (chMuted[FM_CHANNELS + (reg - 0x08)]!) return 0;
+    }
+
+    // ADPCM-B start (reg 0x10): block start for muted ADPCM-B
+    if (reg === 0x10 && chMuted[FM_CHANNELS + SSG_CHANNELS + 6]!) {
+      return value & 0x01; // only allow stop/reset, block start
+    }
+
+    // ADPCM-B volume (reg 0x1B): zero for muted
+    if (reg === 0x1B && chMuted[FM_CHANNELS + SSG_CHANNELS + 6]!) return 0;
+  }
+
+  // Data write to port 1
+  if (port === 3) {
+    const reg = lastAddr1;
+
+    // ADPCM-A key on (reg 0x00): mask out muted channels
+    if (reg === 0x00 && (value & 0x80) === 0) {
+      // Key-on command: clear bits for muted channels
+      let masked = value;
+      for (let ch = 0; ch < 6; ch++) {
+        if (chMuted[FM_CHANNELS + SSG_CHANNELS + ch]!) masked &= ~(1 << ch);
+      }
+      if ((masked & 0x3F) === 0) return -1; // all channels masked → skip write
+      return masked;
+    }
+
+    // ADPCM-A per-channel volume (reg 0x08-0x0D): zero for muted
+    if (reg >= 0x08 && reg <= 0x0D) {
+      if (chMuted[FM_CHANNELS + SSG_CHANNELS + (reg - 0x08)]!) return value & 0xC0; // keep L/R, zero volume
+    }
+
+    // FM TL (reg 0x40-0x4F) on port 1: max attenuation for muted channels
+    if (reg >= 0x40 && reg <= 0x4F) {
+      const fmCh = slotToFmCh(true, reg & 3);
+      if (fmCh >= 0 && chMuted[fmCh]!) return 0x7F;
+    }
+  }
+
+  return value; // pass through unmodified
+}
+
+/**
+ * YM2610 FM channel mapping (OPN-B):
+ *   Port 0, slot 1 (reg & 3 == 1) → viz FM ch 0
+ *   Port 0, slot 2 (reg & 3 == 2) → viz FM ch 1
+ *   Port 1, slot 0 (reg & 3 == 0) → viz FM ch 2
+ *   Port 1, slot 1 (reg & 3 == 1) → viz FM ch 3
+ *   Slot 0 on port 0 and slot 2 on port 1 are unused on YM2610.
+ */
+const PORT0_SLOT_TO_CH: (number | -1)[] = [-1, 0, 1, -1]; // slot 0,1,2,3
+const PORT1_SLOT_TO_CH: (number | -1)[] = [2, 3, -1, -1];
+
+function slotToFmCh(isPort1: boolean, slot: number): number {
+  return (isPort1 ? PORT1_SLOT_TO_CH : PORT0_SLOT_TO_CH)[slot] ?? -1;
+}
+
+/** Convert YM2610 F-Number + Block to YM2151-compatible KC for viz */
+function fnumToKc(fnum: number, block: number): number {
+  if (fnum === 0) return 0;
+  // OPN freq = (fnum × Mclock) / (144 × 2^(21-block))
+  // FM internal clock = YM2610 clock / 2 = 4 MHz
+  const fmClock = NGO_YM2610_CLOCK / 2;
+  const freq = (fnum * fmClock) / (144 * (1 << (21 - block)));
+  const midi = 69 + 12 * Math.log2(freq / 440);
+  if (midi < 12 || midi > 127) return 0;
+  const octave = Math.floor(midi / 12) - 1;
+  const semi = Math.round(midi) % 12;
+  const SEMI_TO_KC = [14, 0, 1, 2, 4, 5, 6, 8, 9, 10, 12, 13];
+  return ((octave & 7) << 4) | (SEMI_TO_KC[semi] ?? 0);
+}
+
+/** Get carrier TL for an FM channel (operator 4 = slot 3) */
+function getCarrierTl(ch: number): number {
+  return fmTl[ch * 4 + 3]!;
+}
+
+/** Process FM per-operator register — immediate write to SAB (like CPS1) */
+function shadowFmOperator(reg: number, value: number, isPort1: boolean): void {
+  const slot = reg & 3;
+  const fmCh = slotToFmCh(isPort1, slot);
+  if (fmCh < 0) return;
+  const opBlock = (reg >> 2) & 3;
+  if (reg >= 0x40 && reg <= 0x4F) {
+    fmTl[fmCh * 4 + opBlock] = value & 0x7F;
+    vizWriter?.updateFmTl(fmCh, getCarrierTl(fmCh));
+  }
+}
+
+/** Process FM per-channel register — immediate write to SAB (like CPS1) */
+function shadowFmChannel(reg: number, value: number, isPort1: boolean): void {
+  const slot = reg & 3;
+  const fmCh = slotToFmCh(isPort1, slot);
+  if (fmCh < 0) return;
+  if (reg >= 0xA4 && reg <= 0xA6) {
+    fmBlock[fmCh] = (value >> 3) & 7;
+    fmFnum[fmCh] = (fmFnum[fmCh]! & 0xFF) | ((value & 0x07) << 8);
+  } else if (reg >= 0xA0 && reg <= 0xA2) {
+    fmFnum[fmCh] = (fmFnum[fmCh]! & 0x700) | value;
+    fmKc[fmCh] = fnumToKc(fmFnum[fmCh]!, fmBlock[fmCh]!);
+    vizWriter?.updateFmKc(fmCh, fmKc[fmCh]!);
+  } else if (reg >= 0xB0 && reg <= 0xB2) {
+    fmRl[fmCh] = (value >> 6) & 3;
+    fmConnect[fmCh] = value & 7;
+    vizWriter?.updateFmRl(fmCh, fmRl[fmCh]!);
+    vizWriter?.updateFmConnect(fmCh, value & 0x3F);
+  }
+}
+
+/** Shadow YM2610 register writes — immediate SAB writes (same approach as CPS1) */
+function updateYm2610Shadow(port: number, value: number): void {
+  if (port === 0) lastAddr0 = value;
+  if (port === 2) lastAddr1 = value;
+
+  if (port === 1) {
+    const reg = lastAddr0;
+
+    // SSG tone period
+    if (reg <= 0x05) {
+      const ch = reg >> 1;
+      if (reg & 1) ssgPeriod[ch] = (ssgPeriod[ch]! & 0xFF) | ((value & 0x0F) << 8);
+      else ssgPeriod[ch] = (ssgPeriod[ch]! & 0xF00) | value;
+      vizWriter?.updateFmKc(FM_CHANNELS + ch, ssgPeriodToKc(ssgPeriod[ch]!, SSG_CLOCK));
+    }
+    // SSG mixer
+    if (reg === 0x07) {
+      for (let ch = 0; ch < SSG_CHANNELS; ch++) {
+        ssgToneEn[ch] = ((value >> ch) & 1) === 0 || ((value >> (ch + 3)) & 1) === 0 ? 1 : 0;
+        ssgKon[ch] = ssgToneEn[ch]! && ssgVolume[ch]! > 0 ? 1 : 0;
+        vizWriter?.updateFmKon(FM_CHANNELS + ch, ssgKon[ch]!);
+      }
+    }
+    // SSG volume
+    if (reg >= 0x08 && reg <= 0x0A) {
+      const ch = reg - 0x08;
+      ssgVolume[ch] = (value & 0x10) ? 15 : (value & 0x0F);
+      ssgKon[ch] = ssgToneEn[ch]! && ssgVolume[ch]! > 0 ? 1 : 0;
+      vizWriter?.updateFmTl(FM_CHANNELS + ch, 127 - ((ssgVolume[ch]! * 127 / 15) | 0));
+      vizWriter?.updateFmKon(FM_CHANNELS + ch, ssgKon[ch]!);
+    }
+    // ADPCM-B
+    if (reg === 0x10) {
+      if (value & 0x80) { adpcmBPlaying.value = 1; adpcmBTtl = ADPCM_B_TTL_FRAMES; }
+      if (value & 0x01) { adpcmBPlaying.value = 0; adpcmBTtl = 0; }
+      vizWriter?.updatePcm(6, adpcmBPlaying.value, 0, adpcmBVolume.value, 128);
+    }
+    if (reg === 0x1B) {
+      adpcmBVolume.value = value;
+      vizWriter?.updatePcm(6, adpcmBPlaying.value, 0, value, 128);
+    }
+    // FM Key On/Off
+    if (reg === 0x28) {
+      const fmCh = slotToFmCh((value & 4) !== 0, value & 3);
+      if (fmCh >= 0) {
+        fmKon[fmCh] = ((value >> 4) & 0x0F) !== 0 ? 1 : 0;
+        vizWriter?.updateFmKon(fmCh, fmKon[fmCh]!);
+        vizWriter?.updateFmTl(fmCh, getCarrierTl(fmCh));
+      }
+    }
+    if (reg >= 0x30 && reg < 0xA0) shadowFmOperator(reg, value, false);
+    if (reg >= 0xA0 && reg < 0xC0) shadowFmChannel(reg, value, false);
+  }
+
+  if (port === 3) {
+    const reg = lastAddr1;
+    // ADPCM-A key on/off
+    if (reg === 0x00) {
+      const isKeyOn = (value & 0x80) === 0;
+      for (let ch = 0; ch < 6; ch++) {
+        if (value & (1 << ch)) {
+          if (isKeyOn) { adpcmAPlaying[ch] = 1; adpcmATtl[ch] = ADPCM_A_TTL_FRAMES; }
+          else { adpcmAPlaying[ch] = 0; adpcmATtl[ch] = 0; }
+          const vol = Math.round(((63 - adpcmATotalVol.value) / 63) * ((31 - (adpcmAVolume[ch] ?? 0)) / 31) * 255);
+          vizWriter?.updatePcm(ch, adpcmAPlaying[ch]!, 0, vol, 128);
+        }
+      }
+    }
+    if (reg === 0x01) adpcmATotalVol.value = value & 0x3F;
+    if (reg >= 0x08 && reg <= 0x0D) {
+      const ch = reg - 0x08;
+      adpcmAVolume[ch] = value & 0x1F;
+      const vol = Math.round(((63 - adpcmATotalVol.value) / 63) * ((31 - (value & 0x1F)) / 31) * 255);
+      vizWriter?.updatePcm(ch, adpcmAPlaying[ch]!, 0, vol, 128);
+    }
+    if (reg >= 0x30 && reg < 0xA0) shadowFmOperator(reg, value, true);
+    if (reg >= 0xA0 && reg < 0xC0) shadowFmChannel(reg, value, true);
+  }
+}
+
+/** Tick ADPCM TTL counters — call once per frame */
+function tickAdpcmTtl(): void {
+  if (!vizWriter) return;
+  for (let ch = 0; ch < 6; ch++) {
+    if (adpcmATtl[ch]! > 0) {
+      adpcmATtl[ch] = adpcmATtl[ch]! - 1;
+      if (adpcmATtl[ch]! === 0) { adpcmAPlaying[ch] = 0; vizWriter.updatePcm(ch, 0, 0, 0, 128); }
+    }
+  }
+  if (adpcmBTtl > 0) {
+    adpcmBTtl--;
+    if (adpcmBTtl === 0) { adpcmBPlaying.value = 0; vizWriter.updatePcm(6, 0, 0, 0, 128); }
+  }
+}
 
 // ── Autonomous frame generation ──────────────────────────────────────────
 
@@ -68,6 +385,9 @@ function runOneFrame(): void {
   if (!z80 || !z80Bus || !ym2610 || !ringBuffer || !resamplerL || !resamplerR) return;
 
   workerFrameCount++;
+
+  // Read channel mask from main thread (mute/solo)
+  if (vizWriter) applyChannelMask(vizWriter.readChannelMask());
 
   // Run Z80 for one frame worth of cycles
   let cyclesLeft = Z80_CYCLES_PER_FRAME;
@@ -116,6 +436,9 @@ function runOneFrame(): void {
 
   // Write to ring buffer
   ringBuffer.write(resampledL, resampledR, outCount);
+
+  // Tick ADPCM auto-expire counters
+  tickAdpcmTtl();
 }
 
 // ── Message handler ─────────────────────────────────────────────────────
@@ -132,25 +455,23 @@ self.onmessage = async (e: MessageEvent) => {
         z80Bus = new NeoGeoZ80Bus();
         z80 = new Z80(z80Bus);
 
-        // Wire Z80 bus to YM2610 + classify writes for diagnostics
-        let ymFmWrites = 0, ymSsgWrites = 0, ymAdpcmAWrites = 0, ymAdpcmBWrites = 0, ymTimerWrites = 0;
-        let lastAddr0 = 0, lastAddr1 = 0;
+        // Visualization SAB
+        if (msg.vizSab) {
+          vizWriter = new VizWriter(msg.vizSab);
+          // Neo-Geo: 4 FM + 3 SSG (mapped as FM 4-6) + 6 ADPCM-A + 1 ADPCM-B
+          vizWriter.setLayout(4, 7, 3, 4);
+        }
+
+        // Wire Z80 bus to YM2610 + shadow + mute interception
         z80Bus.setYm2610WriteCallback((port, value) => {
-          ym2610!.write(port, value);
-          if (port === 0) lastAddr0 = value; // addr port 0
-          if (port === 2) lastAddr1 = value; // addr port 1
-          if (port === 1) { // data port 0: SSG(0x00-0x0F), ADPCM-B(0x10-0x1C), FM(0x21+), Timer(0x24-0x27)
-            if (lastAddr0 <= 0x0F) ymSsgWrites++;
-            else if (lastAddr0 >= 0x10 && lastAddr0 <= 0x1C) ymAdpcmBWrites++;
-            else if (lastAddr0 >= 0x24 && lastAddr0 <= 0x27) ymTimerWrites++;
-            else ymFmWrites++;
-          }
-          if (port === 3) { // data port 1: ADPCM-A(0x00-0x2F), FM ch4-6(0x30+)
-            if (lastAddr1 <= 0x2F) ymAdpcmAWrites++;
-            else ymFmWrites++;
-          }
+          // Always update shadow (shows what Z80 intends, regardless of mute)
+          updateYm2610Shadow(port, value);
+
+          // Intercept writes for muted channels before they reach the WASM chip
+          const modValue = interceptMutedWrite(port, value);
+          if (modValue >= 0) ym2610!.write(port, modValue);
+          // modValue < 0 means "block this write entirely"
         });
-        (self as any).__getYmStats = () => ({ fm: ymFmWrites, ssg: ymSsgWrites, adpcmA: ymAdpcmAWrites, adpcmB: ymAdpcmBWrites, timer: ymTimerWrites });
         z80Bus.setYm2610ReadCallback((port) => {
           return ym2610!.read(port);
         });
@@ -204,15 +525,13 @@ self.onmessage = async (e: MessageEvent) => {
 
     case 'rom-switch':
       // MAME/FBNeo: only change the ROM mapping, never reset Z80 or YM2610.
-      // The Z80 continues executing from wherever it was (typically RAM idle loop).
       if (z80Bus) {
         z80Bus.setUseGameRom(msg.useGameRom);
       }
       break;
 
-
     case 'diag':
-      self.postMessage({ type: 'diag', ymStats: (self as any).__getYmStats?.() ?? {}, frame: workerFrameCount });
+      self.postMessage({ type: 'diag', frame: workerFrameCount });
       break;
 
     case 'reset':

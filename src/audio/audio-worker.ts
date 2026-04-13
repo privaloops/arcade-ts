@@ -54,7 +54,7 @@ let vizWriter: VizWriter | null = null;
 
 // Mute/Solo state
 const fmMuted = new Uint8Array(8);       // 1 = channel is muted
-let lastChannelMask = 0xFFF;             // all 12 channels audible
+let lastChannelMask = 0xFFFF;            // all channels audible
 let lastYmAddr = 0;                      // last address written to YM2151
 
 // FM Editor override: when active on a channel, Z80 timbre writes are replaced
@@ -93,15 +93,14 @@ function applyChannelMask(mask: number): void {
 
     // Immediately silence channels that just became muted
     if (nowMuted && !wasMuted && ym2151) {
-      // Key-off: write channel with all operator bits cleared
       ym2151.writeAddress(0x08);
-      ym2151.writeData(ch); // bits 6-3 = 0 → all operators off
-      // Max attenuation on all 4 operator TL registers
+      ym2151.writeData(ch); // key-off (all operators off)
       for (let op = 0; op < 4; op++) {
         ym2151.writeAddress(0x60 + op * 8 + ch);
-        ym2151.writeData(0x7F);
+        ym2151.writeData(0x7F); // max attenuation
       }
     }
+    // Unmute: Z80 will naturally restore TL on next note-on
   }
 
   if (oki6295) {
@@ -236,13 +235,13 @@ function runAudioFrame(): void {
 
   ringBuffer.write(mixedL, mixedR, nOut);
 
-  // Update OKI voice state in vizSAB
+  // Update OKI voice state in vizSAB (mapped to PCM slots 0-3)
   if (vizWriter && oki6295) {
     const okiState = oki6295.getState();
     for (let v = 0; v < 4; v++) {
       const ch = okiState.channels[v];
       if (ch) {
-        vizWriter.updateOki(v, ch.playing ? 1 : 0, 0, Math.round(ch.volume * 255), ch.signal);
+        vizWriter.updatePcm(v, ch.playing ? 1 : 0, 0, Math.round(ch.volume * 255), ch.signal);
       }
     }
   }
@@ -260,7 +259,10 @@ self.onmessage = async (e: MessageEvent) => {
       const sab = msg.sab as SharedArrayBuffer;
       const sampleRate = msg.sampleRate as number;
       const vizSab = msg.vizSab as SharedArrayBuffer | undefined;
-      if (vizSab) vizWriter = new VizWriter(vizSab);
+      if (vizSab) {
+        vizWriter = new VizWriter(vizSab);
+        vizWriter.setLayout(8, 4); // CPS1: 8 FM + 4 OKI
+      }
 
       // Init WASM OPM
       await initOPMWasm();

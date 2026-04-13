@@ -775,7 +775,7 @@ export class Emulator {
         this.vizSab = new SharedArrayBuffer(VIZ_SAB_SIZE);
         this.vizReader = new VizReader(this.vizSab);
         // Initialize all channels as audible
-        this.vizReader.setChannelMask(0xFFF);
+        this.vizReader.setChannelMask(0xFFFF);
 
         this.audioWorker!.postMessage(
           {

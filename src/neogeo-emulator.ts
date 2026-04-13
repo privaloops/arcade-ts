@@ -29,6 +29,7 @@ import {
 import { CMC42_KEYS, CMC50_KEYS, cmcGfxDecrypt, cmcSfixDecrypt } from './memory/neogeo-cmc';
 import { initYM2610Wasm, YM2610Wasm } from './audio/ym2610-wasm';
 import { InputManager } from './input/input';
+import { VizReader, VIZ_SAB_SIZE } from './audio/audio-viz';
 import type { RendererInterface } from './types';
 import { loadNeoGeoRomFromZip } from './memory/neogeo-rom-loader';
 import type { NeoGeoRomSet } from './memory/neogeo-rom-loader';
@@ -70,6 +71,10 @@ export class NeoGeoEmulator {
   private audioWorker: Worker | null = null;
   private audioWorkerReady = false;
   private pendingSoundLatches: number[] = [];
+
+  // Audio visualization
+  private vizSab: SharedArrayBuffer | null = null;
+  private vizReader: VizReader | null = null;
 
   // Framebuffer
   private readonly framebuffer: Uint8Array;
@@ -355,6 +360,11 @@ export class NeoGeoEmulator {
         }
       };
 
+      // Allocate visualization SharedArrayBuffer
+      this.vizSab = new SharedArrayBuffer(VIZ_SAB_SIZE);
+      this.vizReader = new VizReader(this.vizSab);
+      this.vizReader.setChannelMask(0xFFFF); // all channels audible
+
       this.audioWorker.postMessage({
         type: 'init',
         audioRom: romSet.audioRom.buffer,
@@ -362,6 +372,7 @@ export class NeoGeoEmulator {
         voiceRom: romSet.voiceRom.buffer,
         adpcmASize: romSet.adpcmASize,
         sab,
+        vizSab: this.vizSab,
         sampleRate: this.audioOutput.getSampleRate(),
       });
     } catch (err) {
@@ -599,6 +610,7 @@ export class NeoGeoEmulator {
   getM68000(): M68000 { return this.m68000; }
   getFrameCount(): number { return this.frameCount; }
   getGameName(): string { return this.gameName; }
+  getVizReader(): VizReader | null { return this.vizReader; }
   /** Stub for CPS1 API compatibility — Neo-Geo has no DIP switches in I/O ports */
   getIoPorts(): Uint8Array { return new Uint8Array(0x20).fill(0xFF); }
 }
