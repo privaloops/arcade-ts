@@ -359,7 +359,7 @@ initDropZone({
   emulator, canvas, domScreen, dropZone, fileInput, emuBar, canvasWrapper,
   tateToggle, gameSelect, loadBtn, romControls, exportBtn, statusEl,
   getRendererMode, setupDomRenderer: () => setupDomRenderer(rendererDeps),
-  getDebugPanel, setDebugPanel, getAudioPanel: () => audioPanel, setLastRomFile, getLastRomFile, setStatus,
+  getDebugPanel, setDebugPanel, getAudioPanel: () => audioPanel, setAudioPanel, setLastRomFile, getLastRomFile, setStatus,
   onSprixeFile: handleSprixeFile,
   onRomLoaded,
   createNeoGeoEmulator: () => new NeoGeoEmulator(canvas, emulator.getRenderer()),

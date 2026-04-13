@@ -5,7 +5,7 @@ import type { Plugin } from "vite";
 
 const pkg = JSON.parse(readFileSync("package.json", "utf-8"));
 
-/** Vite plugin: serves /api/roms listing .zip files in public/roms/ */
+/** Vite plugin: serves /api/roms listing .zip files in public/roms/ and public/roms/neogeo/ */
 function romsListPlugin(): Plugin {
   return {
     name: "roms-list",
@@ -13,15 +13,23 @@ function romsListPlugin(): Plugin {
       server.middlewares.use("/api/roms", (_req, res) => {
         try {
           const romsDir = join(process.cwd(), "public", "roms");
-          const files = readdirSync(romsDir)
-            .filter(f => f.endsWith(".zip"))
-            .map(f => f.replace(".zip", ""))
-            .sort();
+          const cps1Dir = join(romsDir, "cps-1");
+          const neoDir = join(romsDir, "neogeo");
+          const readZips = (dir: string, exclude?: string[]) => {
+            try {
+              return readdirSync(dir)
+                .filter(f => f.endsWith(".zip") && !(exclude ?? []).includes(f))
+                .map(f => f.replace(".zip", ""))
+                .sort();
+            } catch { return []; }
+          };
+          const cps1 = readZips(cps1Dir);
+          const neogeo = readZips(neoDir, ["neogeo.zip"]);
           res.setHeader("Content-Type", "application/json");
-          res.end(JSON.stringify(files));
+          res.end(JSON.stringify({ cps1, neogeo }));
         } catch {
           res.setHeader("Content-Type", "application/json");
-          res.end("[]");
+          res.end(JSON.stringify({ cps1: [], neogeo: [] }));
         }
       });
     },

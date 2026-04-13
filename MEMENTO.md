@@ -1,6 +1,6 @@
 # Sprixe : Chronique de développement avec Claude
 
-> Mémento exhaustif du développement d'un émulateur CPS1 from scratch dans le browser, en pair-programming avec Claude. Destiné à servir de matière première pour un article de blog. À compléter au fil de l'eau.
+> Mémento exhaustif du développement d'un émulateur CPS1 (puis Neo-Geo) from scratch dans le browser, en pair-programming avec Claude. Destiné à servir de matière première pour un article de blog. À compléter au fil de l'eau.
 
 ---
 
@@ -9,6 +9,8 @@
 Un émulateur Capcom Play System 1 (l'arcade de Street Fighter II, Final Fight, Cadillacs and Dinosaurs...) écrit entièrement en TypeScript, qui tourne dans un navigateur. Zéro dépendance d'émulation. 18 500+ lignes de code. Du boot au gameplay jouable en 5 jours.
 
 Et l'idée folle : un renderer DOM où **chaque sprite est un `<div>`**, le jeu tourne dans les DevTools.
+
+Puis le grand saut : **Neo-Geo** (SNK, 1990). Un second systeme arcade, une architecture radicalement differente, emule dans le meme projet. De zero a Ninja Combat jouable en 2 jours.
 
 ---
 
@@ -29,7 +31,10 @@ Et l'idée folle : un renderer DOM où **chaque sprite est un `<div>`**, le jeu 
 | J11 | 4 avril 2026 | ~13 | Layout refactor, Aseprite grid alignment, beta gate, center-bottom alignment |
 | J12 | 5 avril 2026 | ~14 | M68000 flags booleans, 3.5K dead code, CSS -25%, perf audit (~22% CPU) |
 | J13 | 6 avril 2026 | ~22 | Rebrand Sprixe, 1.0.0, COOP/COEP headers x5, PixelLab AI |
-| **Total** | **13 jours** | **~220 commits** | **~22 000+ lignes TS+C** |
+| J14 | 9 avril 2026 | ~25 | Le grand saut Neo-Geo — MVP 14 700 LOC, BIOS boot, pd4990a RTC, tile decode |
+| J15 | 10 avril 2026 | ~12 | Du premier jeu jouable aux raster effects — couleurs, zoom, scanline slicing |
+| J16 | 11 avril 2026 | ~6 | VRAM pointers, MVS inputs, P-ROM banking — KOF97 boot |
+| **Total** | **16 jours** | **~260 commits** | **~37 000+ lignes TS+C** |
 
 ---
 
@@ -492,6 +497,10 @@ Bug mineur mais visible : le drag rotation du mode 3D explode ne fonctionne pas 
 | J3 | Full DOM renderer | Hybrid canvas+DOM | Trop de tiles DOM pour les scroll layers |
 | J4-5 | YM2151 only | + QSound HLE WASM | Nécessaire pour les jeux CPS1.5 (Dino, Punisher...) |
 | J5 | 68K puis Z80 séquentiel | Interleave par scanline | Communication shared RAM nécessite timing concurrent |
+| J14 | CPS1 only | + Neo-Geo (MVS) | Second systeme arcade, architecture differente, meme projet |
+| J14 | Boot BIOS natif | Direct boot (fallback) | Tests BIOS trop stricts, direct boot plus fiable |
+| J14 | YM2151 (Nuked OPM) | + YM2610 (ymfm WASM) | Chip audio Neo-Geo different, deux instances (main + worker) |
+| J15 | Frame rendering | Scanline slice rendering | IRQ2 modifie VRAM mid-frame, rendu par tranche necessaire |
 
 ### Ce que Claude fait bien dans ce contexte
 
@@ -696,6 +705,17 @@ Ce commit squash regroupe :
 | TATE mode | Mode vertical (portrait) pour les jeux orientés verticalement |
 | HLE | High-Level Emulation — émulation fonctionnelle (vs cycle-accurate) |
 | ADPCM | Adaptive Differential Pulse Code Modulation — compression audio |
+| Neo-Geo | SNK Neo-Geo — hardware arcade MVS / home AES (1990-2004) |
+| LSPC2 | Line Sprite Controller — chip vidéo Neo-Geo (381 sprites, sticky chain, zoom) |
+| YM2610 | Yamaha OPNB — FM + SSG + ADPCM-A/B (chip audio Neo-Geo) |
+| uPD4990A | NEC — chip RTC série utilisé par le BIOS Neo-Geo |
+| C-ROM | Character ROM — données graphiques Neo-Geo (tiles 16x16, format planaire) |
+| P-ROM | Program ROM — code 68000 du jeu Neo-Geo |
+| MVS | Multi Video System — version arcade de la Neo-Geo |
+| AES | Advanced Entertainment System — version home de la Neo-Geo |
+| Sticky chain | Mécanisme de chaînage de sprites Neo-Geo (bit sticky relie un sprite au précédent) |
+| IRQ2 | Interruption timer LSPC pour raster effects mid-frame |
+| ymfm | Bibliothèque d'émulation FM par Aaron Giles (YM2610, YM2151, etc.) |
 
 ---
 
@@ -992,6 +1012,275 @@ c2e91f7  feat: experimental PixelLab AI integration
 
 ---
 
+## Jour 14 — Le grand saut Neo-Geo (9 avril)
+
+### Un second systeme arcade
+
+Le projet Sprixe, jusqu'ici dedie au CPS1, s'etend a un second systeme arcade : la **Neo-Geo** (SNK, 1990). L'architecture est radicalement differente du CPS1 :
+
+| Composant | CPS1 | Neo-Geo |
+|-----------|------|---------|
+| CPU principal | M68000 @ 10 MHz | M68000 @ 12 MHz |
+| CPU audio | Z80 @ 3.58 MHz | Z80 @ 4 MHz |
+| Audio | YM2151 + OKI6295 | YM2610 (FM + SSG + ADPCM-A/B) |
+| Video | CPS-A/CPS-B (3 scroll + sprites) | LSPC2 (381 sprites, fix layer, zoom) |
+| Specificite | Aucun BIOS | BIOS MVS obligatoire (128 KB) |
+
+Le BIOS MVS est un programme 68K complexe qui teste tout le hardware avant de lancer le jeu : RAM, VRAM, RTC, checksum cartouche. C'est le premier boss a battre.
+
+### PR #154 — Le MVP initial (commit `0dc298d`, ~14 700 lignes)
+
+Architecture complete d'un coup, comme au Jour 1 pour le CPS1 :
+
+- `neogeo-bus.ts` (664 LOC) — bus 68K MVS complet (memory map, I/O, LSPC, IRQ)
+- `neogeo-emulator.ts` (618 LOC) — boucle principale, orchestration CPU/video
+- `neogeo-video.ts` (661 LOC) — LSPC2, sprites + fix layer
+- `neogeo-z80-bus.ts` (277 LOC) — bus Z80 (YM2610, sound latch)
+- `neogeo-rom-loader.ts` (548 LOC) — chargeur ZIP + game defs
+- `neogeo-game-defs.ts` — 52 game defs initiales
+- `neogeo-audio-worker.ts` (272 LOC) — Worker audio autonome
+- `pd4990a.ts` (183 LOC) — chip RTC uPD4990A
+- `ym2610-wasm.ts` (145 LOC) — wrapper WASM ymfm (BSD-3)
+- `neogeo-tile-encoder.ts` (164 LOC) — decode/encode tiles C-ROM
+
+Auto-detection CPS1/Neo-Geo au drop du ZIP : les deux systemes coexistent dans le meme projet.
+
+### PR #155 — La chasse au boot BIOS (7 commits)
+
+La serie de bugs la plus dense du projet. Le BIOS MVS teste tout le hardware, et chaque test rajoute un obstacle :
+
+1. **sm1.sm1 non charge** — Le BIOS Z80 ROM n'etait pas injecte → Z80 execute du garbage → handshake son echoue → BIOS bloque.
+
+2. **Protocole son 68K↔Z80** — Per FBNeo `neogeo.cpp` : le BIOS envoie 0x03 (reset Z80), attend reply 0xC3 (HELLO). Sans pending flag + bit 7 masking + force reply, le handshake boucle indefiniment.
+
+3. **Test calendrier** — Le BIOS teste les transitions TP (Time Pulse) de la RTC uPD4990A. Sans emulation du chip, le test echoue → watchdog reset → loop infinie. Solution temporaire : patcher les BCS/BCC dans le BIOS pour NOP les jumps vers le handler d'erreur calendrier.
+
+4. **Composite vector table** — Le plus tordu. FBNeo mappe 0x00-0x7F depuis le BIOS, 0x80+ depuis la P-ROM. Avec un mapping BIOS complet sur 0x000000-0x0FFFFF, le BIOS lit son propre contenu au lieu de l'en-tete cartouche (P-ROM 0x000100+) → ne peut pas identifier le jeu → boot bloque. Ce bug a ete corrige, revert, puis re-corrige dans le PR suivant.
+
+5. **Direct boot** — En parallele, implementation d'un boot direct (skip BIOS) comme solution de fallback.
+
+**Resultat PR #155** : le BIOS atteint l'eye catcher — fond rose/magenta, 1 sprite actif, animation palette. Premier output graphique Neo-Geo.
+
+![Bandes verticales roses — premier signe de vie du BIOS](docs/screenshots/neogeo/01-bios-pink-stripes.png)
+![Fond magenta uni — eye catcher, premier output video](docs/screenshots/neogeo/03-bios-magenta-background.png)
+![Premiers sprites garbled — tile decode completement faux](docs/screenshots/neogeo/04-first-sprites-garbled-blue.png)
+
+### PR #156 — pd4990a RTC (commit `b067563`)
+
+Implementation complete du chip RTC uPD4990A basee sur FBNeo `neo_upd4990a.cpp` :
+- Protocole CLK/STB/DATA_IN sur 4 bits
+- Sortie TP : square wave, sortie DO : pulse 1Hz
+- BCD time encoding dans registre 48-bit
+- Timing cycle-accurate via compteur de cycles 68K
+
+Les patches BIOS (PR #157) sont ensuite retires — le boot est maintenant natif.
+
+### PR #158 — Tile decode planaire + BIOS boot debloque (commits `cb28bb7`, `44c3a28`)
+
+Deux bugs critiques :
+
+1. **Composite vector table** correctement implemente cette fois (0x00-0x7F BIOS, 0x80+ P-ROM).
+
+2. **Format C-ROM Neo-Geo = planaire** (bitplanes C1/C2), pas nibble-packed comme CPS1. Erreur identique au pattern CPS1 initial (Jour 1, bug #5 — plane bit order dans `decodeRow`). Reecriture complete alignee sur FBNeo `NeoDecodeGfx`. Y position : `0x200 - yRaw` avec wrapping (ypos > 272 → -512).
+
+**Resultat** : Ninja Combat boot complet — crosshatch → eye-catcher → in-game ! Le premier jeu Neo-Geo jouable.
+
+![Fix layer avec mauvais tile decode — points verts (nibble-packed au lieu de planaire)](docs/screenshots/neogeo/06-fix-layer-wrong-decode.png)
+![Crosshatch — le pattern de test BIOS Neo-Geo, rendu correct](docs/screenshots/neogeo/07-crosshatch-test-pattern.png)
+![Eye catcher — couleurs encore fausses (cyan au lieu de blanc)](docs/screenshots/neogeo/08-eye-catcher-wrong-colors.png)
+![Ninja Combat intro — sprites en colonnes, half-order inverse + couleurs fausses](docs/screenshots/neogeo/09-ncombat-intro-half-order-wrong-colors.png)
+![Ninja Combat in-game — personnage visible mais couleurs vertes au lieu de correctes](docs/screenshots/neogeo/10-ncombat-ingame-wrong-colors.png)
+
+---
+
+## Jour 15 — Du premier jeu jouable aux raster effects (10 avril)
+
+### PR #159 — Color decode + sprite pipeline (commit `266eb5b`)
+
+Format palette Neo-Geo 16-bit : 5 bits par canal + dark bit (6eme bit DAC, resistance 8200 Ohm). Le dark bit ajoute un demi-step de luminosite a chaque canal — un mecanisme unique au Neo-Geo.
+
+Sticky chain corrige : le Neo-Geo chaine ses sprites via un "sticky bit". Si le bit est set, le sprite herite de la position Y et de la hauteur du sprite precedent (le "maitre"). Le forward pass pre-calcule les positions cumulatives. Sans ca, les sprites chaines sont disperses n'importe ou.
+
+Bug flipH double-flip : le flip horizontal etait applique deux fois (a la source et a la destination) = pas de flip. Un pattern d'erreur classique quand on porte du code de reference sans comprendre a quel niveau chaque flip s'applique.
+
+**Resultat** : Ninja Combat avec couleurs correctes et sprites corrects.
+
+![Eye catcher avec bonnes couleurs — blanc + SNK bleu](docs/screenshots/neogeo/11-eye-catcher-correct-colors.png)
+![Ninja Combat intro — couleurs correctes mais half-order toujours visible](docs/screenshots/neogeo/12-ncombat-intro-correct-colors-half-order.png)
+![Ninja Combat in-game — couleurs correctes, HUD visible](docs/screenshots/neogeo/14-ncombat-ingame-correct.png)
+
+### PR #160 — Tile mask + half-order + 178 game defs (commit `c93ee29`)
+
+**Tile mask** (`nNeoTileMask` de FBNeo) — wraps les tile codes au range ROM au lieu de skipper. Sans ca, 67% des sprites des title screens manquaient. Le fix est une ligne : `tileCode &= tileMask` au lieu de `if (tileCode > maxTile) return`.
+
+**C-ROM half-order** — Les blocs 64-127 = left half, 0-63 = right half. L'ordre initial etait inverse. Pattern similaire au bug CPS1 `decodeRow` byte order (Jour 1).
+
+**Game defs** : 52 → 178 parent sets, regenere depuis MAME `neogeo.xml`.
+
+![Eye catcher — logo NEO-GEO fragmente (tile mask manquant)](docs/screenshots/neogeo/15-eye-catcher-tile-mask-bug.png)
+![Ninja Combat title tronque — seuls "Co" visible avant tile mask fix](docs/screenshots/neogeo/18-ncombat-title-truncated.png)
+![Ninja Combat title screen complet apres tile mask + half-order fix](docs/screenshots/neogeo/23-ncombat-title-perfect.png)
+
+### PR #161 — Sprite zoom + render order (commit `5391bad`)
+
+Quatre corrections dans un seul PR :
+
+1. **Render order inverse** — Le hardware Neo-Geo rend les sprites low index = devant. Le code rendait high index = devant. Fix : rendu high→low.
+
+2. **Y offset -16** pour la fenetre visible, X wrapping a 480 (pas 320).
+
+3. **Support `000-lo.lo`** — La table shrink (256×256 entries) mapppe les niveaux de zoom aux pixels a dessiner. Fallback lineaire si la ROM est absente.
+
+4. **Zoom X** via 16 bitmasks 16-bit (MAME-aligned) : selection des pixels source selon le niveau de zoom. Chaque bit du mask indique si le pixel correspondant est dessine.
+
+**Resultat** : Art of Fighting — title screen propre, fighters visibles en combat.
+
+![Art of Fighting — title screen parfait](docs/screenshots/neogeo/27-aof-title-perfect.png)
+![Art of Fighting — Ryo vs Todo, decor jardin, mais sprites de persos manquants (avant zoom fix)](docs/screenshots/neogeo/20-aof-combat-no-sprites.png)
+
+### Scanline slice rendering (commit `eb3d5f9`)
+
+Le probleme le plus subtil de la session. Art of Fighting (et d'autres jeux) modifie la VRAM mid-frame via le handler IRQ2 (timer LSPC). Le handler change les positions, tailles, et tile codes des sprites **pendant** que le frame se dessine. Sans rendu par tranche, tous les sprites sont rendus avec l'etat VRAM de fin de frame → rendu "bouillie".
+
+La solution decoupe le frame en tranches de scanlines :
+
+```typescript
+// Dans neogeo-emulator.ts
+beginFrame();           // clear + palette, une seule fois
+for (scanline = 0..223) {
+  tickLSPCTimer();
+  if (irq2Fired) {
+    renderSlice(lastY, scanline);  // flush avant modification VRAM
+    lastY = scanline;
+    // le handler 68K modifie la VRAM ici
+  }
+}
+renderSlice(lastY, 224); // flush le reste
+```
+
+Le forward pass sprite est re-execute a chaque slice — il faut recalculer les positions sticky chain avec l'etat VRAM courant. Sans IRQ2 timer → slice unique [0, 224) → zero regression sur les jeux simples.
+
+![Art of Fighting — rendu "bouillie" avant slice rendering (IRQ2 modifie VRAM mid-frame)](docs/screenshots/neogeo/21-aof-bouillie-before-slice.png)
+![Art of Fighting — combat correct apres scanline slice rendering](docs/screenshots/neogeo/29-aof-combat-after-slice.png)
+![Art of Fighting — intro bar "Street Stars", rendu quasi-parfait](docs/screenshots/neogeo/22-aof-intro-bar-correct.png)
+![Art of Fighting — Ryo kick, sprite et decor corrects](docs/screenshots/neogeo/26-aof-ryo-kick-correct.png)
+
+---
+
+## Jour 16 — VRAM, inputs MVS, P-ROM banking (11 avril)
+
+### VRAM read/write pointers separes (commit `d6fcb7e`)
+
+Le LSPC a deux pointeurs VRAM distincts : un pour l'ecriture, un pour la lecture. Ils sont latches ensemble au set de l'adresse, puis auto-incrementes independamment. Sur CPS1, ce probleme n'existe pas (acces direct via l'adresse).
+
+Le symptome : le test VRAM du BIOS echoue. Le BIOS ecrit une valeur, relit a la meme adresse pour verifier, mais l'auto-increment de l'ecriture a avance le pointeur read aussi → lecture a la mauvaise adresse.
+
+**Fix** : deux pointeurs separes `vramWriteAddr` et `vramReadAddr`, latches ensemble sur ecriture de REG_VRAMADDR, incrementes independamment.
+
+![BIOS VIDEO RAM ERROR — WRITE 5555, READ 0000 (avant fix read/write pointers)](docs/screenshots/neogeo/30-bios-vram-error.png)
+
+### MVS input ports (commits `d6fcb7e`, `2681f7b`)
+
+La Neo-Geo utilise un mapping de bits different du CPS1 pour les directions :
+- CPS1 : R/L/D/U = bits 0-3
+- Neo-Geo : U/D/L/R = bits 0-3
+
+Autres corrections :
+- Coins (0x380001) separes des starts (0x340001) — sur CPS1 tout est dans le meme registre
+- REG_STATUS_B : 0x00 pour MVS (etait 0xFF = AES) — ce registre distingue l'arcade du systeme home
+- Byte order ports corrige (P1 a 0x300000 even, system a 0x380000)
+- LSPC byte writes : assembles en words (etaient ignores). Le bus buffer le high byte et dispatch sur l'ecriture du odd byte
+
+### Sprite rendering MAME-aligned (commit `2681f7b`)
+
+Deux alignements sur l'implementation MAME :
+- **Y-zoom** : algorithme XOR MAME (inversion de la table shrink) remplace la logique custom
+- **X-zoom** : `ZOOM_X_TABLES` bitmask + `sprXZoom` dans le forward pass
+
+### P-ROM banking (commit `bdd7849`)
+
+Les jeux > 1 MB (KOF97 = 3 MB) ont besoin de bank switching sur 0x200000-0x2FFFFF. Le PORTWEL latch D0/D1 selectionne le bank P2. 13 lignes dans `neogeo-bus.ts` :
+
+```typescript
+// P-ROM banking (games > 1MB)
+case 0x2FFFF0: // PORTWEL — select P2 bank
+  this.pRomBank = value & 0x03;
+  break;
+```
+
+**Resultat** : KOF97 passe de black screen a warning screen. La protection cartouche (SMA, PVC, CMC) reste a implementer pour aller plus loin.
+
+![Art of Fighting — Round 1, Ryo vs Todo, rendu quasi-complet](docs/screenshots/neogeo/31-aof-round1-correct.png)
+![Art of Fighting — ecran de selection de personnage](docs/screenshots/neogeo/32-aof-character-select.png)
+![Art of Fighting — artefacts de zoom vertical (tiles empiles)](docs/screenshots/neogeo/33-aof-zoom-artifacts.png)
+![KOF97 — WARNING screen, P-ROM banking fonctionne](docs/screenshots/neogeo/34-kof97-warning-screen.png)
+
+### Decisions architecturales Neo-Geo
+
+| Decision | Choix | Pourquoi |
+|----------|-------|----------|
+| Emulation parallele | CPS1 et Neo-Geo coexistent, auto-detection au drop | Pas de fork, renderers partages via `resize()` |
+| Direct boot | P-ROM mappe a 0x000000, skip BIOS | Le BIOS a des tests trop stricts, le direct boot est plus fiable |
+| YM2610 WASM (ymfm) | BSD-3, compile Emscripten | Deux instances : main thread (handshake BIOS) + worker audio |
+| Interleaving 68K/Z80 | Slices de 128 cycles | Tight polling BIOS, ratio 1:3 (4MHz/12MHz) |
+| Slice rendering | Flush avant IRQ2 handler | Le forward pass sprite est re-execute par slice |
+| pd4990a cycle-accurate | Compteur de cycles 68K total | Pas de `setInterval` — requis pour le test calendrier BIOS |
+
+---
+
+## Jour 14-16 — Ligne de temps des commits Neo-Geo
+
+### Jour 14 — 9 avril 2026 (~25 commits)
+
+```
+0dc298d  feat: add Neo-Geo (MVS/AES) emulation support ← 14 700 LIGNES
+1a29efc  fix: load BIOS Z80 ROM (sm1.sm1) for Neo-Geo sound init
+4947b8c  fix: Neo-Geo BIOS boot — RTC, IRQ, sound register fixes
+87bb470  fix: Neo-Geo IRQ ack + sound protocol per FBNeo
+ae7d50e  fix: Neo-Geo BIOS completes boot — patch all error jumps, fix sound write
+65f31a1  fix: Neo-Geo BIOS boot completes — eye catcher visible
+8742b35  fix: Neo-Geo control register mapping per FBNeo
+da41595  fix: Z80 NMI edge-trigger + sound handshake works
+691bb42  fix: composite vector table at 0x000000 per FBNeo
+e318517  fix: direct game boot + performance progress
+974d62c  fix: sound reply preservation + performance boost
+d538c1c  fix: calendar range check bypass + direct game boot
+42afc13  fix: BIOS reaches eye catcher with sprites visible!
+8ada169  test: add Neo-Geo boot E2E diagnostic test
+b067563  feat: implement pd4990a RTC chip for Neo-Geo
+cbe7e15  fix: re-enable calendar patches alongside pd4990a
+b881f35  feat: pd4990a RTC works — BIOS eye catcher renders 381 sprites
+5170003  fix: pd4990a timing — use real cycles only, remove estimate hack
+06f442d  fix: Z80 comm test debugging — isolate reply, force per-command
+231fb53  fix: remove all BIOS patches — pd4990a passes CALENDAR + checksum
+0e876cf  feat: YM2610 WASM on main thread for Z80 sound init
+8350937  fix: deliver YM2610 timer IRQ to Z80 on main thread
+bce08fb  feat: BIOS passes ALL tests — full boot with graphics!
+b94e059  fix: prefer MVS BIOS (all tests pass), 4KB memory card RAM
+cb28bb7  fix: unblock Neo-Geo BIOS boot — composite vector mapping + LSPC register fixes
+44c3a28  fix: planar tile decode, Y wrapping, enhanced e2e boot test ← NINJA COMBAT IN-GAME
+```
+
+### Jour 15 — 10 avril 2026 (~12 commits)
+
+```
+266eb5b  fix: Neo-Geo color decode + sprite rendering pipeline
+c93ee29  fix: Neo-Geo tile mask + half-order + full game defs (178 games)
+5391bad  fix: Neo-Geo sprite render order, Y/X positioning, zoom infrastructure
+a3c8ae4  fix: improved sprite diagnostic dump with zoom and depth info
+eb3d5f9  feat: Neo-Geo scanline slice rendering (IRQ2 raster effects)
+```
+
+### Jour 16 — 11 avril 2026 (~6 commits)
+
+```
+d6fcb7e  fix: Neo-Geo VRAM separate read/write pointers + MVS input port mapping
+2681f7b  fix: Neo-Geo MVS input ports, sprite rendering (MAME-aligned), LSPC byte writes
+bdd7849  fix: Neo-Geo P-ROM banking for games > 1MB (KOF97 boots)
+```
+
+---
+
 ## Patterns et observations (mise a jour)
 
 ### Nouveaux patterns
@@ -1003,6 +1292,12 @@ c2e91f7  feat: experimental PixelLab AI integration
 8. **Les headers de securite sont un champ de mines** — COOP/COEP pour SharedArrayBuffer vs iframes/embeds YouTube. 5 releases en un jour pour 3 lignes de config. Chaque plateforme d'hebergement a sa propre syntaxe.
 
 9. **Dead code invisible** — 3 500 lignes de code mort (ym2151.ts, nuked-opm.ts) marquees "kept as reference" alors que le git history EST la reference. 360 lignes de CSS orphelines. Le code mort s'accumule silencieusement quand on pivote sans nettoyer.
+
+10. **Tile decode : toujours le meme piege** — Le format graphique est la premiere erreur sur chaque nouveau systeme. CPS1 Jour 1 : plane bit order. Neo-Geo Jour 14 : nibble-packed vs planaire. La solution est toujours la meme : lire FBNeo/MAME d'abord, coder ensuite.
+
+11. **Le BIOS est un programme complet** — Le BIOS MVS teste tout le hardware de maniere exhaustive. Chaque composant non emule (RTC, son, VRAM) bloque le boot. Le direct boot est un raccourci utile, mais le boot natif valide l'emulation.
+
+12. **Slice rendering vs frame rendering** — Les jeux qui modifient la VRAM mid-frame (via IRQ2) sont rendus "bouillie" avec un rendu par frame complet. Le rendu par tranche de scanlines ajoute de la complexite mais resout le probleme sans regression sur les jeux simples.
 
 ### Ce que Claude fait bien (ajouts)
 
@@ -1022,29 +1317,34 @@ c2e91f7  feat: experimental PixelLab AI integration
 
 | Metrique | Valeur |
 |----------|--------|
-| Duree totale | 13 jours (17 mars — 6 avril 2026) |
-| Commits (hors merges) | ~220 |
-| Lignes TypeScript | ~22 000+ (apres suppression de 3 500 LOC dead code) |
-| Insertions source totales | ~40 000+ |
-| Jeux supportes (GameDefs) | 41 parents |
-| Jeux dans le catalogue | 245 |
+| Duree totale | 16 jours (17 mars — 11 avril 2026) |
+| Commits (hors merges) | ~260 |
+| Lignes TypeScript | ~37 000+ |
+| Insertions source totales | ~55 000+ |
+| Jeux supportes CPS1 (GameDefs) | 41 parents |
+| Jeux supportes Neo-Geo (GameDefs) | 178 parents |
+| Jeux dans le catalogue CPS1 | 245 |
 | Vecteurs de test M68000 | 16 800 (84 × 200) |
 | Vecteurs de test Z80 | 117 600 (588 × 200) |
 | Tests unitaires | 1 016+ |
 | Tests E2E | ~115 (16 spec files) |
-| Game matrix | 29 ROMs (boot + audio check) |
-| Composants hardware emules | 7 (M68000, Z80, YM2151, OKI6295, QSound, CPS-A, CPS-B) |
+| Game matrix | 29 ROMs CPS1 (boot + audio check) |
+| Composants hardware emules | 12 (M68000, Z80, YM2151, OKI6295, QSound, CPS-A, CPS-B, LSPC2, YM2610, uPD4990A, shrink ROM, P-ROM banking) |
+| Systemes arcade emules | 2 (CPS1, Neo-Geo MVS) |
 | Renderers | 3 (WebGL2, Canvas 2D, DOM hybrid) |
 | CPU total (apres optim) | ~22% (M68000+video ~11%, audio ~11%) |
 | Releases | 8 (beta.1 → beta.3 → 1.0.0 → 1.0.5) |
+| LOC Neo-Geo MVP | ~14 700 (PR #154, un seul commit) |
 | Bug le plus vicieux | `fetchByte` au lieu de `fetchOpcode` dans CB/ED/DD/FD (3 lignes, QSound muet) |
 | Bug le plus sournois | `~level & 0xffff` (1 ligne, canaux YM2151 silencieux) |
-| Bug le plus frequent (categorie) | Byte order / endianness (5+ occurrences) |
+| Bug le plus frequent (categorie) | Byte order / endianness (5+ occurrences, CPS1 et Neo-Geo) |
+| Bug le plus tordu Neo-Geo | Composite vector table (BIOS vs P-ROM, corrige 3 fois) |
 | Temps de debug le plus long | QSound audio (~12h) — resolu en 2min via MAME debugger |
 | Nettoyage le plus massif | -3 500 LOC dead code + -360 LOC CSS en un jour |
 | Le plus de releases en un jour | 5 (1.0.1 → 1.0.5, toutes pour COOP/COEP headers) |
+| Du zero a in-game Neo-Geo | 2 jours (Jour 14-15, Ninja Combat jouable) |
 
 ---
 
-*Derniere mise a jour : 6 avril 2026*
-*Sprixe 1.0 est sorti. Du premier commit au jeu jouable en 5 jours, de la beta a la release stable en 20. Le studio CPS1 tourne dans un navigateur, exporte vers Aseprite, et commence a generer du pixel art par IA.*
+*Derniere mise a jour : 11 avril 2026*
+*Sprixe emule deux systemes arcade (CPS1 + Neo-Geo) dans un navigateur. Du premier commit CPS1 au jeu jouable en 5 jours. Du zero Neo-Geo a Ninja Combat in-game en 2 jours. 37 000+ lignes de TypeScript, zero dependance d'emulation, 219 game defs (41 CPS1 + 178 Neo-Geo).*

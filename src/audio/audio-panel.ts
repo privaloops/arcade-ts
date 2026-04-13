@@ -9,23 +9,44 @@
  * OKI section: channel strips + waveforms
  */
 
-import { kcToNoteName, type VizReader } from "./audio-viz";
+import { kcToNoteName, type VizReader, type AudioLayout } from "./audio-viz";
 import { parsePhraseTable, decodeSample, encodeSample, replaceSampleInRom, OKI_SAMPLE_RATE, type PhraseInfo } from "./oki-codec";
+import { parseAdpcmASampleTable, decodeAdpcmASample, encodeAdpcmASample, replaceAdpcmASample, ADPCM_A_SAMPLE_RATE } from "./neogeo-adpcm";
 import JSZip from "jszip";
 import type { Emulator } from "../emulator";
 import { showToast } from "../ui/toast";
 
-const FM_CHANNELS = 8;
-const OKI_VOICES = 4;
+/** Minimal interface for audio panel — both Emulator and NeoGeoEmulator satisfy this */
+export interface AudioPanelEmulator {
+  getVizReader(): VizReader | null;
+  getFrameCount(): number;
+  getGameName(): string;
+  getFpsDisplay?(): string | number;
+  // CPS1: OKI samples
+  getOkiRom?(): Uint8Array | null;
+  updateOkiRom?(rom: Uint8Array): void;
+  getRomStore?(): { onModified?: (() => void) | null } | null;
+  // Neo-Geo: ADPCM-A/B samples
+  getVoiceRom?(): Uint8Array | null;
+  getAudioRom?(): Uint8Array | null;
+  getAdpcmASize?(): number;
+  getScannedSamples?(): { startByte: number; endByte: number; type: 'A' | 'B' }[];
+  scanSamples?(): void;
+  requestLiveSamples?(): void;
+  updateVoiceRom?(offset: number, data: Uint8Array): void;
+}
+
+// Default layout (CPS1), overridden per-system via vizSAB
+const DEFAULT_FM = 8;
+const DEFAULT_PCM = 4;
 
 // Piano: 3 octaves C2-B4
 const PR_FIRST_OCTAVE = 2;
 const PR_OCTAVES = 3;
 const PR_KEYS = PR_OCTAVES * 12; // 36
 const FM_ROW_H = 32; // px per FM channel strip
-const FM_TOTAL_H = FM_CHANNELS * FM_ROW_H; // 256
 const KB_WIDTH = 44;
-const KEY_H = FM_TOTAL_H / PR_KEYS; // ~7px per key
+// KEY_H computed dynamically: this.fmTotalH / PR_KEYS
 const TIMELINE_W = 400; // shared width for all timelines (FM + OKI)
 const RULER_H = 16;     // height of the frame ruler bar
 const MAJOR_TICK = 600;  // big tick + label interval (frames)
@@ -46,11 +67,12 @@ const CH_COLORS = [
   "#ff1a50", "#ff6b35", "#ffc234", "#4ecb71",
   "#36b5ff", "#8b5cf6", "#d946ef", "#f97316",
   "#06b6d4", "#84cc16", "#f43f5e", "#a78bfa",
+  "#e879f9", "#22d3ee", // 14 channels total for Neo-Geo
 ];
 
 export class AudioPanel {
   private active = false;
-  private readonly emulator: Emulator;
+  private readonly emulator: AudioPanelEmulator;
 
   private readonly container: HTMLDivElement;
   private readonly audBtn: HTMLElement;
@@ -80,7 +102,12 @@ export class AudioPanel {
   // OKI waveforms
   private readonly waveCanvases: HTMLCanvasElement[] = [];
   private readonly waveCtxs: (CanvasRenderingContext2D | null)[] = [];
-  private readonly prevWaveY: number[] = [5, 5, 5, 5];
+  private prevWaveY: number[] = [5, 5, 5, 5, 5, 5, 5, 5];
+
+  // Sticky note display: keep showing last note for a few frames after key-off
+  private readonly stickyNote: string[] = [];
+  private readonly stickyTtl: number[] = [];
+  private static readonly STICKY_FRAMES = 15; // ~250ms at 60fps
 
   // Tabs
   private tracksContent: HTMLDivElement | null = null;
@@ -92,6 +119,7 @@ export class AudioPanel {
   // Sample browser
   private sampleSortKey: "id" | "duration" | "size" = "id";
   private sampleSortAsc = true;
+  private _livePollId: ReturnType<typeof setInterval> | undefined;
   private sampleTableBody: HTMLElement | null = null;
   private phrases: PhraseInfo[] = [];
   private sampleAudioCtx: AudioContext | null = null;
@@ -106,7 +134,33 @@ export class AudioPanel {
   private lastFrameCount = 0;
   private tickAccumulator = 0; // sub-pixel accumulator for frame ticks
 
-  constructor(emulator: Emulator) {
+  // Dynamic channel layout (read from vizSAB on open)
+  private fmCount = DEFAULT_FM;
+  private pcmCount = DEFAULT_PCM;
+  private ssgCount = 0;
+  private ssgOffset = 0;
+
+  /** Total FM-type slots in viz (FM + SSG) */
+  private get totalFmSlots(): number { return this.fmCount + this.ssgCount; }
+  /** Total pixel height for FM section */
+  private get fmTotalH(): number { return this.totalFmSlots * FM_ROW_H; }
+
+  /** Label for an FM slot (e.g. "FM1", "SSG1") */
+  private fmSlotLabel(ch: number): string {
+    if (ch >= this.ssgOffset && ch < this.ssgOffset + this.ssgCount) {
+      return `SSG${ch - this.ssgOffset + 1}`;
+    }
+    return `FM${ch + 1}`;
+  }
+
+  /** Label for a PCM slot */
+  private pcmSlotLabel(v: number): string {
+    if (this.pcmCount <= 4) return `OKI${v + 1}`;
+    if (v < 6) return `PCMA${v + 1}`;
+    return `PCMB`;
+  }
+
+  constructor(emulator: AudioPanelEmulator) {
     this.emulator = emulator;
     this.container = document.getElementById("aud-panel") as HTMLDivElement;
     this.audBtn = document.getElementById("aud-btn")!;
@@ -127,17 +181,34 @@ export class AudioPanel {
     for (const btn of this.muteButtons) btn?.classList.remove("active");
     for (const btn of this.soloButtons) btn?.classList.remove("active");
     const viz = this.emulator.getVizReader();
-    if (viz) viz.setChannelMask(0xFFF);
+    if (viz) viz.setChannelMask(0xFFFF);
     if (this.active) this.startUpdateLoop();
   }
 
-  destroy(): void { this.close(); this.container.innerHTML = ""; }
+  destroy(): void {
+    if (this._livePollId) clearInterval(this._livePollId);
+    this.close();
+    this.container.innerHTML = "";
+  }
 
   private open(): void {
     this.active = true;
     this.container.classList.add("open");
     document.body.classList.add("aud-active");
     this.audBtn.classList.add("active");
+    // Read layout from vizSAB and rebuild if changed
+    const viz = this.emulator.getVizReader();
+    if (viz) {
+      const layout = viz.getLayout();
+      const totalFm = layout.fmCount + layout.ssgCount;
+      if (totalFm !== this.fmCount + this.ssgCount || layout.pcmCount !== this.pcmCount) {
+        this.fmCount = layout.fmCount;
+        this.pcmCount = layout.pcmCount;
+        this.ssgCount = layout.ssgCount;
+        this.ssgOffset = layout.ssgOffset;
+        this.buildDOM();
+      }
+    }
     this.startUpdateLoop();
   }
 
@@ -154,6 +225,29 @@ export class AudioPanel {
   private buildDOM(): void {
     const c = this.container;
     c.innerHTML = "";
+
+    // Reset all per-channel arrays
+    this.noteEls.length = 0;
+    this.vuCanvases.length = 0;
+    this.vuCtxs.length = 0;
+    this.muteButtons.length = 0;
+    this.soloButtons.length = 0;
+    this.fmTimeCanvases.length = 0;
+    this.fmTimeCtxs.length = 0;
+    this.fmStripEls.length = 0;
+    this.waveCanvases.length = 0;
+    this.waveCtxs.length = 0;
+    this.prevWaveY = Array(this.pcmCount).fill(5);
+    this.stickyNote.length = 0;
+    this.stickyTtl.length = 0;
+    for (let i = 0; i < this.totalFmSlots + this.pcmCount; i++) {
+      this.stickyNote.push('--');
+      this.stickyTtl.push(0);
+    }
+    this.muted.clear();
+    this.soloed.clear();
+    // Reset channelMask in SAB so no channels stay muted after rebuild
+    this.emulator.getVizReader()?.setChannelMask(0xFFFF);
 
     // Header with tabs
     const header = el("div", "aud-header");
@@ -194,10 +288,10 @@ export class AudioPanel {
 
     // FM Section — 3-column grid: controls | keyboard | timelines
     const fmGrid = el("div", "aud-fm-grid") as HTMLDivElement;
-    fmGrid.style.cssText = `display:grid; grid-template-columns: auto ${KB_WIDTH}px 1fr; grid-template-rows: repeat(${FM_CHANNELS}, ${FM_ROW_H}px); gap:0;`;
+    fmGrid.style.cssText = `display:grid; grid-template-columns: auto ${KB_WIDTH}px 1fr; grid-template-rows: repeat(${this.totalFmSlots}, ${FM_ROW_H}px); gap:0;`;
 
     // Column 1: channel strips
-    for (let ch = 0; ch < FM_CHANNELS; ch++) {
+    for (let ch = 0; ch < this.totalFmSlots; ch++) {
       const strip = el("div", "aud-fm-strip");
       strip.append(
         this.createMuteBtn(ch),
@@ -208,7 +302,7 @@ export class AudioPanel {
       colorDot.style.background = CH_COLORS[ch]!;
       strip.appendChild(colorDot);
       const nameEl = el("span", "aud-ch-name");
-      nameEl.textContent = `FM${ch + 1}`;
+      nameEl.textContent = this.fmSlotLabel(ch);
       strip.appendChild(nameEl);
       const noteEl = el("span", "aud-ch-note") as HTMLSpanElement;
       noteEl.textContent = "--";
@@ -226,15 +320,15 @@ export class AudioPanel {
     // Column 2: shared keyboard (spans all 8 rows)
     this.kbCanvas = document.createElement("canvas");
     this.kbCanvas.width = KB_WIDTH;
-    this.kbCanvas.height = FM_TOTAL_H;
+    this.kbCanvas.height = this.fmTotalH;
     this.kbCanvas.className = "aud-kb-canvas";
-    this.kbCanvas.style.cssText = `grid-column:2; grid-row:1/${FM_CHANNELS + 1};`;
+    this.kbCanvas.style.cssText = `grid-column:2; grid-row:1/${this.totalFmSlots + 1};`;
     this.kbCtx = this.kbCanvas.getContext("2d")!;
     this.drawKeyboard();
     fmGrid.appendChild(this.kbCanvas);
 
     // Column 3: per-channel timelines (one canvas per row)
-    for (let ch = 0; ch < FM_CHANNELS; ch++) {
+    for (let ch = 0; ch < this.totalFmSlots; ch++) {
       const cvs = document.createElement("canvas");
       cvs.width = TIMELINE_W;
       cvs.height = FM_ROW_H;
@@ -252,16 +346,18 @@ export class AudioPanel {
     this.tracksContent.appendChild(el("div", "aud-separator"));
 
     const okiSection = el("div", "aud-channels");
-    for (let v = 0; v < OKI_VOICES; v++) {
+    for (let v = 0; v < this.pcmCount; v++) {
       okiSection.appendChild(this.createOkiRow(v));
     }
     this.tracksContent.appendChild(okiSection);
     c.appendChild(this.tracksContent);
 
-    // -- Samples tab content --
+    // -- Samples tab content (CPS1 OKI or Neo-Geo ADPCM-A) --
+    const hasSamples = !!this.emulator.getOkiRom || !!this.emulator.getVoiceRom;
     this.samplesContent = el("div", "aud-tab-content") as HTMLDivElement;
     this.samplesContent.style.display = "none";
-    this.buildSamplesTab();
+    if (hasSamples) this.buildSamplesTab();
+    if (this.samplesTabBtn) this.samplesTabBtn.style.display = hasSamples ? "" : "none";
     c.appendChild(this.samplesContent);
 
   }
@@ -281,7 +377,8 @@ export class AudioPanel {
     exportBtn.style.cssText = "font-size:0.6rem;padding:3px 8px;";
     exportBtn.addEventListener("click", () => this.exportSamples());
     const fmtHint = el("span", "smp-fmt-hint");
-    fmtHint.textContent = "WAV mono 7575 Hz";
+    const isNeoGeo = !!this.emulator.getVoiceRom;
+    fmtHint.textContent = isNeoGeo ? "WAV mono 18519 Hz" : "WAV mono 7575 Hz";
     actions.append(importBtn, exportBtn, fmtHint);
     sc.appendChild(actions);
 
@@ -311,7 +408,28 @@ export class AudioPanel {
     if (this.samplesContent) this.samplesContent.style.display = tab === "samples" ? "" : "none";
     this.tracksTabBtn?.classList.toggle("active", tab === "tracks");
     this.samplesTabBtn?.classList.toggle("active", tab === "samples");
-    if (tab === "samples") this.refreshSampleTable();
+    if (tab === "samples") {
+      if (this.isNeoGeo) {
+        // Request live-captured samples from gameplay + trigger scan as fallback
+        this.emulator.requestLiveSamples?.();
+        if ((this.emulator.getScannedSamples?.()?.length ?? 0) === 0) {
+          this.emulator.scanSamples?.();
+        }
+        // Poll for results (both scan and live are async in worker)
+        const pollId = setInterval(() => {
+          if (this.activeTab !== 'samples') { clearInterval(pollId); return; }
+          this.emulator.requestLiveSamples?.();
+          const samples = this.emulator.getScannedSamples?.() ?? [];
+          if (samples.length > 0) this.refreshSampleTable();
+        }, 1000);
+        // Stop polling when leaving samples tab (handled by activeTab check above)
+        this._livePollId = pollId;
+      }
+      this.refreshSampleTable();
+    } else if (this._livePollId) {
+      clearInterval(this._livePollId);
+      this._livePollId = undefined;
+    }
   }
 
   private sortSamples(key: "id" | "duration" | "size"): void {
@@ -324,14 +442,43 @@ export class AudioPanel {
     this.refreshSampleTable();
   }
 
+  /** Is this a Neo-Geo emulator (ADPCM-A) or CPS1 (OKI)? */
+  private get isNeoGeo(): boolean { return !!this.emulator.getVoiceRom && !this.emulator.getOkiRom; }
+
+  /** Get the sample ROM (V-ROM for Neo-Geo, OKI ROM for CPS1) */
+  private getSampleRom(): Uint8Array | null {
+    return this.emulator.getOkiRom?.() ?? this.emulator.getVoiceRom?.() ?? null;
+  }
+
   private refreshSampleTable(): void {
     if (!this.sampleTableBody) return;
-    const rom = this.emulator.getOkiRom();
+    const rom = this.getSampleRom();
     if (!rom) {
-      this.sampleTableBody.innerHTML = `<tr><td colspan="5" style="color:#555;text-align:center;padding:12px;">No OKI ROM</td></tr>`;
+      this.sampleTableBody.innerHTML = `<tr><td colspan="5" style="color:#555;text-align:center;padding:12px;">No sample ROM</td></tr>`;
       return;
     }
-    this.phrases = parsePhraseTable(rom);
+    if (this.isNeoGeo) {
+      const scanned = this.emulator.getScannedSamples?.() ?? [];
+      if (scanned.length === 0) {
+        this.sampleTableBody.innerHTML = `<tr><td colspan="5" style="color:#555;text-align:center;padding:12px;">Scanning samples...</td></tr>`;
+        return;
+      }
+      this.phrases = scanned
+        .filter(s => s.endByte > s.startByte && s.startByte < rom.length)
+        .map((s, i) => {
+          const sizeBytes = Math.min(s.endByte, rom.length) - s.startByte;
+          return {
+            id: i,
+            startByte: s.startByte,
+            endByte: s.startByte + sizeBytes,
+            sizeBytes,
+            numSamples: sizeBytes * 2,
+            durationMs: Math.round(sizeBytes * 2 / ADPCM_A_SAMPLE_RATE * 1000),
+          };
+        });
+    } else {
+      this.phrases = parsePhraseTable(rom);
+    }
     const dir = this.sampleSortAsc ? 1 : -1;
     const key = this.sampleSortKey;
     this.phrases.sort((a, b) => {
@@ -394,7 +541,7 @@ export class AudioPanel {
   }
 
   private createOkiRow(voice: number): HTMLDivElement {
-    const idx = FM_CHANNELS + voice;
+    const idx = this.totalFmSlots + voice;
     const color = CH_COLORS[idx]!;
     const row = el("div", "aud-ch-row") as HTMLDivElement;
 
@@ -404,7 +551,7 @@ export class AudioPanel {
     colorDot.style.background = color;
     row.appendChild(colorDot);
     const nameEl = el("span", "aud-ch-name");
-    nameEl.textContent = `PCM${voice + 1}`;
+    nameEl.textContent = this.pcmSlotLabel(voice);
     row.appendChild(nameEl);
     const noteEl = el("span", "aud-ch-note") as HTMLSpanElement;
     noteEl.textContent = "--";
@@ -456,11 +603,13 @@ export class AudioPanel {
   }
 
   private playSample(phrase: PhraseInfo): void {
-    const rom = this.emulator.getOkiRom();
+    const rom = this.getSampleRom();
     if (!rom) return;
-    const pcm = decodeSample(rom, phrase);
+    const ngo = this.isNeoGeo;
+    const pcm = ngo ? decodeAdpcmASample(rom, phrase) : decodeSample(rom, phrase);
+    const rate = ngo ? ADPCM_A_SAMPLE_RATE : OKI_SAMPLE_RATE;
     const ctx = this.getAudioCtx();
-    const buffer = ctx.createBuffer(1, pcm.length, OKI_SAMPLE_RATE);
+    const buffer = ctx.createBuffer(1, pcm.length, rate);
     buffer.getChannelData(0).set(pcm);
     const source = ctx.createBufferSource();
     source.buffer = buffer;
@@ -469,29 +618,49 @@ export class AudioPanel {
   }
 
   private async replaceWithFile(phraseId: number, file: File, dropZone: HTMLElement): Promise<void> {
-    const rom = this.emulator.getOkiRom();
+    const rom = this.getSampleRom();
     if (!rom) return;
+    const ngo = this.isNeoGeo;
     try {
       dropZone.textContent = "Encoding...";
       const ctx = this.getAudioCtx();
       const arrayBuf = await file.arrayBuffer();
       const audioBuf = await ctx.decodeAudioData(arrayBuf);
       const pcm = audioBuf.getChannelData(0);
-      const adpcm = encodeSample(pcm, audioBuf.sampleRate);
-      const result = replaceSampleInRom(rom, phraseId, adpcm);
-      if (result.success) {
-        this.emulator.updateOkiRom(rom);
-        this.emulator.getRomStore()?.onModified?.();
-        dropZone.textContent = "\u2713 OK";
-        dropZone.classList.add("replaced");
-        if (result.truncated) {
-          this.showToast(`Sample #${phraseId} replaced (truncated: ${result.keptMs}ms / ${result.originalMs}ms)`, true);
-        } else {
-          this.showToast(`Sample #${phraseId} replaced`, true);
+
+      if (ngo) {
+        const phrase = this.phrases.find(p => p.id === phraseId);
+        if (!phrase) { this.showToast(`Sample #${phraseId}: not found`, false); return; }
+        const adpcm = encodeAdpcmASample(pcm, audioBuf.sampleRate);
+        const result = replaceAdpcmASample(rom, phrase, adpcm);
+        if (result.success) {
+          this.emulator.updateVoiceRom?.(phrase.startByte, rom.subarray(phrase.startByte, phrase.endByte));
+          dropZone.textContent = "\u2713 OK";
+          dropZone.classList.add("replaced");
+          if (result.truncated) {
+            this.showToast(`Sample #${phraseId} replaced (truncated: ${result.keptMs}ms / ${result.originalMs}ms)`, true);
+          } else {
+            this.showToast(`Sample #${phraseId} replaced`, true);
+          }
+          setTimeout(() => this.refreshSampleTable(), 1000);
         }
-        setTimeout(() => this.refreshSampleTable(), 1000);
       } else {
-        this.showToast(`Sample #${phraseId}: invalid slot`, false);
+        const adpcm = encodeSample(pcm, audioBuf.sampleRate);
+        const result = replaceSampleInRom(rom, phraseId, adpcm);
+        if (result.success) {
+          this.emulator.updateOkiRom?.(rom);
+          this.emulator.getRomStore?.()?.onModified?.();
+          dropZone.textContent = "\u2713 OK";
+          dropZone.classList.add("replaced");
+          if (result.truncated) {
+            this.showToast(`Sample #${phraseId} replaced (truncated: ${result.keptMs}ms / ${result.originalMs}ms)`, true);
+          } else {
+            this.showToast(`Sample #${phraseId} replaced`, true);
+          }
+          setTimeout(() => this.refreshSampleTable(), 1000);
+        } else {
+          this.showToast(`Sample #${phraseId}: invalid slot`, false);
+        }
       }
     } catch (err) {
       this.showToast(`Sample #${phraseId}: error`, false);
@@ -500,14 +669,16 @@ export class AudioPanel {
   }
 
   private async exportSamples(): Promise<void> {
-    const rom = this.emulator.getOkiRom();
+    const rom = this.getSampleRom();
     if (!rom || this.phrases.length === 0) return;
+    const ngo = this.isNeoGeo;
+    const rate = ngo ? ADPCM_A_SAMPLE_RATE : OKI_SAMPLE_RATE;
     const gameName = this.emulator.getGameName();
     const zip = new JSZip();
     for (const phrase of this.phrases) {
-      const pcm = decodeSample(rom, phrase);
+      const pcm = ngo ? decodeAdpcmASample(rom, phrase) : decodeSample(rom, phrase);
       if (pcm.length === 0) continue;
-      zip.file(`${String(phrase.id).padStart(2, "0")}.wav`, pcmToWav(pcm, OKI_SAMPLE_RATE));
+      zip.file(`${String(phrase.id).padStart(2, "0")}.wav`, pcmToWav(pcm, rate));
     }
     const blob = await zip.generateAsync({ type: "blob" });
     const url = URL.createObjectURL(blob);
@@ -533,8 +704,9 @@ export class AudioPanel {
   }
 
   private async importFromZip(file: File): Promise<void> {
-    const rom = this.emulator.getOkiRom();
+    const rom = this.getSampleRom();
     if (!rom) return;
+    const ngo = this.isNeoGeo;
     const zip = await JSZip.loadAsync(await file.arrayBuffer());
     const ctx = this.getAudioCtx();
     let replaced = 0;
@@ -545,17 +717,29 @@ export class AudioPanel {
       try {
         const buf = await entry.async("arraybuffer");
         const audioBuf = await ctx.decodeAudioData(buf);
-        const adpcm = encodeSample(audioBuf.getChannelData(0), audioBuf.sampleRate);
-        if (replaceSampleInRom(rom, phraseId, adpcm)) replaced++;
+        if (ngo) {
+          const phrase = this.phrases.find(p => p.id === phraseId);
+          if (!phrase) continue;
+          const adpcm = encodeAdpcmASample(audioBuf.getChannelData(0), audioBuf.sampleRate);
+          if (replaceAdpcmASample(rom, phrase, adpcm).success) {
+            this.emulator.updateVoiceRom?.(phrase.startByte, rom.subarray(phrase.startByte, phrase.endByte));
+            replaced++;
+          }
+        } else {
+          const adpcm = encodeSample(audioBuf.getChannelData(0), audioBuf.sampleRate);
+          if (replaceSampleInRom(rom, phraseId, adpcm).success) replaced++;
+        }
       } catch { /* skip bad files */ }
     }
-    if (replaced > 0) { this.emulator.updateOkiRom(rom); this.emulator.getRomStore()?.onModified?.(); this.refreshSampleTable(); }
+    if (!ngo && replaced > 0) { this.emulator.updateOkiRom?.(rom); this.emulator.getRomStore?.()?.onModified?.(); }
+    if (replaced > 0) this.refreshSampleTable();
     this.showToast(replaced > 0 ? `Imported ${replaced} sample${replaced > 1 ? "s" : ""}` : "No samples imported", replaced > 0);
   }
 
   private async importFromFiles(files: File[]): Promise<void> {
-    const rom = this.emulator.getOkiRom();
+    const rom = this.getSampleRom();
     if (!rom) return;
+    const ngo = this.isNeoGeo;
     const ctx = this.getAudioCtx();
     let replaced = 0;
     for (const file of files) {
@@ -564,11 +748,22 @@ export class AudioPanel {
       try {
         const buf = await file.arrayBuffer();
         const audioBuf = await ctx.decodeAudioData(buf);
-        const adpcm = encodeSample(audioBuf.getChannelData(0), audioBuf.sampleRate);
-        if (replaceSampleInRom(rom, phraseId, adpcm)) replaced++;
+        if (ngo) {
+          const phrase = this.phrases.find(p => p.id === phraseId);
+          if (!phrase) continue;
+          const adpcm = encodeAdpcmASample(audioBuf.getChannelData(0), audioBuf.sampleRate);
+          if (replaceAdpcmASample(rom, phrase, adpcm).success) {
+            this.emulator.updateVoiceRom?.(phrase.startByte, rom.subarray(phrase.startByte, phrase.endByte));
+            replaced++;
+          }
+        } else {
+          const adpcm = encodeSample(audioBuf.getChannelData(0), audioBuf.sampleRate);
+          if (replaceSampleInRom(rom, phraseId, adpcm).success) replaced++;
+        }
       } catch { /* skip */ }
     }
-    if (replaced > 0) { this.emulator.updateOkiRom(rom); this.emulator.getRomStore()?.onModified?.(); this.refreshSampleTable(); }
+    if (!ngo && replaced > 0) { this.emulator.updateOkiRom?.(rom); this.emulator.getRomStore?.()?.onModified?.(); }
+    if (replaced > 0) this.refreshSampleTable();
     this.showToast(replaced > 0 ? `Imported ${replaced} sample${replaced > 1 ? "s" : ""}` : "No samples imported", replaced > 0);
   }
 
@@ -623,13 +818,13 @@ export class AudioPanel {
         const arrayBuf = await blob.arrayBuffer();
         const audioBuf = await ctx.decodeAudioData(arrayBuf);
         const pcm = audioBuf.getChannelData(0);
-        const rom = this.emulator.getOkiRom();
+        const rom = this.emulator.getOkiRom?.();
         if (!rom) return;
         const adpcm = encodeSample(pcm, audioBuf.sampleRate, true);
         const result = replaceSampleInRom(rom, this.micPhraseId, adpcm);
         if (result.success) {
-          this.emulator.updateOkiRom(rom);
-          this.emulator.getRomStore()?.onModified?.();
+          this.emulator.updateOkiRom?.(rom);
+          this.emulator.getRomStore?.()?.onModified?.();
           if (result.truncated) {
             this.showToast(`Sample #${this.micPhraseId} recorded (truncated: ${result.keptMs}ms / ${result.originalMs}ms)`, true);
           } else {
@@ -665,7 +860,7 @@ export class AudioPanel {
 
   private selectFmChannel(ch: number): void {
     this.selectedFmChannel = ch;
-    for (let i = 0; i < FM_CHANNELS; i++) {
+    for (let i = 0; i < this.totalFmSlots; i++) {
       this.fmStripEls[i]?.classList.toggle("selected", i === ch);
     }
   }
@@ -677,7 +872,7 @@ export class AudioPanel {
     if (this.soloed.size > 0) {
       for (const ch of this.soloed) mask |= (1 << ch);
     } else {
-      mask = 0xFFF;
+      mask = 0xFFFF;
       for (const ch of this.muted) mask &= ~(1 << ch);
     }
     viz.setChannelMask(mask);
@@ -688,63 +883,59 @@ export class AudioPanel {
   private drawKeyboard(activeNotes?: Map<number, string>): void {
     const ctx = this.kbCtx!;
     const w = KB_WIDTH;
-    const h = FM_TOTAL_H;
+    const h = this.fmTotalH;
+    const keyH = h / PR_KEYS;
     const blackW = Math.round(w * 0.55);
 
     // Fill entire keyboard white
     ctx.fillStyle = "#ccc";
     ctx.fillRect(0, 0, w, h);
 
-    // Draw white key separators (between E/F and B/C — the naturals without sharps between)
+    // Draw white key separators
     for (let i = 0; i < PR_KEYS; i++) {
       const semi = i % 12;
       if (IS_BLACK[semi]) continue;
-      const y = (PR_KEYS - 1 - i) * KEY_H;
-      // Bottom border of each white key
+      const y = (PR_KEYS - 1 - i) * keyH;
       ctx.fillStyle = "#999";
-      ctx.fillRect(0, y + KEY_H - 1, w, 1);
+      ctx.fillRect(0, y + keyH - 1, w, 1);
     }
 
-    // Draw black keys on top (shorter, only covers left portion)
+    // Draw black keys on top
     for (let i = 0; i < PR_KEYS; i++) {
       const semi = i % 12;
       if (!IS_BLACK[semi]) continue;
-      const y = (PR_KEYS - 1 - i) * KEY_H;
+      const y = (PR_KEYS - 1 - i) * keyH;
       ctx.fillStyle = "#1a1a1a";
-      ctx.fillRect(0, y, blackW, KEY_H);
-      // Highlight edge
+      ctx.fillRect(0, y, blackW, keyH);
       ctx.fillStyle = "#333";
-      ctx.fillRect(blackW - 1, y, 1, KEY_H);
+      ctx.fillRect(blackW - 1, y, 1, keyH);
     }
 
     // C labels
     for (let i = 0; i < PR_KEYS; i += 12) {
-      const y = (PR_KEYS - 1 - i) * KEY_H;
+      const y = (PR_KEYS - 1 - i) * keyH;
       const octave = PR_FIRST_OCTAVE + Math.floor(i / 12);
       ctx.fillStyle = "#666";
-      ctx.font = `${Math.min(KEY_H - 1, 9)}px Courier New`;
-      ctx.fillText(`C${octave}`, blackW + 2, y + KEY_H - 1);
+      ctx.font = `${Math.min(keyH - 1, 9)}px Courier New`;
+      ctx.fillText(`C${octave}`, blackW + 2, y + keyH - 1);
     }
 
-    // Highlight active notes (pressed keys)
+    // Highlight active notes
     if (activeNotes) {
       for (const [absSemi, color] of activeNotes) {
         const offset = absSemi - PR_FIRST_OCTAVE * 12;
         if (offset < 0 || offset >= PR_KEYS) continue;
-        const y = (PR_KEYS - 1 - offset) * KEY_H;
+        const y = (PR_KEYS - 1 - offset) * keyH;
         const semi = offset % 12;
         const isBlack = IS_BLACK[semi];
-
-        // Colored pressed key
         ctx.fillStyle = color;
         if (isBlack) {
-          ctx.fillRect(0, y, blackW, KEY_H);
+          ctx.fillRect(0, y, blackW, keyH);
         } else {
-          ctx.fillRect(0, y, w, KEY_H - 1);
+          ctx.fillRect(0, y, w, keyH - 1);
         }
-        // Glow
         ctx.fillStyle = color + "33";
-        ctx.fillRect(0, Math.max(0, y - 1), w, KEY_H + 2);
+        ctx.fillRect(0, Math.max(0, y - 1), w, keyH + 2);
       }
     }
   }
@@ -766,6 +957,17 @@ export class AudioPanel {
   private updateAll(): void {
     const viz = this.emulator.getVizReader();
     if (!viz) return;
+
+    // Auto-detect layout change (worker may set layout after panel init)
+    const layout = viz.getLayout();
+    const totalFm = layout.fmCount + layout.ssgCount;
+    if (totalFm !== this.totalFmSlots || layout.pcmCount !== this.pcmCount) {
+      this.fmCount = layout.fmCount;
+      this.pcmCount = layout.pcmCount;
+      this.ssgCount = layout.ssgCount;
+      this.ssgOffset = layout.ssgOffset;
+      this.buildDOM();
+    }
 
     const curFrame = this.emulator.getFrameCount();
     const advancing = curFrame > this.lastFrameCount;
@@ -790,7 +992,7 @@ export class AudioPanel {
       }
 
       // FM timelines — scroll + clear leftmost pixel
-      for (let ch = 0; ch < FM_CHANNELS; ch++) {
+      for (let ch = 0; ch < this.totalFmSlots; ch++) {
         const tCtx = this.fmTimeCtxs[ch];
         const tCvs = this.fmTimeCanvases[ch];
         if (!tCtx || !tCvs) continue;
@@ -800,7 +1002,7 @@ export class AudioPanel {
       }
 
       // OKI waveforms — scroll + clear leftmost pixel
-      for (let v = 0; v < OKI_VOICES; v++) {
+      for (let v = 0; v < this.pcmCount; v++) {
         const wCvs = this.waveCanvases[v];
         const wCtx = this.waveCtxs[v];
         if (!wCtx || !wCvs) continue;
@@ -814,15 +1016,24 @@ export class AudioPanel {
 
     // FPS + frame counter (DOM, no canvas text)
     if (this.rulerInfoEl) {
-      this.rulerInfoEl.textContent = `F${curFrame}  ${this.emulator.getFpsDisplay()}fps`;
+      const fps = this.emulator.getFpsDisplay?.() ?? '';
+      this.rulerInfoEl.textContent = fps ? `F${curFrame}  ${fps}fps` : `F${curFrame}`;
     }
 
     // FM channels — update strips (VU, note name) + draw current pixel
-    for (let ch = 0; ch < FM_CHANNELS; ch++) {
+    for (let ch = 0; ch < this.totalFmSlots; ch++) {
       const fm = viz.getFm(ch);
       const color = CH_COLORS[ch]!;
 
-      this.noteEls[ch]!.textContent = fm.kon ? kcToNoteName(fm.kc) : "--";
+      // Sticky note: keep showing last note for a few frames after key-off
+      if (fm.kon) {
+        const name = kcToNoteName(fm.kc);
+        this.stickyNote[ch] = name;
+        this.stickyTtl[ch] = AudioPanel.STICKY_FRAMES;
+      } else if (this.stickyTtl[ch]! > 0) {
+        this.stickyTtl[ch] = this.stickyTtl[ch]! - 1;
+      }
+      this.noteEls[ch]!.textContent = this.stickyTtl[ch]! > 0 ? this.stickyNote[ch]! : '--';
 
       const vol = fm.kon ? Math.max(0, (127 - fm.tl) / 127 * 100) : 0;
       const vuCtx = this.vuCtxs[ch];
@@ -837,23 +1048,34 @@ export class AudioPanel {
       }
     }
 
-    // Keyboard + piano roll
+    // Keyboard — highlight active note (with sticky)
     const selCh = this.selectedFmChannel;
     const selFm = viz.getFm(selCh);
     const selColor = CH_COLORS[selCh]!;
     const activeNotes = new Map<number, string>();
     if (selFm.kon) {
       activeNotes.set(kcToAbsSemitone(selFm.kc), selColor);
+    } else if (this.stickyTtl[selCh]! > 0) {
+      // Show last note on keyboard during sticky period
+      const kc = this.stickyNote[selCh]!;
+      const lastKcVal = viz.getFm(selCh).kc; // read last KC from SAB
+      activeNotes.set(kcToAbsSemitone(lastKcVal), selColor + '88');
     }
     this.drawKeyboard(activeNotes);
 
-    // OKI voices — update strips + draw current pixel
-    for (let v = 0; v < OKI_VOICES; v++) {
-      const oki = viz.getOki(v);
-      const idx = FM_CHANNELS + v;
+    // PCM voices — update strips + draw current pixel
+    for (let v = 0; v < this.pcmCount; v++) {
+      const oki = viz.getPcm(v);
+      const idx = this.totalFmSlots + v;
       const color = CH_COLORS[idx]!;
 
-      this.noteEls[idx]!.textContent = oki.playing ? `#${oki.phraseId}` : "--";
+      if (oki.playing) {
+        this.stickyNote[idx] = `#${oki.phraseId}`;
+        this.stickyTtl[idx] = AudioPanel.STICKY_FRAMES;
+      } else if (this.stickyTtl[idx]! > 0) {
+        this.stickyTtl[idx] = this.stickyTtl[idx]! - 1;
+      }
+      this.noteEls[idx]!.textContent = this.stickyTtl[idx]! > 0 ? this.stickyNote[idx]! : '--';
 
       const vol = oki.playing ? (oki.volume / 255 * 100) : 0;
       const vuCtx = this.vuCtxs[idx];

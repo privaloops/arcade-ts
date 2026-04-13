@@ -6,9 +6,10 @@
  * and performs Neo-Geo C-ROM byte interleaving.
  */
 
-import JSZip from 'jszip';
 import { NEOGEO_GAME_DEFS } from './neogeo-game-defs';
 import type { NeoGeoGameDef, NeoGeoRomEntry } from './neogeo-game-defs';
+import { extractZip, buildFileMap } from './rom-utils';
+import type { RomFileEntry } from './rom-utils';
 
 export type { NeoGeoGameDef, NeoGeoRomEntry } from './neogeo-game-defs';
 
@@ -19,6 +20,7 @@ export interface NeoGeoRomSet {
   spritesRom: Uint8Array;     // C-ROM assembled (interleaved pairs)
   audioRom: Uint8Array;       // M-ROM (Z80 code)
   voiceRom: Uint8Array;       // V-ROM (ADPCM samples, concatenated)
+  adpcmASize: number;         // Size of ADPCM-A pool (ADPCM-B starts after)
   fixedRom: Uint8Array;       // S-ROM (fix layer tiles)
   biosRom: Uint8Array;        // BIOS 68K (sp-s2.sp1, 128KB)
   biosSRom: Uint8Array;       // BIOS S-ROM (sfix.sfix, 128KB)
@@ -26,11 +28,6 @@ export interface NeoGeoRomSet {
   loRom: Uint8Array;          // L0 ROM (shrink tables, 64KB)
   gameDef: NeoGeoGameDef;
   originalFiles: Map<string, Uint8Array>;
-}
-
-interface RomFileEntry {
-  name: string;
-  data: Uint8Array;
 }
 
 // ---------------------------------------------------------------------------
@@ -77,37 +74,6 @@ function identifyNeoGeoGame(fileNames: string[]): NeoGeoGameDef | null {
   return null;
 }
 
-/** Extract all files from a ZIP as RomFileEntry[]. */
-async function extractZip(file: File | ArrayBuffer): Promise<RomFileEntry[]> {
-  const arrayBuffer = file instanceof ArrayBuffer ? file : await file.arrayBuffer();
-  const zip = await JSZip.loadAsync(arrayBuffer);
-  const entries: RomFileEntry[] = [];
-  const promises: Promise<void>[] = [];
-
-  zip.forEach((relativePath, zipEntry) => {
-    if (zipEntry.dir) return;
-    const name = relativePath.includes('/')
-      ? relativePath.substring(relativePath.lastIndexOf('/') + 1)
-      : relativePath;
-    promises.push(
-      zipEntry.async('uint8array').then(data => {
-        entries.push({ name, data });
-      })
-    );
-  });
-
-  await Promise.all(promises);
-  return entries;
-}
-
-/** Build a filename -> data map from the extracted entries. */
-function buildFileMap(entries: RomFileEntry[]): Map<string, Uint8Array> {
-  const map = new Map<string, Uint8Array>();
-  for (const entry of entries) {
-    map.set(entry.name.toLowerCase(), entry.data);
-  }
-  return map;
-}
 
 // ---------------------------------------------------------------------------
 // ROM assembly
@@ -121,11 +87,16 @@ export function assembleProgramRom(
   entries: NeoGeoRomEntry[],
   fileMap: Map<string, Uint8Array>,
 ): Uint8Array {
-  // Calculate total size from entries
+  // Calculate total size from entries — account for ROM_CONTINUE (file > declared size)
   let totalSize = 0;
   for (const entry of entries) {
-    const end = entry.offset + entry.size;
-    if (end > totalSize) totalSize = end;
+    const data = fileMap.get(entry.name.toLowerCase());
+    const fileSize = data?.length ?? entry.size;
+    // If file is larger than declared size, the continuation fills offset 0
+    const effectiveEnd = entry.offset + entry.size;
+    if (effectiveEnd > totalSize) totalSize = effectiveEnd;
+    // ROM_CONTINUE: extra data from the file goes to offset 0
+    if (fileSize > entry.size && fileSize > totalSize) totalSize = fileSize;
   }
   const result = new Uint8Array(totalSize);
 
@@ -134,11 +105,20 @@ export function assembleProgramRom(
     if (data === undefined) continue;
 
     if (entry.loadFlag === 'load16_word_swap') {
-      // Swap each pair of bytes (big-endian word swap)
+      // Load declared portion at entry.offset
       const len = Math.min(data.length, entry.size);
       for (let i = 0; i < len; i += 2) {
         result[entry.offset + i] = data[i + 1] ?? 0;
         result[entry.offset + i + 1] = data[i] ?? 0;
+      }
+      // ROM_CONTINUE: if file has more data than declared, load remainder at offset 0
+      // MAME pattern: ROM_LOAD16_WORD_SWAP at 0x100000 + ROM_CONTINUE at 0x000000
+      if (data.length > entry.size) {
+        const remaining = Math.min(data.length - entry.size, entry.offset);
+        for (let i = 0; i < remaining; i += 2) {
+          result[i] = data[entry.size + i + 1] ?? 0;
+          result[i + 1] = data[entry.size + i] ?? 0;
+        }
       }
     } else {
       // Linear copy
@@ -195,13 +175,14 @@ export function assembleSpritesRom(
 
 /**
  * Assemble V-ROM (voice/ADPCM samples).
- * Simple linear concatenation based on offsets.
+ * Returns the combined buffer + ADPCM-A pool size for the WASM split.
  * Voice data can come from ymsnd:adpcma and ymsnd:adpcmb — different pools.
+ * The YM2610 has separate ROM interfaces for ADPCM-A and ADPCM-B.
  */
 export function assembleVoiceRom(
   entries: NeoGeoRomEntry[],
   fileMap: Map<string, Uint8Array>,
-): Uint8Array {
+): { data: Uint8Array; adpcmASize: number } {
   // Calculate total size
   let totalSize = 0;
   for (const entry of entries) {
@@ -209,9 +190,8 @@ export function assembleVoiceRom(
     if (end > totalSize) totalSize = end;
   }
 
-  // ADPCM-A and ADPCM-B have separate address spaces in the XML.
-  // We detect split pools by counting entries starting at offset 0.
-  // If there are two, we concatenate ADPCM-B after ADPCM-A.
+  // ADPCM-A and ADPCM-B have separate address spaces on the YM2610.
+  // Detect split pools by counting entries starting at offset 0.
   const zeroOffsetIndices: number[] = [];
   for (let i = 0; i < entries.length; i++) {
     if (entries[i]!.offset === 0) zeroOffsetIndices.push(i);
@@ -247,10 +227,11 @@ export function assembleVoiceRom(
       result.set(data.subarray(0, Math.min(data.length, entry.size)), adpcmASize + entry.offset);
     }
 
-    return result;
+    console.log(`[Neo-Geo V-ROM] Split pools: ADPCM-A=${adpcmASize/1024}KB, ADPCM-B=${adpcmBSize/1024}KB`);
+    return { data: result, adpcmASize };
   }
 
-  // Simple case: single address space
+  // Single pool: both ADPCM-A and ADPCM-B share the same ROM
   const result = new Uint8Array(totalSize);
   for (const entry of entries) {
     const data = fileMap.get(entry.name.toLowerCase());
@@ -259,7 +240,7 @@ export function assembleVoiceRom(
     result.set(data.subarray(0, len), entry.offset);
   }
 
-  return result;
+  return { data: result, adpcmASize: totalSize };
 }
 
 /** Assemble linear ROM (M-ROM, S-ROM). */
@@ -487,7 +468,9 @@ export async function loadNeoGeoRomFromZip(
   const programRom = assembleProgramRom(gameDef.program, fileMap);
   const spritesRom = assembleSpritesRom(gameDef.sprites, fileMap);
   const audioRom = assembleLinearRom(gameDef.audio, fileMap);
-  const voiceRom = assembleVoiceRom(gameDef.voice, fileMap);
+  const voiceResult = assembleVoiceRom(gameDef.voice, fileMap);
+  const voiceRom = voiceResult.data;
+  const adpcmASize = voiceResult.adpcmASize;
   const fixedRom = gameDef.fixed
     ? assembleLinearRom(gameDef.fixed, fileMap)
     : new Uint8Array(0);
@@ -514,6 +497,7 @@ export async function loadNeoGeoRomFromZip(
     spritesRom,
     audioRom,
     voiceRom,
+    adpcmASize,
     fixedRom,
     biosRom,
     biosSRom,

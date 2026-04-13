@@ -5,8 +5,9 @@
 
 import type { Emulator } from "../emulator";
 import { CPS1_PARENT_GAMES, ROT270_GAMES } from "../game-catalog";
+import { NEOGEO_GAME_DEFS } from "../memory/neogeo-game-defs";
 import { DebugPanel } from "../debug/debug-panel";
-import type { AudioPanel } from "../audio/audio-panel";
+import { AudioPanel } from "../audio/audio-panel";
 import { loadDipFromStorage } from "./dip-switch-ui";
 import { isNeoGeoRom } from "../memory/neogeo-rom-loader";
 import type { NeoGeoEmulator } from "../neogeo-emulator";
@@ -35,6 +36,7 @@ export interface DropZoneDeps {
   getDebugPanel(): DebugPanel | null;
   setDebugPanel(p: DebugPanel | null): void;
   getAudioPanel(): AudioPanel | null;
+  setAudioPanel(p: AudioPanel | null): void;
   setLastRomFile(f: File | null): void;
   getLastRomFile(): File | null;
   setStatus(msg: string): void;
@@ -105,6 +107,14 @@ async function handleRomFile(file: File): Promise<void> {
       ngoEmu.start();
       _deps.onRomLoaded(ngoEmu.getGameName());
       setStatus(`Running: ${file.name} (Neo-Geo)`);
+
+      // Reconnect audio panel to the Neo-Geo emulator
+      const oldPanel = getAudioPanel();
+      const wasOpen = oldPanel?.isOpen() ?? false;
+      oldPanel?.destroy();
+      const ngoPanel = new AudioPanel(ngoEmu);
+      _deps.setAudioPanel(ngoPanel);
+      if (wasOpen) ngoPanel.toggle();
     } else {
       // CPS1 path (original)
       await emulator.initAudio();
@@ -154,8 +164,14 @@ async function handleRomFile(file: File): Promise<void> {
         setupDomRenderer();
       }
 
-      // Update audio panel
-      getAudioPanel()?.onGameChange();
+      // Reconnect audio panel to CPS1 emulator (may have been on Neo-Geo)
+      const curPanel = getAudioPanel();
+      const panelWasOpen = curPanel?.isOpen() ?? false;
+      curPanel?.destroy();
+      const cpsPanel = new AudioPanel(emulator);
+      _deps.setAudioPanel(cpsPanel);
+      if (panelWasOpen) cpsPanel.toggle();
+      cpsPanel.onGameChange();
 
       emulator.start();
       _deps.onRomLoaded(emulator.getGameName());
@@ -212,20 +228,39 @@ export function initDropZone(deps: DropZoneDeps): void {
     }
   });
 
-  // Build game selector from available ROMs in public/roms/
-  const gameDescriptions = new Map(CPS1_PARENT_GAMES.map(g => [g.name, g.description]));
+  // Build game selector with CPS-1 and Neo-Geo optgroups
+  const cps1Descriptions = new Map(CPS1_PARENT_GAMES.map(g => [g.name, g.description]));
+  const neoGeoDescriptions = new Map(NEOGEO_GAME_DEFS.map(g => [g.name, g.description]));
 
   fetch("/api/roms").then(r => {
     if (!r.ok) throw new Error("not available");
     return r.json();
-  }).then((roms: string[]) => {
-    if (roms.length === 0) return;
+  }).then((data: { cps1: string[]; neogeo: string[] }) => {
+    if (data.cps1.length === 0 && data.neogeo.length === 0) return;
     romControls.style.display = "flex";
-    for (const name of roms) {
-      const opt = document.createElement("option");
-      opt.value = name;
-      opt.textContent = gameDescriptions.get(name) ?? name;
-      gameSelect.appendChild(opt);
+
+    if (data.cps1.length > 0) {
+      const group = document.createElement("optgroup");
+      group.label = "CPS-1";
+      for (const name of data.cps1) {
+        const opt = document.createElement("option");
+        opt.value = `cps-1/${name}`;
+        opt.textContent = cps1Descriptions.get(name) ?? name;
+        group.appendChild(opt);
+      }
+      gameSelect.appendChild(group);
+    }
+
+    if (data.neogeo.length > 0) {
+      const group = document.createElement("optgroup");
+      group.label = "Neo-Geo";
+      for (const name of data.neogeo) {
+        const opt = document.createElement("option");
+        opt.value = `neogeo/${name}`;
+        opt.textContent = neoGeoDescriptions.get(name) ?? name;
+        group.appendChild(opt);
+      }
+      gameSelect.appendChild(group);
     }
   }).catch(() => {
     // No local ROMs available — stays hidden, drag & drop only
@@ -236,18 +271,22 @@ export function initDropZone(deps: DropZoneDeps): void {
   });
 
   loadBtn.addEventListener("click", async () => {
-    const gameName = gameSelect.value;
-    if (!gameName) return;
+    const selectedValue = gameSelect.value;
+    if (!selectedValue) return;
 
     loadBtn.disabled = true;
     void emulator.initAudio();
 
+    // Value is "neogeo/gamename" for Neo-Geo, "gamename" for CPS-1
+    const romPath = selectedValue.includes("/") ? selectedValue : selectedValue;
+    const displayName = selectedValue.includes("/") ? selectedValue.split("/")[1]! : selectedValue;
+
     try {
-      setStatus(`Loading ${gameName}...`);
-      const resp = await fetch(`/roms/${gameName}.zip`);
-      if (!resp.ok) throw new Error(`ROM not found: ${gameName}.zip`);
+      setStatus(`Loading ${displayName}...`);
+      const resp = await fetch(`/roms/${romPath}.zip`);
+      if (!resp.ok) throw new Error(`ROM not found: ${romPath}.zip`);
       const blob = await resp.blob();
-      const file = new File([blob], `${gameName}.zip`, { type: "application/zip" });
+      const file = new File([blob], `${displayName}.zip`, { type: "application/zip" });
       await handleRomFile(file);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

@@ -12,8 +12,8 @@ import { initOPMWasm, NukedOPMWasm } from './nuked-opm-wasm';
 import { OKI6295, type OKI6295State } from './oki6295';
 import { LinearResampler } from './resampler';
 import { YM2151_SAMPLE_RATE, OKI6295_SAMPLE_RATE, Z80_CLOCK, PIXEL_CLOCK, CPS_HTOTAL, CPS_VTOTAL, FRAME_RATE } from '../constants';
-import { RING_BUFFER_SAMPLES, SAB_DATA_OFFSET } from './audio-output';
 import { VizWriter } from './audio-viz';
+import { RingBufferWriter, clip } from './audio-shared';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -21,48 +21,6 @@ const FRAME_MS = 1000 / FRAME_RATE;
 const Z80_CYCLES_PER_FRAME = Math.round(Z80_CLOCK / FRAME_RATE);
 const YM_SAMPLES_PER_FRAME = Math.ceil(YM2151_SAMPLE_RATE / FRAME_RATE);
 const OKI_SAMPLES_PER_FRAME = Math.ceil(OKI6295_SAMPLE_RATE / FRAME_RATE);
-
-// ── Ring buffer writer ───────────────────────────────────────────────────
-
-class RingBufferWriter {
-  private readonly ctrl: Int32Array;
-  private readonly data: Float32Array;
-
-  constructor(sab: SharedArrayBuffer) {
-    this.ctrl = new Int32Array(sab, 0, 2);
-    this.data = new Float32Array(sab, SAB_DATA_OFFSET, RING_BUFFER_SAMPLES * 2);
-  }
-
-  get freeSlots(): number {
-    const writePtr = Atomics.load(this.ctrl, 0);
-    const readPtr = Atomics.load(this.ctrl, 1);
-    return (RING_BUFFER_SAMPLES - 1 - ((writePtr - readPtr + RING_BUFFER_SAMPLES) % RING_BUFFER_SAMPLES));
-  }
-
-  write(left: Float32Array, right: Float32Array, numSamples: number): number {
-    const free = this.freeSlots;
-    const toWrite = Math.min(numSamples, free);
-
-    let wp = Atomics.load(this.ctrl, 0);
-    for (let i = 0; i < toWrite; i++) {
-      const base = (wp % RING_BUFFER_SAMPLES) * 2;
-      this.data[base] = left[i] ?? 0;
-      this.data[base + 1] = right[i] ?? 0;
-      wp = (wp + 1) % RING_BUFFER_SAMPLES;
-    }
-
-    Atomics.store(this.ctrl, 0, wp);
-    return toWrite;
-  }
-}
-
-// ── Soft limiter ─────────────────────────────────────────────────────────
-
-function clip(s: number): number {
-  if (s > 0.95) return 0.95 + 0.05 * Math.tanh((s - 0.95) * 10);
-  if (s < -0.95) return -0.95 - 0.05 * Math.tanh((-s - 0.95) * 10);
-  return s;
-}
 
 // ── Worker state ─────────────────────────────────────────────────────────
 
@@ -96,7 +54,7 @@ let vizWriter: VizWriter | null = null;
 
 // Mute/Solo state
 const fmMuted = new Uint8Array(8);       // 1 = channel is muted
-let lastChannelMask = 0xFFF;             // all 12 channels audible
+let lastChannelMask = 0xFFFF;            // all channels audible
 let lastYmAddr = 0;                      // last address written to YM2151
 
 // FM Editor override: when active on a channel, Z80 timbre writes are replaced
@@ -135,15 +93,14 @@ function applyChannelMask(mask: number): void {
 
     // Immediately silence channels that just became muted
     if (nowMuted && !wasMuted && ym2151) {
-      // Key-off: write channel with all operator bits cleared
       ym2151.writeAddress(0x08);
-      ym2151.writeData(ch); // bits 6-3 = 0 → all operators off
-      // Max attenuation on all 4 operator TL registers
+      ym2151.writeData(ch); // key-off (all operators off)
       for (let op = 0; op < 4; op++) {
         ym2151.writeAddress(0x60 + op * 8 + ch);
-        ym2151.writeData(0x7F);
+        ym2151.writeData(0x7F); // max attenuation
       }
     }
+    // Unmute: Z80 will naturally restore TL on next note-on
   }
 
   if (oki6295) {
@@ -278,13 +235,13 @@ function runAudioFrame(): void {
 
   ringBuffer.write(mixedL, mixedR, nOut);
 
-  // Update OKI voice state in vizSAB
+  // Update OKI voice state in vizSAB (mapped to PCM slots 0-3)
   if (vizWriter && oki6295) {
     const okiState = oki6295.getState();
     for (let v = 0; v < 4; v++) {
       const ch = okiState.channels[v];
       if (ch) {
-        vizWriter.updateOki(v, ch.playing ? 1 : 0, 0, Math.round(ch.volume * 255), ch.signal);
+        vizWriter.updatePcm(v, ch.playing ? 1 : 0, 0, Math.round(ch.volume * 255), ch.signal);
       }
     }
   }
@@ -302,7 +259,10 @@ self.onmessage = async (e: MessageEvent) => {
       const sab = msg.sab as SharedArrayBuffer;
       const sampleRate = msg.sampleRate as number;
       const vizSab = msg.vizSab as SharedArrayBuffer | undefined;
-      if (vizSab) vizWriter = new VizWriter(vizSab);
+      if (vizSab) {
+        vizWriter = new VizWriter(vizSab);
+        vizWriter.setLayout(8, 4); // CPS1: 8 FM + 4 OKI
+      }
 
       // Init WASM OPM
       await initOPMWasm();

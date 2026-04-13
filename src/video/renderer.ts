@@ -18,10 +18,14 @@ export class Renderer implements RendererInterface {
   private readonly canvas: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D;
   private imageData: ImageData;
+  private nativeWidth: number;
+  private nativeHeight: number;
 
   constructor(canvas: HTMLCanvasElement, width = SCREEN_WIDTH, height = SCREEN_HEIGHT) {
     canvas.width = width;
     canvas.height = height;
+    this.nativeWidth = width;
+    this.nativeHeight = height;
 
     const ctx = canvas.getContext("2d", { alpha: false });
     if (!ctx) {
@@ -30,7 +34,7 @@ export class Renderer implements RendererInterface {
 
     this.canvas = canvas;
     this.ctx = ctx;
-    this.imageData = new ImageData(SCREEN_WIDTH, SCREEN_HEIGHT);
+    this.imageData = new ImageData(width, height);
 
     // Apply CSS scaling so the canvas fills its container while keeping ratio.
     this.resize();
@@ -44,9 +48,10 @@ export class Renderer implements RendererInterface {
    * uploads the pixel buffer in a single DMA-like operation.
    */
   render(framebuffer: Uint8Array): void {
-    if (framebuffer.length !== FRAMEBUFFER_SIZE) {
+    const expected = this.nativeWidth * this.nativeHeight * 4;
+    if (framebuffer.length !== expected) {
       throw new Error(
-        `Renderer.render: expected ${FRAMEBUFFER_SIZE} bytes, got ${framebuffer.length}`
+        `Renderer.render: expected ${expected} bytes, got ${framebuffer.length}`
       );
     }
 
@@ -74,6 +79,8 @@ export class Renderer implements RendererInterface {
     if (newWidth !== undefined && newHeight !== undefined) {
       this.canvas.width = newWidth;
       this.canvas.height = newHeight;
+      this.nativeWidth = newWidth;
+      this.nativeHeight = newHeight;
       this.imageData = this.ctx.createImageData(newWidth, newHeight);
     }
     const parent = this.canvas.parentElement;
@@ -89,12 +96,12 @@ export class Renderer implements RendererInterface {
       availableHeight = window.innerHeight;
     }
 
-    const scaleX = availableWidth / SCREEN_WIDTH;
-    const scaleY = availableHeight / SCREEN_HEIGHT;
+    const scaleX = availableWidth / this.nativeWidth;
+    const scaleY = availableHeight / this.nativeHeight;
     const scale = Math.min(scaleX, scaleY);
 
-    const displayWidth = Math.floor(SCREEN_WIDTH * scale);
-    const displayHeight = Math.floor(SCREEN_HEIGHT * scale);
+    const displayWidth = Math.floor(this.nativeWidth * scale);
+    const displayHeight = Math.floor(this.nativeHeight * scale);
 
     this.canvas.style.width = `${displayWidth}px`;
     this.canvas.style.height = `${displayHeight}px`;

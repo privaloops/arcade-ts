@@ -127,8 +127,9 @@ describe('Neo-Geo ROM Loader', () => {
       fileMap.set('v2.v2', new Uint8Array([5, 6, 7, 8]));
 
       const result = assembleVoiceRom(entries, fileMap);
-      expect(result.length).toBe(8);
-      expect(Array.from(result)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+      expect(result.data.length).toBe(8);
+      expect(Array.from(result.data)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+      expect(result.adpcmASize).toBe(8);
     });
 
     it('handles ADPCM-A + ADPCM-B (offset reset)', () => {
@@ -145,12 +146,13 @@ describe('Neo-Geo ROM Loader', () => {
 
       const result = assembleVoiceRom(entries, fileMap);
       // ADPCM-A (4 bytes) then ADPCM-B (8 bytes) = 12 bytes total
-      expect(result.length).toBe(12);
-      expect(result[0]).toBe(0xA1); // ADPCM-A start
-      expect(result[3]).toBe(0xA4); // ADPCM-A end
-      expect(result[4]).toBe(0xB1); // ADPCM-B start
-      expect(result[7]).toBe(0xB4);
-      expect(result[8]).toBe(0xB5);
+      expect(result.data.length).toBe(12);
+      expect(result.adpcmASize).toBe(4);
+      expect(result.data[0]).toBe(0xA1); // ADPCM-A start
+      expect(result.data[3]).toBe(0xA4); // ADPCM-A end
+      expect(result.data[4]).toBe(0xB1); // ADPCM-B start
+      expect(result.data[7]).toBe(0xB4);
+      expect(result.data[8]).toBe(0xB5);
     });
   });
 

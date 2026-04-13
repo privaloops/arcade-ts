@@ -22,8 +22,14 @@ import { NeoGeoVideo } from './video/neogeo-video';
 import { WebGLRenderer } from './video/renderer-webgl';
 import { Renderer } from './video/renderer';
 import { AudioOutput } from './audio/audio-output';
+import {
+  getProtectionType, Kof98Protection, kof98Decrypt68k,
+  MslugxProtection, SmaProtection, smaDecrypt68k,
+} from './memory/neogeo-protection';
+import { CMC42_KEYS, CMC50_KEYS, cmcGfxDecrypt, cmcSfixDecrypt } from './memory/neogeo-cmc';
 import { initYM2610Wasm, YM2610Wasm } from './audio/ym2610-wasm';
 import { InputManager } from './input/input';
+import { VizReader, VIZ_SAB_SIZE } from './audio/audio-viz';
 import type { RendererInterface } from './types';
 import { loadNeoGeoRomFromZip } from './memory/neogeo-rom-loader';
 import type { NeoGeoRomSet } from './memory/neogeo-rom-loader';
@@ -31,6 +37,7 @@ import {
   NGO_FRAMEBUFFER_SIZE,
   NGO_M68K_CYCLES_PER_SCANLINE,
   NGO_Z80_CLOCK,
+  NGO_YM2610_CLOCK,
   NGO_VTOTAL,
   NGO_VBLANK_LINE,
   NGO_FRAME_RATE,
@@ -41,6 +48,11 @@ import {
 // ── Timing ────────────────────────────────────────────────────────────────
 
 const FRAME_MS = 1000 / NGO_FRAME_RATE;
+const YM_CLOCK_RATIO = NGO_YM2610_CLOCK / NGO_Z80_CLOCK; // 8 MHz / 4 MHz = 2
+// Z80 cycles to run when processing a sound command handshake
+const Z80_HANDSHAKE_BURST = 10_000;
+// Z80 cycles to pre-run during ROM load (sm1.sm1 init sequence)
+const Z80_PRERUN_CYCLES = 500_000;
 
 // ── Emulator ──────────────────────────────────────────────────────────────
 
@@ -60,6 +72,10 @@ export class NeoGeoEmulator {
   private audioWorkerReady = false;
   private pendingSoundLatches: number[] = [];
 
+  // Audio visualization
+  private vizSab: SharedArrayBuffer | null = null;
+  private vizReader: VizReader | null = null;
+
   // Framebuffer
   private readonly framebuffer: Uint8Array;
 
@@ -74,8 +90,12 @@ export class NeoGeoEmulator {
   private frameCount = 0;
   private firstFrame = true;
   private m68kErrorCount = 0;
+  private voiceRom: Uint8Array | null = null;
+  private audioRom: Uint8Array | null = null;
+  private adpcmASize = 0;
+  private biosZRom: Uint8Array | null = null;
+  private scannedSamples: { startByte: number; endByte: number; type: 'A' | 'B' }[] = [];
   private mainYm2610: YM2610Wasm | null = null;
-  private soundCmdLogCount = 0;
 
   // Callbacks
   private _vblankCallback: (() => void) | null = null;
@@ -99,30 +119,27 @@ export class NeoGeoEmulator {
       this.z80Bus.pushSoundLatch(value);
 
       // Run Z80 to process the command via NMI
-      let z80Run = 10000;
+      let z80Run = Z80_HANDSHAKE_BURST;
       while (z80Run > 0) {
         if (this.z80Bus.shouldFireNmi()) this.z80.nmi();
         z80Run -= this.z80.step();
       }
 
-      // The Z80 handler should have written a reply to port 0x0C,
-      // but it may have been overwritten by the idle heartbeat.
-      // Force the expected reply based on the command sent.
+      // Force known BIOS handshake replies (Z80 may not have had enough
+      // cycles to process them during the 10k burst above)
       if (value === 0x03) {
         this.bus.setSoundReply(0xC3); // Reset → HELLO
       } else if (value === 0x01) {
-        this.bus.setSoundReply(0x01); // Command echo
+        this.bus.setSoundReply(0x01); // Slot switch echo
       }
       if (this.audioWorkerReady) {
         this.pendingSoundLatches.push(value);
       }
     });
 
-    // Wire Z80 sound reply → 68K
-    // Only propagate replies during command processing (not idle heartbeat).
-    // The idle heartbeat (R|0x80) would overwrite the HELLO preset.
-    this.z80Bus.setSoundReplyCallback((_value: number) => {
-      // Replies are handled in the command callback (immediate Z80 sync)
+    // Wire Z80 sound reply → 68K (port 0x0C writes propagate to 68K bus)
+    this.z80Bus.setSoundReplyCallback((value: number) => {
+      this.bus.setSoundReply(value);
     });
 
     // When Z80 reads port 0x00, mark command as consumed (clears pending flag)
@@ -164,17 +181,18 @@ export class NeoGeoEmulator {
     await this.loadRom(romSet);
   }
 
-  /** Try to fetch neogeo.zip from the server */
+  /** Try to fetch neogeo.zip from the server (checks neogeo/ subfolder first, then root) */
   private async fetchBios(): Promise<File | undefined> {
-    try {
-      const resp = await fetch('/roms/neogeo.zip');
-      if (!resp.ok) throw new Error(`${resp.status}`);
-      const blob = await resp.blob();
-      return new File([blob], 'neogeo.zip', { type: 'application/zip' });
-    } catch {
-      console.warn('[Neo-Geo] neogeo.zip not found at /roms/neogeo.zip — BIOS required for boot');
-      return undefined;
+    for (const path of ['/roms/neogeo/neogeo.zip', '/roms/neogeo.zip']) {
+      try {
+        const resp = await fetch(path);
+        if (!resp.ok) continue;
+        const blob = await resp.blob();
+        return new File([blob], 'neogeo.zip', { type: 'application/zip' });
+      } catch { /* try next */ }
     }
+    console.warn('[Neo-Geo] neogeo.zip not found — BIOS required for boot');
+    return undefined;
   }
 
   async loadRom(romSet: NeoGeoRomSet): Promise<void> {
@@ -186,6 +204,46 @@ export class NeoGeoEmulator {
 
     // Resize the renderer for Neo-Geo resolution (320x224)
     this.renderer.resize?.(NGO_SCREEN_WIDTH, NGO_SCREEN_HEIGHT);
+
+    // Apply game-specific protection (ROM decrypt + runtime handler)
+    const protType = getProtectionType(romSet.name);
+    if (protType === 'kof98') {
+      const defaults = kof98Decrypt68k(romSet.programRom, romSet.programRom.length);
+      const prot = new Kof98Protection();
+      prot.setDefaultRom(defaults[0], defaults[1]);
+      this.bus.setProtection(prot);
+      console.log(`[Neo-Geo] KOF98 protection: P-ROM decrypted, runtime overlay active`);
+    } else if (protType === 'mslugx') {
+      const prot = new MslugxProtection((addr) => this.bus.read16(addr));
+      this.bus.setProtection(prot);
+      console.log(`[Neo-Geo] MSLUGX protection: bit counter active`);
+    } else if (protType === 'sma') {
+      smaDecrypt68k(romSet.programRom, romSet.name);
+      const prot = new SmaProtection(
+        romSet.name,
+        (offset) => { this.bus.setPRomBankOffset(offset); },
+      );
+      this.bus.setProtection(prot);
+      console.log(`[Neo-Geo] SMA protection: P-ROM decrypted, bankswitch + RNG active`);
+    } else {
+      this.bus.setProtection(null);
+    }
+
+    // CMC GFX decryption — applies to C-ROM (sprites) + S-ROM (fix layer)
+    // SMA games also need CMC (they have both P-ROM and C-ROM encryption)
+    const cmcKey42 = CMC42_KEYS[romSet.name];
+    const cmcKey50 = CMC50_KEYS[romSet.name];
+    if (cmcKey42 !== undefined) {
+      console.log(`[Neo-Geo] CMC42 GFX decrypt (key=0x${cmcKey42.toString(16)}): ${romSet.spritesRom.length / 1024 / 1024}MB`);
+      cmcGfxDecrypt(romSet.spritesRom, romSet.spritesRom.length, cmcKey42, false);
+      cmcSfixDecrypt(romSet.spritesRom, romSet.spritesRom.length, romSet.fixedRom, romSet.fixedRom.length);
+      console.log(`[Neo-Geo] CMC42 GFX + SFIX decrypt complete`);
+    } else if (cmcKey50 !== undefined) {
+      console.log(`[Neo-Geo] CMC50 GFX decrypt (key=0x${cmcKey50.toString(16)}): ${romSet.spritesRom.length / 1024 / 1024}MB`);
+      cmcGfxDecrypt(romSet.spritesRom, romSet.spritesRom.length, cmcKey50, true);
+      cmcSfixDecrypt(romSet.spritesRom, romSet.spritesRom.length, romSet.fixedRom, romSet.fixedRom.length);
+      console.log(`[Neo-Geo] CMC50 GFX + SFIX decrypt complete`);
+    }
 
     // Load ROMs into bus
     this.bus.loadProgramRom(romSet.programRom);
@@ -203,26 +261,57 @@ export class NeoGeoEmulator {
 
     this.gameName = romSet.name;
     this.romLoaded = true;
+    this.voiceRom = romSet.voiceRom;
+    this.audioRom = romSet.audioRom;
+    this.biosZRom = romSet.biosZRom;
+    this.adpcmASize = romSet.adpcmASize;
 
     // Initialize audio worker
     await this.initAudioWorker(romSet);
 
+    // Configure MVS mode (arcade board) — affects BIOS boot path
+    this.bus.setMvsMode(true);
+
     // Reset bus and CPUs
     this.bus.resetBus();
+
     this.m68000.reset();
     this.z80.reset();
 
+    // Assert IRQ3 (coldboot) on first frame — MAME: m_irq3_pending = 1
+    // The BIOS IRQ3 handler initializes the system on first boot.
+    this.bus.assertIrq(3);
+
+
+    // Watchdog reset: full soft reset when watchdog expires
+    this.bus.setWatchdogResetCallback(() => {
+      console.log('[Neo-Geo] Watchdog reset triggered');
+      this.bus.resetBus();
+      this.m68000.reset();
+      this.z80.reset();
+    });
 
     // Wire ROM banking callbacks
     this.bus.setFixRomSwitchCallback((useBios) => {
       this.video.setFixRomMode(useBios);
+    });
+    this.bus.setZ80RomSwitchCallback((useBios) => {
+      this.z80Bus.setUseGameRom(!useBios);
+      // Forward ROM switch to audio worker — the worker Z80 must also
+      // switch from BIOS to game M-ROM to execute the sound driver.
+      if (this.audioWorker) {
+        this.audioWorker.postMessage({ type: 'rom-switch', useGameRom: !useBios });
+      }
+    });
+    this.bus.setPaletteBankCallback((bank) => {
+      this.video.setPaletteBank(bank);
     });
 
     // Initialize YM2610 on main thread for Z80 sound handshake
     try {
       await initYM2610Wasm();
       this.mainYm2610 = new YM2610Wasm();
-      this.mainYm2610.loadVRom(romSet.voiceRom);
+      this.mainYm2610.loadVRom(romSet.voiceRom, romSet.adpcmASize);
       // Wire YM2610 to Z80 bus
       this.z80Bus.setYm2610WriteCallback((port, value) => {
         this.mainYm2610!.write(port, value);
@@ -236,15 +325,14 @@ export class NeoGeoEmulator {
 
     // Pre-run the Z80 with YM2610 connected to complete sm1.sm1 init
     {
-      let cycles = 500000; // More cycles with real YM2610
+      let cycles = Z80_PRERUN_CYCLES;
       while (cycles > 0) {
         if (this.z80Bus.shouldFireNmi()) this.z80.nmi();
         const ran = this.z80.step();
         cycles -= ran;
-        // Clock YM2610 + check IRQ
         if (this.mainYm2610) {
-          this.mainYm2610.clockCycles(ran);
-          if (this.mainYm2610.getIrq()) this.z80.irq(0xFF);
+          this.mainYm2610.clockCycles(ran * YM_CLOCK_RATIO);
+          this.z80.setIrqLine(this.mainYm2610.getIrq());
         }
       }
     }
@@ -271,22 +359,37 @@ export class NeoGeoEmulator {
       this.audioWorker.onmessage = (e) => {
         if (e.data.type === 'ready') {
           this.audioWorkerReady = true;
-          console.log('[Neo-Geo] Audio worker ready');
+        } else if (e.data.type === 'samples') {
+          // Merge new samples with existing ones (dedup by start:end:type key)
+          const existing = new Map(this.scannedSamples.map(s => [`${s.type}:${s.startByte}:${s.endByte}`, s]));
+          for (const s of e.data.samples) {
+            existing.set(`${s.type}:${s.startByte}:${s.endByte}`, s);
+          }
+          this.scannedSamples = Array.from(existing.values()).sort((a, b) => a.startByte - b.startByte);
+          console.log(`[Neo-Geo] Samples: ${this.scannedSamples.length} total`);
+        } else if (e.data.type === 'error') {
+          console.error('[Neo-Geo] Audio worker error:', e.data.message);
         } else if (e.data.type === 'reply') {
-          // Worker Z80 replies are ignored — the main-thread Z80 handles the
-          // BIOS handshake. Worker heartbeat (R|0x80) would overwrite the preset.
+          // Worker replies ignored — main-thread Z80 handles BIOS handshake
         } else if (e.data.type === 'z80debug') {
           const ram = e.data.ram?.map((b: number) => b.toString(16).padStart(2, '0')).join(' ') ?? '';
           console.log(`[Neo-Geo] Worker Z80: PC=0x${e.data.pc.toString(16)} SP=0x${e.data.sp.toString(16)} frame=${e.data.frame} nmi=${e.data.nmiEnabled} latch=0x${e.data.soundLatch?.toString(16)} RAM@PC=[${ram}]`);
         }
       };
 
+      // Allocate visualization SharedArrayBuffer
+      this.vizSab = new SharedArrayBuffer(VIZ_SAB_SIZE);
+      this.vizReader = new VizReader(this.vizSab);
+      this.vizReader.setChannelMask(0xFFFF); // all channels audible
+
       this.audioWorker.postMessage({
         type: 'init',
         audioRom: romSet.audioRom.buffer,
         biosZRom: romSet.biosZRom.buffer,
         voiceRom: romSet.voiceRom.buffer,
+        adpcmASize: romSet.adpcmASize,
         sab,
+        vizSab: this.vizSab,
         sampleRate: this.audioOutput.getSampleRate(),
       });
     } catch (err) {
@@ -314,9 +417,16 @@ export class NeoGeoEmulator {
     this.audioOutput.suspend();
   }
 
-  pause(): void { this.paused = !this.paused; }
-  isPaused(): boolean { return this.paused; }
-  isRunning(): boolean { return this.running; }
+  pause(): void {
+    if (!this.running) return;
+    this.paused = true;
+  }
+  resume(): void {
+    if (!this.running || !this.paused) return;
+    this.paused = false;
+  }
+  isPaused(): boolean { return this.running && this.paused; }
+  isRunning(): boolean { return this.running && !this.paused; }
 
   setVblankCallback(cb: () => void): void { this._vblankCallback = cb; }
 
@@ -343,8 +453,8 @@ export class NeoGeoEmulator {
       this.runOneFrame();
     }
 
-    // Render
-    this.video.renderFrame(this.framebuffer);
+    // Copy slice-rendered framebuffer to output
+    this.video.copyFramebuffer(this.framebuffer);
     this.renderer.render(this.framebuffer);
   };
 
@@ -360,27 +470,40 @@ export class NeoGeoEmulator {
       this.pendingSoundLatches.length = 0;
     }
 
+    // Slice rendering: render visible scanlines in chunks between IRQ2 boundaries
+    this.video.beginFrame();
+    let sliceStart = 0;
+
     // Run scanlines
     for (let scanline = 0; scanline < NGO_VTOTAL; scanline++) {
       this.bus.setScanline(scanline);
 
-      // VBlank at line 224
+      // VBlank at line 224 — flush remaining visible slice
       if (scanline === NGO_VBLANK_LINE) {
+        if (sliceStart < NGO_VBLANK_LINE) {
+          this.video.renderSlice(sliceStart, NGO_VBLANK_LINE);
+          sliceStart = NGO_VBLANK_LINE;
+        }
         this.video.markPaletteDirty();
         this.video.tickAutoAnim();
-        this.bus.tickAutoAnim(); // Sync bus counter for LSPC scanline register
+        this.bus.tickAutoAnim();
 
         this.bus.assertIrq(1); // IRQ1 = VBlank
 
+        // Watchdog: decrement each VBlank, reset system if expired
+        this.bus.tickWatchdog();
 
         this._vblankCallback?.();
       }
 
-      // No coldboot IRQ3 — FBNeo doesn't fire it. The BIOS reset vector
-      // handles initialization, VBlank IRQ1 drives the boot state machine.
+      // IRQ3 (coldboot) is asserted once at loadRom() — not per-frame.
 
-      // Timer tick
-      this.bus.tickTimer();
+      // Timer tick — flush slice before IRQ2 handler modifies VRAM
+      const timerFired = this.bus.tickTimer();
+      if (timerFired && scanline < NGO_VBLANK_LINE && scanline > sliceStart) {
+        this.video.renderSlice(sliceStart, scanline);
+        sliceStart = scanline;
+      }
 
 
 
@@ -428,12 +551,9 @@ export class NeoGeoEmulator {
           const ran = this.z80.step();
           z80Slice -= ran;
           z80Left -= ran;
-          // Clock YM2610 on main thread + check IRQ
           if (this.mainYm2610) {
-            this.mainYm2610.clockCycles(ran);
-            if (this.mainYm2610.getIrq()) {
-              this.z80.irq(0xFF);
-            }
+            this.mainYm2610.clockCycles(ran * YM_CLOCK_RATIO);
+            this.z80.setIrqLine(this.mainYm2610.getIrq());
           }
         }
       }
@@ -446,104 +566,106 @@ export class NeoGeoEmulator {
   // ── Input mapping ─────────────────────────────────────────────────────────
 
   private updateInputPorts(): void {
-    // Neo-Geo uses same active LOW convention as CPS1.
-    // InputManager.readPort() returns bytes with pressed buttons as 0.
-    // Port 0 = P1 low (directions + buttons 1-3), Port 1 = P1 high (buttons 4-6)
-    // Port 2 = P2 low, Port 3 = P2 high, Port 4 = system (coins, starts)
+    // CPS1 InputManager bit layout (active LOW):
+    //   readPlayerLow: bit 0=Right, 1=Left, 2=Down, 3=Up, 4=Btn1(A), 5=Btn2(B), 6=Btn3(C)
+    //   readPlayerHigh: bit 0=Btn4(D)
+    //   readSystem: bit 0=Coin1, 1=Coin2, 4=Start1, 5=Start2
+    //
+    // Neo-Geo MVS port layout (active LOW):
+    //   0x300001 P1: bit 0=Up, 1=Down, 2=Left, 3=Right, 4=A, 5=B, 6=C, 7=D
+    //   0x340000 P2: same as P1
+    //   0x340001 System: bit 0=Start1, 1=Start2, 2=Select1, 3=Select2
+    //   0x380001 Coins: bit 0=Coin1, 1=Coin2, 2=Service
 
-    // P1: directions + A/B/C from port 0, D from port 1 bit 4
     const p1Lo = this.input.readPort(0);
     const p1Hi = this.input.readPort(1);
-    // Map CPS1 6-button layout to Neo-Geo 4-button:
-    // port 0 bits: 0=up, 1=down, 2=left, 3=right, 4=btn1(A), 5=btn2(B), 6=btn3(C)
-    // Neo-Geo P1: 0=up, 1=down, 2=left, 3=right, 4=A, 5=B, 6=C, 7=D
-    const p1 = (p1Lo & 0x7F) | ((p1Hi & 0x10) ? 0x80 : 0); // D from btn4
-    this.bus.setPortP1(p1);
+    // Remap CPS1 directions (R/L/D/U bits 0-3) → Neo-Geo (U/D/L/R bits 0-3)
+    const up1    = (p1Lo >> 3) & 1;  // CPS1 bit 3 (Up)
+    const down1  = (p1Lo >> 2) & 1;  // CPS1 bit 2 (Down)
+    const left1  = (p1Lo >> 1) & 1;  // CPS1 bit 1 (Left)
+    const right1 = (p1Lo >> 0) & 1;  // CPS1 bit 0 (Right)
+    const a1 = (p1Lo >> 4) & 1;      // Btn1 = A
+    const b1 = (p1Lo >> 5) & 1;      // Btn2 = B
+    const c1 = (p1Lo >> 6) & 1;      // Btn3 = C
+    const d1 = (p1Hi >> 0) & 1;      // Btn4 = D
+    const p1Neo = (up1) | (down1 << 1) | (left1 << 2) | (right1 << 3) |
+                  (a1 << 4) | (b1 << 5) | (c1 << 6) | (d1 << 7);
+    this.bus.setPortP1(p1Neo);
 
     const p2Lo = this.input.readPort(2);
     const p2Hi = this.input.readPort(3);
-    const p2 = (p2Lo & 0x7F) | ((p2Hi & 0x10) ? 0x80 : 0);
-    this.bus.setPortP2(p2);
+    const up2    = (p2Lo >> 3) & 1;
+    const down2  = (p2Lo >> 2) & 1;
+    const left2  = (p2Lo >> 1) & 1;
+    const right2 = (p2Lo >> 0) & 1;
+    const a2 = (p2Lo >> 4) & 1;
+    const b2 = (p2Lo >> 5) & 1;
+    const c2 = (p2Lo >> 6) & 1;
+    const d2 = (p2Hi >> 0) & 1;
+    const p2Neo = (up2) | (down2 << 1) | (left2 << 2) | (right2 << 3) |
+                  (a2 << 4) | (b2 << 5) | (c2 << 6) | (d2 << 7);
+    this.bus.setPortP2(p2Neo);
 
-    // System: coin/start
+    // System port at 0x380000: bit0=Start1, bit1=Select1, bit2=Start2, bit3=Select2
     const sys = this.input.readPort(4);
-    this.bus.setPortSystem(sys);
+    const start1 = (sys >> 4) & 1;  // CPS1 bit 4
+    const start2 = (sys >> 5) & 1;  // CPS1 bit 5
+    const sysNeo = 0xFA | start1 | (start2 << 2); // select1/2 = 1 (released)
+    this.bus.setPortSystem(sysNeo);
+
+    // Coins at 0x320001: bit0=Coin1, bit1=Coin2, bit2=Service (active LOW)
+    const coin1 = (sys >> 0) & 1;   // CPS1 bit 0
+    const coin2 = (sys >> 1) & 1;   // CPS1 bit 1
+    const coinsNeo = 0x3C | coin1 | (coin2 << 1); // service=1, bits 3-5=1
+    this.bus.setPortCoins(coinsNeo);
   }
 
   // ── Public accessors ──────────────────────────────────────────────────────
-
-  /** Patch the BIOS to work without pd4990a RTC emulation.
-   *  The BIOS CALENDAR test fails and enters an infinite watchdog loop
-   *  with SR mask 7 (all IRQs blocked). We patch the error handler's
-   *  MOVE #$0007, ($3C000C) to also include ANDI #$F8FF, SR (lower mask). */
-  private patchBiosBoot(biosRom: Uint8Array): void {
-    let patched = 0;
-
-    // Patch 1: Skip ALL boot test error jumps.
-    // Pattern: MOVEQ #N, D6 (7C0N) followed by JMP (4EF9) to error handler.
-    // N = 0-8 for different boot tests. NOP them all to skip errors.
-    for (let i = 0; i < biosRom.length - 8; i++) {
-      if (biosRom[i] === 0x7C && (biosRom[i + 1]! & 0xF0) === 0x00 &&
-          biosRom[i + 2] === 0x4E && biosRom[i + 3] === 0xF9) {
-        const testNum = biosRom[i + 1]!;
-        // NOP out the MOVEQ + JMP (8 bytes = 4 NOPs)
-        for (let j = 0; j < 8; j += 2) {
-          biosRom[i + j] = 0x4E;
-          biosRom[i + j + 1] = 0x71;
-        }
-        console.log(`[Neo-Geo] Patched BIOS: skip boot test ${testNum} error at 0x${i.toString(16)}`);
-        patched++;
-      }
-    }
-
-    // Patch 2: Calendar range check — safety net alongside pd4990a.
-    // At 0xC11C14: BCS.W $C11D8C (6500 0176) — "count < 57" → NOP NOP
-    // At 0xC11C1C: BCC.W $C11D8C (6400 016E) — "count >= 64" → NOP NOP
-    for (let i = 0; i < biosRom.length - 4; i++) {
-      // BCS.W to error handler
-      if (biosRom[i] === 0x65 && biosRom[i + 1] === 0x00 &&
-          biosRom[i + 2] === 0x01 && biosRom[i + 3] === 0x76) {
-        biosRom[i] = 0x4E; biosRom[i + 1] = 0x71;
-        biosRom[i + 2] = 0x4E; biosRom[i + 3] = 0x71;
-        console.log(`[Neo-Geo] Patched BIOS: NOP calendar BCS at 0x${i.toString(16)}`);
-        patched++;
-      }
-      // BCC.W to error handler
-      if (biosRom[i] === 0x64 && biosRom[i + 1] === 0x00 &&
-          biosRom[i + 2] === 0x01 && biosRom[i + 3] === 0x6E) {
-        biosRom[i] = 0x4E; biosRom[i + 1] = 0x71;
-        biosRom[i + 2] = 0x4E; biosRom[i + 3] = 0x71;
-        console.log(`[Neo-Geo] Patched BIOS: NOP calendar BCC at 0x${i.toString(16)}`);
-        patched++;
-      }
-    }
-
-    // Patch 3 disabled — overwriting watchdog loops caused code fallthrough crashes.
-    // VBlank handlers still run correctly with irqMask=7 (they use a lower mask internally).
-
-    if (patched > 0) console.log(`[Neo-Geo] Applied ${patched} BIOS patches`);
-  }
-
-  /** Try to identify the BIOS by looking for known strings */
-  private detectBiosName(biosRom: Uint8Array): string {
-    // UniBIOS has "UNIVERSE BIOS" string
-    const str = String.fromCharCode(...biosRom.subarray(0, Math.min(0x200, biosRom.length))
-      .filter(b => b >= 0x20 && b < 0x7F));
-    if (str.includes('UNIVERSE') || str.includes('UNI-BIOS')) return 'uni-bios';
-    // Search more broadly
-    for (let i = 0; i < biosRom.length - 10; i++) {
-      if (biosRom[i] === 0x55 && biosRom[i+1] === 0x4E && biosRom[i+2] === 0x49) { // "UNI"
-        return 'uni-bios';
-      }
-    }
-    return 'standard';
-  }
 
   getBus(): NeoGeoBus { return this.bus; }
   getVideo(): NeoGeoVideo { return this.video; }
   getM68000(): M68000 { return this.m68000; }
   getFrameCount(): number { return this.frameCount; }
   getGameName(): string { return this.gameName; }
+  getVizReader(): VizReader | null { return this.vizReader; }
+  getVoiceRom(): Uint8Array | null { return this.voiceRom; }
+  getAudioRom(): Uint8Array | null { return this.audioRom; }
+  getAdpcmASize(): number { return this.adpcmASize; }
+  getScannedSamples(): { startByte: number; endByte: number; type: 'A' | 'B' }[] { return this.scannedSamples; }
+
+  /** Request live-captured samples from the audio worker (accumulated during gameplay) */
+  requestLiveSamples(): void {
+    if (this.audioWorker && this.audioWorkerReady) {
+      this.audioWorker.postMessage({ type: 'get-live-samples' });
+    }
+  }
+
+  /** Trigger ADPCM sample scan (sends all sound commands to Z80, captures addresses) */
+  scanSamples(): void {
+    if (this.audioWorker && this.audioWorkerReady && this.audioRom) {
+      this.audioWorker.postMessage({
+        type: 'scan-samples',
+        audioRom: this.audioRom.buffer.slice(0),
+        biosZRom: this.biosZRom?.buffer.slice(0),
+        adpcmASize: this.adpcmASize,
+      });
+    }
+  }
+
+  /** Update V-ROM after sample replacement and sync to worker WASM */
+  updateVoiceRom(offset: number, data: Uint8Array): void {
+    if (!this.voiceRom) return;
+    this.voiceRom.set(data, offset);
+    // Sync to audio worker (worker patches WASM heap)
+    if (this.audioWorker) {
+      this.audioWorker.postMessage({
+        type: 'patch-vrom',
+        offset,
+        data: data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength),
+      });
+    }
+  }
+
   /** Stub for CPS1 API compatibility — Neo-Geo has no DIP switches in I/O ports */
   getIoPorts(): Uint8Array { return new Uint8Array(0x20).fill(0xFF); }
 }

@@ -152,6 +152,24 @@ export function initShortcuts(deps: ShortcutsDeps): void {
       return;
     }
 
+    // F10 = dump Neo-Geo sprite table + enable VRAM trace for Todo sprites
+    if (e.code === "F10") {
+      e.preventDefault();
+      const ngo = (window as unknown as Record<string, unknown>).__ngoEmu;
+      if (ngo) {
+        const emu = ngo as {
+          getVideo: () => { dumpSpriteTable: () => void };
+          getBus: () => { enableVramTrace: (s: number[]) => void; disableVramTrace: () => void };
+        };
+        emu.getVideo().dumpSpriteTable();
+        // Trace SCB writes for sprites 89-110 (Todo's suspected range)
+        const sprites = Array.from({ length: 22 }, (_, i) => 89 + i);
+        emu.getBus().enableVramTrace(sprites);
+        console.log('[Debug] VRAM trace ON for sprites 89-110. Press F10 again in 2s to see writes.');
+      }
+      return;
+    }
+
     // Remaining shortcuts require a game running or paused
     if (!emulator.isRunning() && !emulator.isPaused()) return;
 
