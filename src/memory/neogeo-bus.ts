@@ -61,8 +61,10 @@ export class NeoGeoBus implements BusInterface {
   // Bit 4 (0x10): IRQ enable, Bit 5 (0x20): relative offset, Bit 6 (0x40): load at VBlank, Bit 7 (0x80): auto-reload
   private lspcControl: number = 0;
 
-  // Auto-animation counter (ticked at VBlank, exposed in scanline counter read)
+  // Auto-animation: counter increments every (speed+1) VBlanks (LSPC2 register 0x3C0006 upper byte)
   private autoAnimCounter: number = 0;
+  private autoAnimSpeed: number = 0;
+  private autoAnimFrameTimer: number = 0;
 
   // Sound latch
   private soundLatchToZ80: number = 0;
@@ -109,8 +111,20 @@ export class NeoGeoBus implements BusInterface {
   /** Add 68K cycles to the total (call from emulator per step) */
   addCycles(n: number): void { this.totalCycles += n; }
 
-  /** Increment auto-animation counter (call once per VBlank from emulator) */
-  tickAutoAnim(): void { this.autoAnimCounter++; }
+  /** Increment auto-animation counter with speed divider (call once per VBlank) */
+  tickAutoAnim(): void {
+    // Bit 3 of lspcControl low byte disables auto-animation (MAME: BIT(data, 3))
+    if (this.lspcControl & 0x08) return;
+    if (this.autoAnimFrameTimer >= this.autoAnimSpeed) {
+      this.autoAnimFrameTimer = 0;
+      this.autoAnimCounter++;
+    } else {
+      this.autoAnimFrameTimer++;
+    }
+  }
+
+  /** Get current auto-animation counter (for video renderer) */
+  getAutoAnimCounter(): number { return this.autoAnimCounter; }
 
   loadProgramRom(data: Uint8Array): void {
     this.programRom = data;
@@ -136,6 +150,8 @@ export class NeoGeoBus implements BusInterface {
     this.vramMod = 0;
     this.timerRunning = false;
     this.autoAnimCounter = 0;
+    this.autoAnimSpeed = 0;
+    this.autoAnimFrameTimer = 0;
     this.lspcControl = 0;
     // Pre-set Z80 reply to 0xC3 ("HELLO") — sm1.sm1 should send this at boot
     // but our Z80 emulation doesn't reach the OUT instruction during init.
@@ -583,6 +599,7 @@ export class NeoGeoBus implements BusInterface {
         break;
       case 3: // 0x3C0006: LSPC control (auto-anim speed + IRQ control flags)
         this.lspcControl = value;
+        this.autoAnimSpeed = (value >> 8) & 0xFF;
         break;
       case 4: // 0x3C0008: LSPC timer high
         this.timerHigh = value;

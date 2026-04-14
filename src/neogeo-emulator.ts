@@ -274,6 +274,7 @@ export class NeoGeoEmulator {
     // Share VRAM and palette RAM between bus and video
     this.video.setVram(this.bus.getVram());
     this.video.setPaletteRam(this.bus.getPaletteRam());
+    this.video.setAutoAnimSource(() => this.bus.getAutoAnimCounter());
 
     this.gameName = romSet.name;
     this.romLoaded = true;
@@ -503,7 +504,6 @@ export class NeoGeoEmulator {
           sliceStart = NGO_VBLANK_LINE;
         }
         this.video.markPaletteDirty();
-        this.video.tickAutoAnim();
         this.bus.tickAutoAnim();
 
         this.bus.assertIrq(1); // IRQ1 = VBlank
