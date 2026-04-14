@@ -191,8 +191,11 @@ describe('smaDecrypt68k', () => {
   it('does nothing for unknown games', () => {
     const rom = new Uint8Array(0x200000);
     rom.fill(0xAA);
-    const copy = new Uint8Array(rom);
     smaDecrypt68k(rom, 'unknowngame');
-    expect(rom).toEqual(copy); // unchanged
+    // Spot-check a few positions instead of comparing 2MB byte-by-byte
+    expect(rom[0]).toBe(0xAA);
+    expect(rom[0x100000]).toBe(0xAA);
+    expect(rom[0x1FFFFF]).toBe(0xAA);
+    expect(rom.every(b => b === 0xAA)).toBe(true);
   });
 });
