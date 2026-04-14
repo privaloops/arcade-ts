@@ -399,8 +399,8 @@ export class DebugPanel {
 
       tick++;
 
-      // Update frame counter every 10 frames
-      if (tick % 10 === 0 && this.frameCounter) {
+      // Update frame counter every 10 frames (only if CPS1 emulator is actually running)
+      if (tick % 10 === 0 && this.frameCounter && this.emulator.isRunning()) {
         this.frameCounter.textContent = `Frame: ${this.emulator.getFrameCount()} | ${this.emulator.getFpsDisplay()} FPS`;
       }
 

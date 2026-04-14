@@ -355,7 +355,7 @@ initKeyboardCapture(emulator);
 initRendererToggle(rendererDeps);
 initControlsBar(controlsBarDeps);
 initSaveStateUI({ emulator, ssOverlay, ssTitle, ssSlots, ssCloseBtn, canvasWrapper, appEl, getMuted, setStatus });
-initDropZone({
+const dropZoneDeps = {
   emulator, canvas, domScreen, dropZone, fileInput, emuBar, canvasWrapper,
   tateToggle, gameSelect, loadBtn, romControls, exportBtn, statusEl,
   getRendererMode, setupDomRenderer: () => setupDomRenderer(rendererDeps),
@@ -363,10 +363,12 @@ initDropZone({
   onSprixeFile: handleSprixeFile,
   onRomLoaded,
   createNeoGeoEmulator: () => new NeoGeoEmulator(canvas, emulator.getRenderer()),
-  neoGeoEmulator: null,
-});
+  neoGeoEmulator: null as NeoGeoEmulator | null,
+};
+initDropZone(dropZoneDeps);
 initShortcuts({
   emulator, canvasWrapper, emuBar, pauseBtn, muteBtn, getMuted, setMuted,
+  getActiveEmulator: () => dropZoneDeps.neoGeoEmulator ?? emulator,
   togglePause: () => pauseBtn.click(),
   toggleMute: () => muteBtn.click(),
   openControlsModal, closeControlsModal,

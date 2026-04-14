@@ -90,6 +90,9 @@ export class NeoGeoEmulator {
   private frameCount = 0;
   private firstFrame = true;
   private m68kErrorCount = 0;
+  private fpsFrames = 0;
+  private fpsLastTime = 0;
+  private fpsDisplay = 0;
   private voiceRom: Uint8Array | null = null;
   private audioRom: Uint8Array | null = null;
   private adpcmASize = 0;
@@ -164,8 +167,14 @@ export class NeoGeoEmulator {
     await this.audioOutput.init();
   }
 
+  suspendAudio(): void {
+    this.audioOutput.suspend();
+    if (this.audioWorker) this.audioWorker.postMessage({ type: 'suspend' });
+  }
+
   resumeAudio(): void {
     this.audioOutput.resume();
+    if (this.audioWorker) this.audioWorker.postMessage({ type: 'resume' });
   }
 
   // ── ROM loading ───────────────────────────────────────────────────────────
@@ -424,6 +433,8 @@ export class NeoGeoEmulator {
   resume(): void {
     if (!this.running || !this.paused) return;
     this.paused = false;
+    // Reset RAF timestamp so next frame doesn't include pause duration
+    this.prevRafTime = 0;
   }
   isPaused(): boolean { return this.running && this.paused; }
   isRunning(): boolean { return this.running && !this.paused; }
@@ -561,6 +572,25 @@ export class NeoGeoEmulator {
 
     this.firstFrame = false;
     this.frameCount++;
+    this.updateFps();
+  }
+
+  private updateFps(): void {
+    const now = performance.now();
+    this.fpsFrames++;
+    if (this.fpsLastTime === 0) {
+      // First call — initialize without emitting a value
+      this.fpsLastTime = now;
+      return;
+    }
+    if (now - this.fpsLastTime >= 1000) {
+      this.fpsDisplay = this.fpsFrames;
+      this.fpsFrames = 0;
+      this.fpsLastTime = now;
+      // Update emu-bar counter (debug panel doesn't know about Neo-Geo)
+      const el = document.getElementById('frame-counter');
+      if (el) el.textContent = `${this.fpsDisplay} FPS`;
+    }
   }
 
   // ── Input mapping ─────────────────────────────────────────────────────────
@@ -626,6 +656,7 @@ export class NeoGeoEmulator {
   getVideo(): NeoGeoVideo { return this.video; }
   getM68000(): M68000 { return this.m68000; }
   getFrameCount(): number { return this.frameCount; }
+  getFpsDisplay(): number { return this.fpsDisplay; }
   getGameName(): string { return this.gameName; }
   getVizReader(): VizReader | null { return this.vizReader; }
   getVoiceRom(): Uint8Array | null { return this.voiceRom; }

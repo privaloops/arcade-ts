@@ -6,8 +6,21 @@ import type { Emulator } from "../emulator";
 import { downloadTextFile } from "../utils/trace-export";
 import { updatePauseBtn } from "./controls-bar";
 
+/** Minimal interface for pause/resume/audio — works with both CPS1 and Neo-Geo emulators */
+interface Pausable {
+  isRunning(): boolean;
+  isPaused(): boolean;
+  pause(): void;
+  resume(): void;
+  suspendAudio(): void;
+  resumeAudio(): void;
+  getGameName(): string;
+}
+
 export interface ShortcutsDeps {
   emulator: Emulator;
+  /** Returns the currently active emulator (CPS1 or Neo-Geo) */
+  getActiveEmulator?: () => Pausable | null;
   canvasWrapper: HTMLDivElement;
   emuBar: HTMLDivElement;
   pauseBtn: HTMLButtonElement;
@@ -83,14 +96,15 @@ export function initShortcuts(deps: ShortcutsDeps): void {
 
     // M = Mute / Unmute
     if (key === "m") {
+      const emu = deps.getActiveEmulator?.() ?? emulator;
       setMuted(!getMuted());
       if (getMuted()) {
-        emulator.suspendAudio();
+        emu.suspendAudio();
         muteBtn.textContent = "🔇";
         muteBtn.classList.add("active");
         setStatus("Muted");
       } else {
-        emulator.resumeAudio();
+        emu.resumeAudio();
         muteBtn.textContent = "🔊";
         muteBtn.classList.remove("active");
         setStatus("Running");
@@ -100,14 +114,15 @@ export function initShortcuts(deps: ShortcutsDeps): void {
 
     // P = Pause / Resume
     if (key === "p") {
-      if (emulator.isRunning()) {
-        emulator.pause();
-        emulator.suspendAudio();
+      const emu = deps.getActiveEmulator?.() ?? emulator;
+      if (emu.isRunning()) {
+        emu.pause();
+        emu.suspendAudio();
         updatePauseBtn(pauseBtn, emuBar, true);
         setStatus("Paused");
-      } else if (emulator.isPaused()) {
-        emulator.resume();
-        if (!getMuted()) emulator.resumeAudio();
+      } else if (emu.isPaused()) {
+        emu.resume();
+        if (!getMuted()) emu.resumeAudio();
         updatePauseBtn(pauseBtn, emuBar, false);
         setStatus("Running");
       }
@@ -171,7 +186,8 @@ export function initShortcuts(deps: ShortcutsDeps): void {
     }
 
     // Remaining shortcuts require a game running or paused
-    if (!emulator.isRunning() && !emulator.isPaused()) return;
+    const activeEmu = deps.getActiveEmulator?.() ?? emulator;
+    if (!activeEmu.isRunning() && !activeEmu.isPaused()) return;
 
     if (e.code === "F1") {
       e.preventDefault();
