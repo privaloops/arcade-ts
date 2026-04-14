@@ -115,7 +115,7 @@ export class NeoGeoVideo {
   private fb: Uint8Array;             // 320x224x4 RGBA
   private fb32: Uint32Array;          // same buffer as Uint32Array view
   private paletteDirty: boolean;
-  private autoAnimCounter: number;
+  private autoAnimCounter: () => number;  // delegate to bus counter
   private tileMask: number;           // wraps tile codes to ROM range
   private _dbgHideFrom = 0;          // debug: hide sprites in range [from, to)
   private _dbgHideTo = 0;
@@ -133,7 +133,7 @@ export class NeoGeoVideo {
     this.fb = new Uint8Array(buffer);
     this.fb32 = new Uint32Array(buffer);
     this.paletteDirty = true;
-    this.autoAnimCounter = 0;
+    this.autoAnimCounter = () => 0;
     this.tileMask = 0;
   }
 
@@ -186,8 +186,8 @@ export class NeoGeoVideo {
   /** Set palette RAM reference (shared with NeoGeoBus) */
   setPaletteRam(paletteRam: Uint8Array): void { this.paletteRam = paletteRam; }
 
-  /** Increment auto-animation counter (call once per frame) */
-  tickAutoAnim(): void { this.autoAnimCounter++; }
+  /** Set auto-animation counter source (delegate to bus) */
+  setAutoAnimSource(fn: () => number): void { this.autoAnimCounter = fn; }
 
   /** Switch fix layer ROM source (BIOS sfix.sfix vs game S-ROM) */
   private useBiosFixRom: boolean = true;
@@ -348,6 +348,9 @@ export class NeoGeoVideo {
     if (y0 >= y1) return;
     if (this.paletteDirty) this.rebuildPaletteCache();
 
+    // Read auto-animation counter once per slice (shared by all sprites)
+    const animCounter = this.autoAnimCounter();
+
     // Forward pass: hardware maintains running X/Y/size registers across sticky chains
     let chainX = 0, chainYRaw = 0, chainSize = 0, chainYZoom = 0;
     let xZoom = 0;
@@ -377,7 +380,7 @@ export class NeoGeoVideo {
     }
 
     for (let i = 1; i <= NGO_MAX_SPRITES; i++) {
-      this.renderSprite(i, y0, y1);
+      this.renderSprite(i, animCounter, y0, y1);
     }
 
     this.renderFixLayer(y0, y1);
@@ -406,7 +409,7 @@ export class NeoGeoVideo {
    * The zoom ROM maps each output line to a source tile + row within the sprite,
    * allowing vertical shrink from 256 lines (full) down to 1 line.
    */
-  private renderSprite(index: number, y0 = 0, y1 = NGO_SCREEN_HEIGHT): void {
+  private renderSprite(index: number, animCounter: number, y0 = 0, y1 = NGO_SCREEN_HEIGHT): void {
     const x = this.sprX[index]!;
     const yRaw = this.sprYRaw[index]!;
     const size = this.sprSize[index]!;
@@ -481,8 +484,8 @@ export class NeoGeoVideo {
         let tc = w0 | ((w1 & 0xF0) << 12);
         flipV = ((w1 >> 1) & 1) === 1;
         flipH = (w1 & 1) === 1;
-        if (w1 & 0x08) tc = (tc & ~7) | (this.autoAnimCounter & 7);
-        else if (w1 & 0x04) tc = (tc & ~3) | (this.autoAnimCounter & 3);
+        if (w1 & 0x08) tc = (tc & ~7) | (animCounter & 7);
+        else if (w1 & 0x04) tc = (tc & ~3) | (animCounter & 3);
         tc &= this.tileMask;
         tileOff = tc * NGO_TILE_BYTES;
         palBase = ((w1 >> 8) & 0xFF) * 16;
