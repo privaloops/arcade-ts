@@ -314,8 +314,7 @@ export class NeoGeoEmulator {
     });
     this.bus.setZ80RomSwitchCallback((useBios) => {
       this.z80Bus.setUseGameRom(!useBios);
-      // Forward ROM switch to audio worker — the worker Z80 must also
-      // switch from BIOS to game M-ROM to execute the sound driver.
+      // Forward ROM switch to audio worker
       if (this.audioWorker) {
         this.audioWorker.postMessage({ type: 'rom-switch', useGameRom: !useBios });
       }

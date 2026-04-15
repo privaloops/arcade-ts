@@ -572,9 +572,13 @@ self.onmessage = async (e: MessageEvent) => {
       break;
 
     case 'rom-switch':
-      // MAME/FBNeo: only change the ROM mapping, never reset Z80 or YM2610.
       if (z80Bus) {
         z80Bus.setUseGameRom(msg.useGameRom);
+        // Reset Z80 when switching to game ROM so it starts the game
+        // sound driver from address 0x0000 (like sm1.sm1 BIOS does on cmd 0x03)
+        if (msg.useGameRom && z80) {
+          z80.reset();
+        }
       }
       break;
 

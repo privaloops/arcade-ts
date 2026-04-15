@@ -1,5 +1,30 @@
 # Learnings
 
+## Session April 15
+
+### Neo-Geo sprite X position — MAME comparison reveals three bugs
+
+**Context:** fatfury1 sprites disappeared intermittently, especially when moving backward.
+
+**Root cause:** Three differences with MAME's sprite X handling:
+1. **Signed conversion threshold**: we used `>= 0x1E0` (−32), MAME uses `> 0x1F0` (−15). Values in `0x1E0..0x1F0` are valid on-screen X positions that we were converting to negative → sprites rendered off-screen.
+2. **Sticky chain X mask**: MAME masks sticky X to 9 bits (`& 0x1FF`). We didn't mask → X overflowed 9-bit range after many chained sprites.
+3. **Off-screen skip**: MAME skips sprites with X in `[0x140, 0x1F0]` (gap between right edge and left wrap). We had no equivalent → rendered invisible sprites at wrong positions.
+
+**Key insight:** The Neo-Geo uses 9-bit unsigned X coordinates (0-511). Values 0-319 are visible, 320-496 are off-screen right/gap, 497-511 wrap to the left of screen. Never do signed conversion in the forward pass — keep unsigned, convert only at blit time.
+
+### Neo-Geo ADPCM-B silence — shared V-ROM pool offset bug
+
+**Context:** fatfury1 (and all early Neo-Geo games with a single V-ROM) had audio in menus but total silence when a fight started. blazstar, mslug2, mslug3 also affected.
+
+**Root cause:** The YM2610 WASM wrapper (`ym2610_wrapper.cpp`) offsets ADPCM-B reads by `adpcm_a_size`. For games with split pools (separate ADPCM-A/B ROMs), this is correct. But for games with a single V-ROM, `assembleVoiceRom` sets `adpcmASize = totalSize` (the entire ROM). ADPCM-B reads at address X went to `totalSize + X` — past the buffer — returning 0 (silence).
+
+**Why menus worked:** Menu music/SFX used ADPCM-A channels (short samples). Fight BGM used ADPCM-B (longer samples for music playback). Both share the same ROM data on early Neo-Geo hardware.
+
+**Fix:** In `ymfm_external_read`, when `adpcm_a_size >= combined_rom_size` (no split), ADPCM-B reads at `address % combined_rom_size` instead of `adpcm_a_size + address`.
+
+**Key insight:** Neo-Geo ADPCM-A and ADPCM-B address spaces are independent on the YM2610. When MAME has a single `ymsnd` region, both A and B read from the same ROM with no offset. Our wrapper must mirror this.
+
 ## Session April 14
 
 ### Neo-Geo CMC fix layer — three layers of bugs

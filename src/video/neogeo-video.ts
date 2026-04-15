@@ -249,10 +249,10 @@ export class NeoGeoVideo {
     const sticky = ((scb3 >> 6) & 1) === 1;
     const height = (scb3 & 0x3F) + 1; // 6-bit height (0=1 tile)
 
-    // SCB4: X position (9-bit, wraps at 480)
+    // SCB4: X position (9-bit unsigned, values > 0x1F0 wrap to left)
     const scb4 = this.readVramWord(NGO_SCB4_BASE + index);
     let xSigned = (scb4 >> 7) & 0x1FF;
-    if (xSigned >= 0x1E0) xSigned -= 0x200;
+    if (xSigned > 0x1F0) xSigned -= 0x200;
 
     // SCB1: first tile entry (2 words per tile)
     const scb1Base = NGO_SCB1_BASE + index * 64; // 64 words per sprite = 32 tiles max × 2
@@ -365,10 +365,9 @@ export class NeoGeoVideo {
         chainYZoom = scb2 & 0xFF;
         const scb4 = this.readVramWord(NGO_SCB4_BASE + i);
         chainX = (scb4 >> 7) & 0x1FF;
-        if (chainX >= 0x1E0) chainX -= 0x200;
         xZoom = (scb2 >> 8) & 0x0F;
       } else {
-        chainX += xZoom + 1;
+        chainX = (chainX + xZoom + 1) & 0x1FF;
         xZoom = (scb2 >> 8) & 0x0F;
       }
 
@@ -410,7 +409,7 @@ export class NeoGeoVideo {
    * allowing vertical shrink from 256 lines (full) down to 1 line.
    */
   private renderSprite(index: number, animCounter: number, y0 = 0, y1 = NGO_SCREEN_HEIGHT): void {
-    const x = this.sprX[index]!;
+    let x = this.sprX[index]!;
     const yRaw = this.sprYRaw[index]!;
     const size = this.sprSize[index]!;
     const yZoom = this.sprYZoom[index]!;
@@ -418,6 +417,11 @@ export class NeoGeoVideo {
 
     if (size === 0) return;
     if (index >= this._dbgHideFrom && index < this._dbgHideTo) return;
+
+    // MAME: skip sprites in the off-screen X gap (right of visible, left of wrap)
+    if (x >= 0x140 && x <= 0x1F0) return;
+    // Convert 9-bit unsigned to signed screen X (values > 0x1F0 wrap to negative)
+    if (x > 0x1F0) x -= 0x200;
 
     const scb1Base = NGO_SCB1_BASE + index * 64;
     const zoomXMask = ZOOM_X_TABLES[xZoom]!;

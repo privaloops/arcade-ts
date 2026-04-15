@@ -7,6 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Fixed
+- **Neo-Geo sprite X position** — Sprites disappeared when scrolling backward. Three issues: signed conversion threshold was wrong (0x1E0 vs MAME's 0x1F0), sticky chain X lacked 9-bit mask (`& 0x1FF`), and off-screen skip range didn't match MAME (`0x140..0x1F0`).
+- **Neo-Geo worker Z80 ROM switch** — Reset Z80 when switching from BIOS to game ROM so the game sound driver starts cleanly from address 0x0000.
 - **Neo-Geo ADPCM-B silence** — Games with a single V-ROM pool (fatfury1, blazstar, mslug2, etc.) had no in-game audio because ADPCM-B reads were offset by the full ROM size, reading zeros. The YM2610 WASM wrapper now reads from the same address space when there is no A/B split.
 - **Neo-Geo auto-animation speed** — Background animations on kof97/kof98/kof99 were cycling at 60fps instead of the game's programmed speed. The LSPC2 speed divider register (0x3C0006 upper byte) was stored but never consulted. Counter now increments every (speed+1) VBlanks.
 - **Neo-Geo CMC fix layer (HUD)** — Games with CMC encryption (garou, kof99, mslug3) now display their HUD correctly (health bars, timer, score, combos). Three bugs fixed:
