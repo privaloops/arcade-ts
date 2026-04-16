@@ -41,14 +41,16 @@ Un produit qui transforme n'importe quel Raspberry Pi (ou vieux PC) en borne d'a
 
 | Couche | Choix | Raison |
 |--------|-------|--------|
-| Frontend | PWA (HTML/CSS/TS, WebGL2/WebGPU) | Offline, installable, universel |
+| Frontend | Web app (HTML/CSS/TS, WebGL2) hosted on Vercel | Mises à jour instantanées, zéro maintenance |
 | Émulation CPS1/Neo Geo | Émulateurs natifs Sprixe (TS/WASM) | Performance optimisée, contrôle total |
 | Émulation autres systèmes | EmulatorJS (cores LibRetro WASM) | 60+ systèmes d'un coup, éprouvés |
 | Audio | Web Worker + AudioWorklet + SharedArrayBuffer | Autonome, pas de latence |
 | Stockage ROMs | IndexedDB (navigateur) | Pas de backend pour le jeu |
-| Upload ROMs | Micro serveur local (embarqué dans l'image) | Pont téléphone → borne |
+| Upload ROMs | WebRTC P2P (téléphone → borne, via signaling) | ROMs ne transitent jamais par un serveur |
+| Assets visuels | Lazy-load depuis CDN (marquees, screenshots, vidéos) | Pas bundlés, chargés à la demande |
 | Manettes | Gamepad API | Natif, tous les navigateurs |
-| Kiosk | Chromium --kiosk | Boot direct, pas de desktop |
+| Kiosk | Chromium --kiosk --app=URL | Boot direct, 100% online, maj automatiques |
+| Offline (optionnel) | PWA installable | Service worker cache les assets après 1ère visite |
 
 ## Positionnement
 
@@ -68,7 +70,8 @@ Un produit qui transforme n'importe quel Raspberry Pi (ou vieux PC) en borne d'a
 - **Émulateurs natifs CPS1/Neo Geo** — performance supérieure sur le cœur du catalogue arcade (Street Fighter, Metal Slug, KoF, Final Fight)
 - **Zéro OS custom** — juste Chromium sur un Linux minimal. Moins de couches = moins de casse
 - **Le téléphone est la télécommande** — pattern connu (Chromecast, Apple TV), résout le problème du clavier
-- **Mises à jour safe** — le navigateur se met à jour indépendamment, l'app est un site web statique
+- **100% online** — l'app est hébergée, les mises à jour sont instantanées (reload = dernière version). PWA optionnel pour offline
+- **Assets à la demande** — marquees, screenshots, vidéos preview chargés depuis CDN quand l'utilisateur navigue. Rien de pré-bundlé
 
 ## Benchmark préliminaire
 
