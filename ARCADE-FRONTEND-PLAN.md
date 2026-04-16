@@ -645,35 +645,28 @@ cps1-web/
 │
 │
 ├── packages/
-│   └── sprixe-image/                  # RPi SD card image builder
-│       ├── plymouth/
-│       │   ├── sprixe.plymouth        # Plymouth theme descriptor
-│       │   ├── sprixe.script          # Plymouth animation script
-│       │   └── logo.png               # Boot logo (matches HTML splash)
-│       ├── systemd/
-│       │   ├── sprixe-chromium.service # Chromium kiosk autostart
-│       │   ├── sprixe-network.service   # WiFi connectivity check
-│       │   └── sprixe-watchdog.service # Auto-restart on crash
-│       ├── config/
-│       │   ├── chromium-flags.conf    # --kiosk --no-first-run etc.
-│       │   ├── xorg.conf             # Minimal X11 (or cage for Wayland)
-│       │   ├── network/
-│       │   │   ├── wpa_supplicant.conf # WiFi join mode (V1)
-│       │   │   └── hostapd.conf       # WiFi AP mode (V2)
-│       │   └── boot/
-│       │       ├── config.txt         # RPi firmware config (GPU mem, HDMI)
-│       │       └── cmdline.txt        # Kernel params (quiet splash)
-│       ├── scripts/
-│       │   ├── build-image.sh         # Pi-gen based image builder
-│       │   ├── setup.sh               # First-boot provisioning script
-│       │   ├── install-deps.sh        # apt packages (chromium, xorg, node)
-│       │   └── optimize-boot.sh       # Disable unused services, boot time
-│       ├── rootfs/
-│       │   ├── etc/                   # Config files copied to image /etc/
-│       │   └── opt/sprixe/            # App deployment directory structure
-│       ├── Makefile                   # Build targets: image, flash, clean
-│       ├── README.md                  # Image build instructions
-│       └── package.json               # npm scripts: build, flash
+│   └── sprixe-image/                  # RPi SD card image builder (pi-gen)
+│       ├── stage-sprixe/              # Custom pi-gen stage
+│       │   ├── 00-install-deps/
+│       │   │   └── 00-run.sh          # apt install chromium-browser xorg unclutter
+│       │   ├── 01-kiosk-config/
+│       │   │   ├── files/
+│       │   │   │   ├── sprixe-kiosk.service    # Chromium → sprixe.app/play/
+│       │   │   │   ├── sprixe-watchdog.service # Auto-restart on crash
+│       │   │   │   ├── config.txt              # GPU mem=256, KMS, HDMI
+│       │   │   │   └── cmdline.txt             # quiet splash loglevel=3
+│       │   │   └── 00-run.sh          # Copy configs, enable services, autologin
+│       │   ├── 02-plymouth/
+│       │   │   ├── files/
+│       │   │   │   ├── sprixe.plymouth
+│       │   │   │   ├── sprixe.script
+│       │   │   │   └── logo.png       # Boot logo (matches HTML splash)
+│       │   │   └── 00-run.sh          # Install plymouth theme
+│       │   └── 03-optimize/
+│       │       └── 00-run.sh          # Disable bluetooth, avahi, apt-daily, etc.
+│       ├── config                     # pi-gen config (IMG_NAME, RELEASE, stages)
+│       ├── Makefile                   # make image, make clean
+│       └── README.md
 │
 ├── package.json                       # Root workspace config
 └── tsconfig.base.json                 # Shared TS config
@@ -957,62 +950,126 @@ Chromium --kiosk --app=URL    →    sprixe.app/send/  ← Phone upload page
 
 ### 4.2 Base OS
 
-**Raspberry Pi OS Lite (64-bit, Bookworm)**. No desktop. Minimal X11 ou Cage (Wayland kiosk compositor).
+**Raspberry Pi OS Lite (64-bit, Bookworm)**. No desktop. Minimal X11 (ou Cage pour Wayland).
 
-### 4.2 Image Build Pipeline
+### 4.3 Image Build — pi-gen + GitHub Actions CI
 
-Le build utilise **pi-gen** (l'outil officiel de la Raspberry Pi Foundation) avec un stage custom :
+L'image est buildée automatiquement en CI à chaque release. Zéro build local nécessaire.
 
-```
-pi-gen/
-  stage0  — bootstrap (debootstrap)
-  stage1  — base system (apt, kernel)
-  stage2  — lite system (networking, users)
-  stage-sprixe  — CUSTOM: Sprixe Arcade setup
-    ├── 00-install-deps     # chromium, xorg/cage, nodejs 20 LTS
-    ├── 01-deploy-app       # copy built frontend + server to /opt/sprixe/
-    ├── 02-systemd-services # install .service files, enable at boot
-    ├── 03-plymouth-theme   # install boot splash
-    ├── 04-boot-config      # config.txt, cmdline.txt, quiet splash
-    ├── 05-user-setup       # create 'sprixe' user, autologin
-    ├── 06-optimize          # disable bluetooth, avahi, apt-daily, etc.
-    └── 07-firstboot        # first-boot script (expand fs, generate keys)
-```
-
-**Build command** :
-```bash
-cd packages/sprixe-image
-make image    # runs pi-gen, outputs sprixe-arcade-v1.0.0.img.xz
-make flash    # flash to SD card (uses dd or rpi-imager CLI)
-make clean    # remove build artifacts
-```
-
-**CI** : le build image peut tourner dans GitHub Actions avec un runner ARM64 ou via QEMU cross-compilation.
-
-### 4.3 Contenu de l'image
+#### pi-gen stage custom (`stage-sprixe/`)
 
 ```
-/opt/sprixe/
-├── scripts/
-│   └── health-check.sh   # Vérifie que Chromium tourne, redémarre si crash
-└── version.txt            # Version de l'image (pour OTA updates du thin client)
+stage-sprixe/
+  00-install-deps/
+    00-run.sh        # apt install chromium-browser xserver-xorg xinit unclutter
+  01-kiosk-config/
+    files/
+      sprixe-kiosk.service     # Chromium → https://sprixe.app/play/
+      sprixe-watchdog.service  # Health check + auto-restart
+      sprixe-watchdog.timer    # Toutes les 30s
+      config.txt               # gpu_mem=256, KMS, HDMI force
+      cmdline.txt              # quiet splash loglevel=3
+    00-run.sh                  # Copie configs, enable services, autologin
+  02-plymouth/
+    files/
+      sprixe.plymouth          # Theme descriptor
+      sprixe.script            # Animation script
+      logo.png                 # Boot logo (identique au splash HTML)
+    00-run.sh                  # Install plymouth theme, set default
+  03-optimize/
+    00-run.sh                  # Disable bluetooth, avahi, apt-daily, ModemManager
 ```
 
-Pas de frontend ni de serveur embarqué — tout est hébergé sur Vercel. L'image ne contient que le minimum pour lancer Chromium en kiosk.
+#### pi-gen config
 
-### 4.4 Chromium Kiosk
+```
+IMG_NAME=sprixe-arcade
+RELEASE=bookworm
+TARGET_HOSTNAME=sprixe
+FIRST_USER_NAME=sprixe
+FIRST_USER_PASS=sprixe
+LOCALE_DEFAULT=en_US.UTF-8
+KEYBOARD_KEYMAP=us
+ENABLE_SSH=0
+STAGE_LIST="stage0 stage1 stage2 stage-sprixe"
+```
 
-```bash
-# /etc/systemd/system/sprixe-chromium.service
+#### GitHub Actions CI — build automatique à chaque release
+
+```yaml
+# .github/workflows/build-image.yml
+name: Build RPi Image
+on:
+  release:
+    types: [published]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build with pi-gen
+        uses: usimd/pi-gen-action@v1
+        with:
+          image-name: sprixe-arcade
+          release: bookworm
+          hostname: sprixe
+          username: sprixe
+          password: sprixe
+          enable-ssh: false
+          stage-list: stage0 stage1 stage2 ./packages/sprixe-image/stage-sprixe
+          verbose-output: true
+
+      - name: Compress image
+        run: xz -9 deploy/sprixe-arcade.img
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: deploy/sprixe-arcade.img.xz
+```
+
+**Output** : `sprixe-arcade.img.xz` (~500-700MB) attaché à la GitHub Release, téléchargeable depuis `sprixe.app/download`.
+
+#### Makefile local (développement/debug uniquement)
+
+```makefile
+image:
+	cd pi-gen && sudo ./build-docker.sh
+clean:
+	cd pi-gen && sudo ./build-docker.sh clean
+```
+
+### 4.4 Ce que l'image contient
+
+```
+Raspberry Pi OS Lite (Bookworm 64-bit)
+├── chromium-browser          # Navigateur kiosk
+├── xserver-xorg + xinit      # X11 minimal (pas de desktop)
+├── unclutter                  # Cache le curseur souris
+├── plymouth sprixe theme      # Boot splash (logo identique au HTML)
+└── systemd services:
+    ├── sprixe-kiosk.service   # Chromium → sprixe.app/play/
+    └── sprixe-watchdog.timer  # Health check toutes les 30s
+```
+
+**Ce qu'elle ne contient PAS** : Node.js, serveur, frontend bundlé, ROMs, media assets. C'est un **thin client pur**.
+
+### 4.5 Chromium Kiosk Service
+
+```ini
 [Unit]
-Description=Sprixe Arcade (Chromium Kiosk)
-After=graphical.target sprixe-server.service
-Wants=sprixe-server.service
+Description=Sprixe Arcade Kiosk
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
 User=sprixe
 Environment=DISPLAY=:0
+ExecStartPre=/usr/bin/xinit -- :0 -nocursor &
+ExecStartPre=/bin/sleep 2
 ExecStartPre=/usr/bin/xset -dpms
 ExecStartPre=/usr/bin/xset s off
 ExecStart=/usr/bin/chromium-browser \
@@ -1030,77 +1087,63 @@ Restart=always
 RestartSec=3
 
 [Install]
-WantedBy=graphical.target
+WantedBy=multi-user.target
 ```
 
-### 4.5 Watchdog Service
+### 4.6 Boot Config
 
-```bash
-# /etc/systemd/system/sprixe-watchdog.service
-[Unit]
-Description=Sprixe Health Monitor
+```ini
+# /boot/firmware/config.txt
+gpu_mem=256
+hdmi_force_hotplug=1
+disable_overscan=1
+dtoverlay=vc4-kms-v3d
 
-[Service]
-Type=oneshot
-ExecStart=/opt/sprixe/scripts/health-check.sh
-# Vérifie que Chromium + server tournent, redémarre si crash
+# /boot/firmware/cmdline.txt
+... quiet splash loglevel=3 vt.global_cursor_default=0
 ```
-
-Timer associé qui exécute le health check toutes les 30 secondes.
 
 ### 4.7 Plymouth Boot Splash
 
-```ini
-# plymouth/sprixe.plymouth
-[Plymouth Theme]
-Name=Sprixe Arcade
-Description=Sprixe Arcade boot splash
-ModuleName=script
+Logo Sprixe centré, fond noir, glow pulse. Visuellement **identique au splash HTML** pour transition invisible (Plymouth → Chromium).
 
-[script]
-ImageDir=/usr/share/plymouth/themes/sprixe
-ScriptFile=/usr/share/plymouth/themes/sprixe/sprixe.script
-```
+### 4.8 Network
 
-Logo PNG centré, fond noir, glow pulse. Visuellement identique au splash HTML pour transition invisible.
+**V1** : Join existing WiFi. Configuré pendant le flash via Pi Imager (interface graphique, champ WiFi intégré). Aucun fichier à éditer manuellement.
 
-### 4.8 Boot Config
+**V2** : WiFi AP mode — le RPi crée son propre réseau "Sprixe-Arcade" (`hostapd` + `dnsmasq`). Pas besoin de routeur/internet pour le P2P local.
 
-```ini
-# config.txt (GPU, HDMI)
-gpu_mem=256           # 256MB GPU pour WebGL
-hdmi_force_hotplug=1  # Forcer HDMI même sans écran détecté
-disable_overscan=1    # Pas de bordures noires
-dtoverlay=vc4-kms-v3d # KMS driver (requis pour Chromium GPU accel)
+### 4.9 Mises à jour
 
-# cmdline.txt
-quiet splash loglevel=3 vt.global_cursor_default=0
-```
+**Frontend** : automatiques. Déployer sur Vercel = tous les kiosks ont la nouvelle version au prochain reload. Zéro intervention.
 
-### 4.9 Network
+**Image SD** : V1 manuelles (reflash avec nouvelle image). V2 OTA pour les mises à jour système (kernel, Chromium).
 
-**V1** : Join existing WiFi (configuré pendant le flash via Pi Imager ou `wpa_supplicant.conf` pré-rempli).
-
-**V2** : WiFi AP mode — le RPi crée son propre réseau "Sprixe-Arcade". Le phone se connecte directement. Utilise `hostapd` + `dnsmasq`. Pas besoin de routeur/internet.
-
-### 4.10 Mises à jour
-
-**Frontend** : automatiques — l'app est hébergée sur Vercel. Déployer = tous les kiosks ont la nouvelle version au prochain reload/refresh. Zéro intervention côté borne.
-
-**Image SD** : V1 manuelles (reflash). V2 OTA pour les mises à jour système (kernel, Chromium, configs).
-
-### 4.11 Boot Time Target
+### 4.10 Boot Time Target
 
 Objectif : **< 12 secondes** (power → game browser visible).
 
 | Étape | Durée cible | Optimisation |
 |-------|-------------|-------------|
 | Kernel boot | ~3s | `quiet splash`, kernel minimal |
-| Plymouth | 3-5s | Masque le boot, glow animation |
-| X11 + Chromium launch | ~3s | Preloaded profile, no first-run |
-| App init (WASM load) | ~2s | Precached par service worker |
+| Plymouth splash | 3-5s | Masque le boot, glow animation |
+| X11 + Chromium | ~3s | Profil pré-chargé, no first-run |
+| App init (WASM) | ~2s | Service worker precache |
 
-Optimisations : désactiver bluetooth, avahi-daemon, apt-daily-upgrade, ModemManager. `systemd-analyze blame` pour identifier les services lents.
+### 4.11 Expérience utilisateur finale
+
+```
+1. Télécharger sprixe-arcade.img.xz depuis sprixe.app/download
+2. Ouvrir Raspberry Pi Imager
+3. Sélectionner l'image Sprixe, configurer WiFi (interface graphique)
+4. Flasher sur carte SD
+5. Insérer SD, brancher HDMI + manette + alimentation
+6. Boot → logo Sprixe → écran d'accueil avec QR code
+7. Scanner QR → envoyer ROMs depuis le téléphone
+8. Jouer
+
+Temps total : ~3 minutes. Zéro terminal. Zéro clavier. Zéro SSH.
+```
 
 ---
 
