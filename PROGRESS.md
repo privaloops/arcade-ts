@@ -26,7 +26,7 @@
 - `editor/neogeo-tile-encoder.ts` → `@sprixe/engine/video/neogeo-tile-encoder.ts` (plan: edit).
   Reason: `neogeo-video.ts` imports decodeNeoGeoRow/decodeFixRow.
 - `wasm/` → `packages/sprixe-engine/wasm/` (plan did not specify). Reason: engine audio imports `../../wasm/*.mjs`.
-- `tests/68000/`, `tests/z80/` → `packages/sprixe-engine/tsets/` (plan did not specify). Reason: CPU test fixtures belong to engine.
+- `tests/68000/`, `tests/z80/` → `packages/sprixe-engine/tests/` (plan did not specify). Reason: CPU test fixtures belong to engine.
 - `tsconfig.json` at repo root: removed (each package has its own, extending `tsconfig.base.json`).
 - `vite.config.ts` at repo root: removed (each consumer package has its own).
 - `@sprixe/edit/tsconfig.json`: no `rootDir` (allows TS to include `@sprixe/engine/*` files outside edit's src/).
