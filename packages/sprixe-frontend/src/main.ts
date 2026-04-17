@@ -16,11 +16,14 @@ import "./styles/base.css";
 import { MOCK_GAMES } from "./data/mock-games";
 import { GamepadNav } from "./input/gamepad-nav";
 import { BrowserScreen } from "./screens/browser/browser-screen";
+import { HintsBar } from "./ui/hints-bar";
 
 const app = document.getElementById("app");
 if (!app) throw new Error("#app container missing");
 
 const browser = new BrowserScreen(app, { initialGames: MOCK_GAMES });
+const hints = new HintsBar(app);
+hints.setContext("browser");
 
 const gamepad = new GamepadNav();
 gamepad.onAction((action) => {

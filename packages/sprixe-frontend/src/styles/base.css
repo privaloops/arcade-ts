@@ -200,3 +200,39 @@ html, body {
   color: var(--af-accent-gold);
   font-size: 0.9rem;
 }
+
+/* --- Hints bar --- */
+
+.af-hints-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 14px 24px;
+  background: var(--af-bg-overlay);
+  border-top: 1px solid var(--af-bg-card);
+  font-size: 0.85rem;
+  color: var(--af-text-secondary);
+  z-index: 50;
+}
+
+.af-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.af-hint-button {
+  color: var(--af-accent);
+  font-family: var(--af-font-display);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+.af-hint-label {
+  color: var(--af-text-secondary);
+}
