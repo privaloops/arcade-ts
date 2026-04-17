@@ -1,0 +1,58 @@
+/*
+ * Sprixe Arcade design tokens (§2.1 of ARCADE-FRONTEND-PLAN.md).
+ *
+ * All surface colors, accents, system badges, typography, and motion
+ * reduction are exposed as CSS custom properties so individual screens
+ * can theme themselves by overriding a single variable. Never hard-code
+ * a hex value in screen-specific CSS.
+ */
+
+:root {
+  /* Background layers */
+  --af-bg-deep:       #050508;
+  --af-bg-primary:    #0a0a10;
+  --af-bg-card:       #12121a;
+  --af-bg-card-hover: #1a1a28;
+  --af-bg-overlay:    rgba(5, 5, 8, 0.92);
+
+  /* Accent colors */
+  --af-accent:        #00d4ff;
+  --af-accent-glow:   #00d4ff33;
+  --af-accent-warm:   #ff6b2e;
+  --af-accent-gold:   #ffd700;
+
+  /* System badges */
+  --af-badge-cps1:    #e8003c;
+  --af-badge-neogeo:  #00b4d8;
+
+  /* Text */
+  --af-text-primary:   #f0f0f5;
+  --af-text-secondary: #a0a0b0;
+  --af-text-muted:     #606070;
+
+  /* Typography */
+  --af-font-display: "Rajdhani", sans-serif;
+  --af-font-body:    "Inter", system-ui, sans-serif;
+
+  /* Size scale — readable from ~1m at 1080p */
+  --af-size-game-title: clamp(1.4rem, 2.5vw, 2rem);
+  --af-size-metadata:   clamp(0.9rem, 1.5vw, 1.2rem);
+  --af-size-badge:      clamp(0.7rem, 1.2vw, 0.9rem);
+  --af-size-section:    clamp(1.2rem, 2vw, 1.6rem);
+
+  /* Motion budget (§2.1) */
+  --af-motion:         1;
+  --af-ease-out:       cubic-bezier(0.16, 1, 0.3, 1);
+  --af-dur-selection:  120ms;
+  --af-dur-screen:     250ms;
+  --af-dur-overlay:    200ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --af-motion: 0;
+    --af-dur-selection: 0ms;
+    --af-dur-screen: 0ms;
+    --af-dur-overlay: 0ms;
+  }
+}

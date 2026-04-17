@@ -1,6 +1,5 @@
 /*
- * Minimal baseline stylesheet so Phase 1.5 renders correctly in the
- * browser. Full design-token system lands in Phase 1.7.
+ * Reset + screen-level layout. Consumes --af-* tokens from tokens.css.
  */
 
 * { box-sizing: border-box; }
@@ -9,14 +8,16 @@ html, body {
   margin: 0;
   padding: 0;
   height: 100%;
-  background: #0a0a10;
-  color: #f0f0f5;
-  font-family: Inter, system-ui, sans-serif;
+  background: var(--af-bg-primary);
+  color: var(--af-text-primary);
+  font-family: var(--af-font-body);
 }
 
 #app {
   height: 100%;
 }
+
+/* --- Browser screen layout --- */
 
 .af-browser-screen {
   display: flex;
@@ -24,6 +25,7 @@ html, body {
   gap: 16px;
   padding: 24px;
   height: 100vh;
+  background: var(--af-bg-primary);
 }
 
 .af-browser-filter-pane {
@@ -42,9 +44,11 @@ html, body {
 .af-browser-preview-pane {
   position: relative;
   overflow: hidden;
-  background: #12121a;
+  background: var(--af-bg-card);
   border-radius: 8px;
 }
+
+/* --- Filter bar --- */
 
 .af-filter-bar {
   display: flex;
@@ -54,24 +58,27 @@ html, body {
 }
 
 .af-filter-pill {
-  background: #12121a;
-  color: #a0a0b0;
+  background: var(--af-bg-card);
+  color: var(--af-text-secondary);
   border: none;
   padding: 8px 14px;
   border-radius: 999px;
-  font-family: Rajdhani, Inter, sans-serif;
+  font-family: var(--af-font-display);
   font-size: 0.9rem;
   letter-spacing: 0.05em;
   display: inline-flex;
   align-items: center;
   gap: 8px;
   cursor: pointer;
+  transition: background calc(var(--af-dur-selection) * var(--af-motion)) var(--af-ease-out),
+              color calc(var(--af-dur-selection) * var(--af-motion)) var(--af-ease-out),
+              box-shadow calc(var(--af-dur-selection) * var(--af-motion)) var(--af-ease-out);
 }
 
 .af-filter-pill.active {
-  background: rgba(0, 212, 255, 0.18);
-  color: #f0f0f5;
-  box-shadow: 0 0 0 1px #00d4ff44;
+  background: var(--af-accent-glow);
+  color: var(--af-text-primary);
+  box-shadow: 0 0 0 1px var(--af-accent-glow), 0 0 24px var(--af-accent-glow);
 }
 
 .af-filter-count {
@@ -81,9 +88,11 @@ html, body {
 
 .af-filter-visible-count {
   margin-left: auto;
-  color: #606070;
+  color: var(--af-text-muted);
   font-size: 0.8rem;
 }
+
+/* --- Game list --- */
 
 .af-game-list {
   position: relative;
@@ -98,9 +107,7 @@ html, body {
   height: 100%;
 }
 
-.af-game-list-spacer {
-  width: 100%;
-}
+.af-game-list-spacer { width: 100%; }
 
 .af-game-list-item {
   position: absolute;
@@ -111,38 +118,45 @@ html, body {
   display: flex;
   align-items: center;
   gap: 12px;
-  color: #a0a0b0;
-  transition: background 0.15s;
+  color: var(--af-text-secondary);
+  transition: background calc(var(--af-dur-selection) * var(--af-motion)) var(--af-ease-out),
+              color calc(var(--af-dur-selection) * var(--af-motion)) var(--af-ease-out);
 }
 
 .af-game-list-item.selected {
-  background: #1a1a28;
-  color: #f0f0f5;
-  box-shadow: inset 3px 0 0 #00d4ff;
+  background: var(--af-bg-card-hover);
+  color: var(--af-text-primary);
+  box-shadow: inset 3px 0 0 var(--af-accent), 0 0 32px var(--af-accent-glow);
 }
 
 .af-game-list-favorite {
-  color: #ffd700;
+  color: var(--af-accent-gold);
 }
 
 .af-game-list-title {
   flex: 1;
-  font-family: Rajdhani, Inter, sans-serif;
-  font-size: 1.2rem;
+  font-family: var(--af-font-display);
+  font-size: var(--af-size-game-title);
   font-weight: 500;
 }
 
+/* --- System badges --- */
+
 .af-badge {
-  font-size: 0.75rem;
+  font-size: var(--af-size-badge);
   padding: 2px 8px;
   border-radius: 4px;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  color: #f0f0f5;
+  color: var(--af-text-primary);
+  font-family: var(--af-font-body);
+  font-weight: 600;
 }
 
-.af-badge--cps1 { background: #e8003c; }
-.af-badge--neogeo { background: #00b4d8; }
+.af-badge--cps1   { background: var(--af-badge-cps1); }
+.af-badge--neogeo { background: var(--af-badge-neogeo); }
+
+/* --- Video preview pane --- */
 
 .af-video-preview {
   display: flex;
@@ -157,7 +171,7 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #050508;
+  background: var(--af-bg-deep);
   border-radius: 6px;
   overflow: hidden;
 }
@@ -170,18 +184,19 @@ html, body {
 
 .af-video-preview-title {
   margin-top: 16px;
-  font-family: Rajdhani, sans-serif;
-  font-size: 1.6rem;
+  font-family: var(--af-font-display);
+  font-size: var(--af-size-section);
   font-weight: 600;
 }
 
 .af-video-preview-meta {
-  color: #a0a0b0;
+  color: var(--af-text-secondary);
   margin-top: 4px;
+  font-size: var(--af-size-metadata);
 }
 
 .af-video-preview-favorite {
   margin-top: 8px;
-  color: #ffd700;
+  color: var(--af-accent-gold);
   font-size: 0.9rem;
 }

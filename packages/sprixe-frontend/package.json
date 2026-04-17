@@ -10,6 +10,8 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@fontsource/inter": "^5.2.8",
+    "@fontsource/rajdhani": "^5.2.7",
     "@sprixe/engine": "*",
     "peerjs": "^1.5.4"
   },

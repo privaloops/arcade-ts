@@ -6,6 +6,11 @@
  * real catalogue and layer the pause overlay / settings on top.
  */
 
+import "@fontsource/rajdhani/500.css";
+import "@fontsource/rajdhani/600.css";
+import "@fontsource/inter/400.css";
+import "@fontsource/inter/600.css";
+import "./styles/tokens.css";
 import "./styles/base.css";
 
 import { MOCK_GAMES } from "./data/mock-games";
