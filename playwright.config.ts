@@ -12,7 +12,7 @@ export default defineConfig({
     trace: 'on-first-retry',
   },
   webServer: {
-    command: 'npm run dev -- --port 5173',
+    command: 'npm -w @sprixe/edit run dev -- --port 5173',
     port: 5173,
     reuseExistingServer: true,
     timeout: 10_000,

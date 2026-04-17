@@ -14,4 +14,6 @@ playwright-report/
 # ROM files — never commit copyrighted material
 public/*.zip
 public/roms/
+**/public/roms/
+**/public/*.zip
 .rom-cache/
