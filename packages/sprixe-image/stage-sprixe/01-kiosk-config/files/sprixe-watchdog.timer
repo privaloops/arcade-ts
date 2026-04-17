@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Sprixe watchdog every 30s
+
+[Timer]
+OnBootSec=60s
+OnUnitActiveSec=30s
+Unit=sprixe-watchdog.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,6 @@
+[Unit]
+Description=Sprixe Kiosk Health Watchdog
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/sprixe-watchdog.sh

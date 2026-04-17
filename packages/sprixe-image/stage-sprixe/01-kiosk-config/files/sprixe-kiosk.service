@@ -1,0 +1,29 @@
+[Unit]
+Description=Sprixe Arcade Kiosk
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sprixe
+Environment=DISPLAY=:0
+ExecStartPre=/usr/bin/xinit -- :0 -nocursor &
+ExecStartPre=/bin/sleep 2
+ExecStartPre=/usr/bin/xset -dpms
+ExecStartPre=/usr/bin/xset s off
+ExecStart=/usr/bin/chromium-browser \
+  --kiosk --no-first-run --disable-infobars \
+  --noerrdialogs --disable-translate \
+  --disable-session-crashed-bubble \
+  --disable-component-update \
+  --autoplay-policy=no-user-gesture-required \
+  --enable-features=SharedArrayBuffer \
+  --enable-gpu-rasterization --enable-zero-copy \
+  --ignore-gpu-blocklist \
+  --user-data-dir=/home/sprixe/.chromium \
+  https://sprixe.app/play/
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

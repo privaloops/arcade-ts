@@ -1,0 +1,8 @@
+[Plymouth Theme]
+Name=Sprixe
+Description=Sprixe Arcade boot splash (logo + glow pulse)
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/sprixe
+ScriptFile=/usr/share/plymouth/themes/sprixe/sprixe.script

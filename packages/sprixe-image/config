@@ -1,0 +1,9 @@
+IMG_NAME=sprixe-arcade
+RELEASE=bookworm
+TARGET_HOSTNAME=sprixe
+FIRST_USER_NAME=sprixe
+FIRST_USER_PASS=sprixe
+LOCALE_DEFAULT=en_US.UTF-8
+KEYBOARD_KEYMAP=us
+ENABLE_SSH=0
+STAGE_LIST="stage0 stage1 stage2 stage-sprixe"
