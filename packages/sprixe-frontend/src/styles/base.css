@@ -19,11 +19,23 @@ html, body {
 }
 
 .af-browser-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 24px;
+  height: 100vh;
+}
+
+.af-browser-filter-pane {
+  flex: 0 0 auto;
+}
+
+.af-browser-body {
+  flex: 1;
   display: grid;
   grid-template-columns: minmax(360px, 1fr) minmax(360px, 1fr);
   gap: 24px;
-  padding: 24px;
-  height: 100vh;
+  min-height: 0;
 }
 
 .af-browser-list-pane,
@@ -32,6 +44,45 @@ html, body {
   overflow: hidden;
   background: #12121a;
   border-radius: 8px;
+}
+
+.af-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.af-filter-pill {
+  background: #12121a;
+  color: #a0a0b0;
+  border: none;
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-family: Rajdhani, Inter, sans-serif;
+  font-size: 0.9rem;
+  letter-spacing: 0.05em;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.af-filter-pill.active {
+  background: rgba(0, 212, 255, 0.18);
+  color: #f0f0f5;
+  box-shadow: 0 0 0 1px #00d4ff44;
+}
+
+.af-filter-count {
+  font-size: 0.75rem;
+  opacity: 0.8;
+}
+
+.af-filter-visible-count {
+  margin-left: auto;
+  color: #606070;
+  font-size: 0.8rem;
 }
 
 .af-game-list {

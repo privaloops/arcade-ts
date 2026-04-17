@@ -24,6 +24,7 @@ export type NavAction =
   | "back"
   | "favorite"
   | "settings"
+  | "bumper-left"
   | "bumper-right"
   | "coin-hold";
 
@@ -37,6 +38,7 @@ export interface ButtonMapping {
   back: number;
   favorite: number;
   settings: number;
+  bumperLeft: number;
   bumperRight: number;
   coin: number;
 }
@@ -50,6 +52,7 @@ export const DEFAULT_MAPPING: ButtonMapping = {
   back: 1,           // B / circle
   favorite: 3,       // Y / triangle
   settings: 9,       // Start
+  bumperLeft: 4,     // LB / L1
   bumperRight: 5,    // RB / R1
   coin: 8,           // Select
 };
@@ -198,6 +201,7 @@ export class GamepadNav {
     yield ["back", m.back];
     yield ["favorite", m.favorite];
     yield ["settings", m.settings];
+    yield ["bumper-left", m.bumperLeft];
     yield ["bumper-right", m.bumperRight];
     yield ["coin-hold", m.coin];
   }
