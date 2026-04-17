@@ -2,11 +2,20 @@
   "name": "sprixe",
   "version": "1.1.0",
   "description": "CPS1 (Capcom Play System 1) emulator in the browser — TypeScript + WebGL2 + AudioWorklet + WASM",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "dev": "vite",
+    "dev:edit": "npm -w @sprixe/edit run dev",
+    "dev:frontend": "npm -w @sprixe/frontend run dev",
+    "dev:site": "npm -w @sprixe/site run dev",
     "build": "tsc && vite build",
+    "build:all": "npm -ws --if-present run build",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:all": "npm -ws --if-present run test",
     "test:watch": "vitest",
     "test:e2e": "playwright test --grep-invert 'Game Matrix'",
     "test:e2e:all": "playwright test",
