@@ -24,7 +24,7 @@ import {
   NGO_SCB1_BASE, NGO_SCB2_BASE, NGO_SCB3_BASE, NGO_SCB4_BASE, NGO_FIX_BASE,
   NGO_TILE_BYTES, NGO_FIX_TILE_BYTES,
 } from '../neogeo-constants';
-import { decodeNeoGeoRow, decodeFixRow } from '../editor/neogeo-tile-encoder';
+import { decodeNeoGeoRow, decodeFixRow } from './neogeo-tile-encoder';
 import { FixBankType } from '../memory/neogeo-cmc';
 
 // ---------------------------------------------------------------------------

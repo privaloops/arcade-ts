@@ -6,7 +6,7 @@ import {
   writeNeoGeoPixel,
   decodeFixRow,
   readFixTile,
-} from '../editor/neogeo-tile-encoder';
+} from '../video/neogeo-tile-encoder';
 import { NGO_TILE_BYTES, NGO_FIX_TILE_BYTES } from '../neogeo-constants';
 
 describe('Neo-Geo Tile Encoder', () => {
