@@ -23,12 +23,14 @@
    - 3.3 [New Modules](#33-new-modules)
    - 3.4 [Build Pipeline](#34-build-pipeline)
    - 3.5 [Monorepo Package Configs](#35-monorepo-package-configs)
+   - 3.6 [Frontend Test Setup](#36-frontend-test-setup)
    - 3.7 [Service Worker / PWA](#37-service-worker--pwa)
    - 3.8 [ROM Transfer (WebRTC P2P)](#38-rom-transfer-webrtc-p2p)
    - 3.9 [Input System Architecture](#39-input-system-architecture)
    - 3.10 [Media CDN Pipeline](#310-media-cdn-pipeline)
 4. [Kiosk / RPi Image](#4-kiosk--rpi-image)
 5. [Implementation Phases](#5-implementation-phases)
+   - 5.0 [Test Strategy](#50-test-strategy)
 6. [Risks and Mitigations](#6-risks-and-mitigations)
 7. [Agent Execution Guide](#7-agent-execution-guide)
 
@@ -954,6 +956,117 @@ export default defineConfig({
 
 **Validation checkpoint**: After setting up these configs, run `npx tsc --noEmit` from root. Zero errors = proceed.
 
+### 3.6 Frontend Test Setup
+
+Le package `@sprixe/frontend` doit pouvoir être validé par `npm test -w @sprixe/frontend` (Vitest, jsdom) **et** par `npx playwright test` (E2E navigateur réel). Les autres packages réutilisent la config Vitest existante du repo.
+
+#### Vitest config (`packages/sprixe-frontend/vitest.config.ts`)
+
+```ts
+import { defineConfig } from 'vitest/config';
+import path from 'path';
+
+export default defineConfig({
+  test: {
+    environment: 'jsdom',
+    setupFiles: ['./src/__tests__/setup.ts'],
+    globals: false,
+    include: ['src/**/*.test.ts']
+  },
+  resolve: {
+    alias: {
+      '@sprixe/engine': path.resolve(__dirname, '../sprixe-engine/src')
+    }
+  }
+});
+```
+
+#### Setup file (`packages/sprixe-frontend/src/__tests__/setup.ts`)
+
+```ts
+import 'fake-indexeddb/auto';            // IndexedDB en mémoire pour RomDB
+import { vi } from 'vitest';
+
+// Gamepad API mock — tests poussent des snapshots via globalThis.__setGamepad()
+let _pad: Gamepad | null = null;
+(globalThis as any).__setGamepad = (pad: Partial<Gamepad> | null) => {
+  _pad = pad as Gamepad | null;
+};
+vi.stubGlobal('navigator', {
+  ...globalThis.navigator,
+  getGamepads: () => [_pad, null, null, null] as (Gamepad | null)[]
+});
+
+// requestAnimationFrame déterministe (avance manuellement via vi.advanceTimersByTime)
+vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => setTimeout(() => cb(performance.now()), 16));
+```
+
+#### Playwright config (extension de `playwright.config.ts` racine)
+
+Ajouter un nouveau projet `arcade` qui pointe sur le dev server du frontend et injecte le mock gamepad via `addInitScript` :
+
+```ts
+{
+  name: 'arcade',
+  testDir: './tests/e2e/arcade',
+  use: {
+    baseURL: 'http://localhost:5174',  // port @sprixe/frontend
+    launchOptions: {
+      args: ['--enable-features=SharedArrayBuffer']
+    }
+  },
+  webServer: {
+    command: 'npm run dev:frontend',
+    url: 'http://localhost:5174',
+    reuseExistingServer: !process.env.CI
+  }
+}
+```
+
+#### Helpers E2E (`tests/e2e/arcade/_helpers/gamepad.ts`)
+
+```ts
+import type { Page } from '@playwright/test';
+
+export async function installGamepadMock(page: Page) {
+  await page.addInitScript(() => {
+    let pad: Gamepad | null = null;
+    (window as any).__pressButton = (idx: number, ms = 50) => {
+      pad = { buttons: Object.assign([], { [idx]: { pressed: true, value: 1 } }) } as any;
+      setTimeout(() => { pad = null; }, ms);
+    };
+    (window as any).__holdButton = (idx: number, ms: number) => {
+      pad = { buttons: Object.assign([], { [idx]: { pressed: true, value: 1 } }) } as any;
+      return new Promise<void>(r => setTimeout(() => { pad = null; r(); }, ms));
+    };
+    Object.defineProperty(navigator, 'getGamepads', {
+      value: () => [pad, null, null, null]
+    });
+  });
+}
+```
+
+#### Conventions
+
+- Vitest : `packages/sprixe-frontend/src/<module>/<file>.test.ts` (colocated)
+- Playwright arcade : `tests/e2e/arcade/<phase>-<flow>.spec.ts`
+- Chaque spec E2E commence par `await installGamepadMock(page)` puis `await page.goto('/')`
+- Pas de timeout par défaut > 5s sauf justification (transferts P2P : 15s)
+
+#### Dépendances à ajouter (`packages/sprixe-frontend/package.json`)
+
+```json
+{
+  "devDependencies": {
+    "vitest": "^2.1.0",
+    "jsdom": "^25.0.0",
+    "fake-indexeddb": "^6.0.0"
+  }
+}
+```
+
+Playwright est déjà installé à la racine (cf. `playwright.config.ts` existant).
+
 ### 3.7 Service Worker / PWA (optional offline)
 
 **Online-first by default**. PWA optionnel pour les utilisateurs qui veulent du offline.
@@ -1302,6 +1415,37 @@ Temps total : ~3 minutes. Zéro terminal. Zéro clavier. Zéro SSH.
 
 ## 5. Implementation Phases
 
+### 5.0 Test Strategy
+
+Chaque sous-étape numérotée des Phases 1→4 doit se terminer par un **bloc « Tests »** standardisé. Aucun passage à la sous-étape suivante tant que le bloc n'est pas vert.
+
+#### Forme imposée
+
+```markdown
+**Tests** :
+- Vitest : `<chemin/fichier>.test.ts` — <comportements couverts>
+- E2E : `tests/e2e/arcade/<scenario>.spec.ts` — <flow utilisateur>
+- ✅ Checkpoint : `npm test -w @sprixe/frontend && npx playwright test --project=arcade <scenario>` → 0 fail
+```
+
+#### Doctrine
+
+- **Vitest = logique pure**, en jsdom : routers, managers, parsers, wrappers IDB, codecs WebRTC, handlers d'input. Mock systématique de PeerJS, Web Audio, MediaDevices.
+- **Playwright = flow utilisateur**, navigateur réel : navigation gamepad, transitions d'écran, bootstrap de l'émulateur, save/load state, transferts P2P (deux contexts Playwright dans le même test).
+- **Pas de tests « fumée »** : chaque test doit reproduire un comportement décrit dans le bloc UX (§2) ou architecture (§3).
+- **Mock gamepad** : tous les tests E2E utilisent `installGamepadMock(page)` (cf. §3.6) — on n'utilise jamais l'API gamepad réelle en CI.
+
+#### Critère de fin de phase
+
+Le *deliverable* énoncé par chaque phase doit être couvert par **au moins un test E2E end-to-end**. Exemple Phase 2 deliverable « Load ROM manually, see in browser, play, pause, save, quit » → `select-play-quit.spec.ts` doit exécuter ce flow complet.
+
+#### Anti-flaky
+
+- Pas de `page.waitForTimeout()` arbitraire — utiliser `waitForSelector` ou `expect.poll()`.
+- Tests P2P : un seul test par PeerJS Cloud ID (ID aléatoire par test, pas de réutilisation).
+- Tests vidéo CDN : intercepter via `page.route()` et servir un MP4 fixture local — jamais de fetch réseau réel en CI.
+- Si un test devient flaky (>1% en CI), il est désactivé via `test.skip()` avec issue GitHub liée — pas de retry magique.
+
 ### Phase 0: Monorepo Setup (1 week)
 **Goal**: Convert to monorepo without breaking anything.
 
@@ -1348,31 +1492,132 @@ Temps total : ~3 minutes. Zéro terminal. Zéro clavier. Zéro SSH.
 ### Phase 1: Frontend Skeleton + Gamepad Nav (2 weeks)
 **Goal**: Game browser with gamepad navigation and mock data.
 
-1. Create `packages/sprixe-frontend/` with Vite config
-2. Implement `GamepadNav` (polling, actions, key repeat)
-3. Implement `FocusManager` (spatial navigation)
-4. Implement `ScreenRouter` (state machine)
-5. Build game browser: vertical list + video preview panel
-6. Filter bar (All / CPS-1 / Neo-Geo / Favorites)
-7. CSS design tokens, dark arcade theme
-8. HTML splash screen
-9. Navigation hints bar with dynamic button labels
-10. Mock data: 5-10 hardcoded games with placeholder screenshots
+> Chaque sous-étape suit la doctrine §5.0 : pas de passage à la suivante tant que le bloc **Tests** n'est pas vert.
+
+1. **Create `packages/sprixe-frontend/` with Vite config**
+   - **Tests** :
+     - Vitest : N/A (infra de package)
+     - E2E : N/A
+     - ✅ Checkpoint : `npm run dev:frontend` démarre sur :5174, page blanche, console sans erreur
+
+2. **Implement `GamepadNav` (polling, actions, key repeat)**
+   - **Tests** :
+     - Vitest : `src/input/gamepad-nav.test.ts` — émission d'action sur transition `pressed` → `released`, key-repeat (hold initial 250ms puis répétition tous les 80ms), debounce des taps <16ms, ignore les boutons non mappés
+     - E2E : couvert indirectement par les sous-étapes 5 et 6
+     - ✅ Checkpoint : `npm test -w @sprixe/frontend gamepad-nav` → 0 fail
+
+3. **Implement `FocusManager` (spatial navigation)**
+   - **Tests** :
+     - Vitest : `src/ui/focus-manager.test.ts` — grille 3×3 mock, navigation UP/DOWN/LEFT/RIGHT, wrap-around opt-in, blocage aux bords sans wrap, focus initial = premier élément focusable
+     - E2E : couvert via game browser
+     - ✅ Checkpoint : `npm test -w @sprixe/frontend focus-manager` → 0 fail
+
+4. **Implement `ScreenRouter` (state machine)**
+   - **Tests** :
+     - Vitest : `src/router/screen-router.test.ts` — transitions valides (browser→playing→browser), back stack (push/pop), refus des transitions invalides, hooks `onEnter`/`onLeave` appelés une seule fois
+     - E2E : couvert via flows complets
+     - ✅ Checkpoint : `npm test -w @sprixe/frontend screen-router` → 0 fail
+
+5. **Build game browser: vertical list + video preview panel**
+   - **Tests** :
+     - Vitest : `src/screens/browser/game-list.test.ts` — sélection programmatique, scroll virtuel sur 1000 items mock (rendu ≤20 nodes DOM), index sélectionné persiste après filtrage
+     - E2E : `tests/e2e/arcade/p1-browser-navigation.spec.ts` — charger page avec 10 jeux mock, gamepad mock DOWN×5 → 6e jeu sélectionné, screenshot du panneau preview présent
+     - ✅ Checkpoint : `npm test -w @sprixe/frontend game-list && npx playwright test --project=arcade p1-browser-navigation` → 0 fail
+
+6. **Filter bar (All / CPS-1 / Neo-Geo / Favorites)**
+   - **Tests** :
+     - Vitest : `src/screens/browser/filter-bar.test.ts` — prédicats `isCps1`/`isNeoGeo`/`isFavorite`, comptage par catégorie sur dataset mock, transition All→CPS-1 ne perd pas la sélection si l'item courant matche
+     - E2E : `tests/e2e/arcade/p1-filter-bar.spec.ts` — switcher entre les 4 filtres avec gamepad LB/RB, vérifier `data-testid="visible-count"` cohérent
+     - ✅ Checkpoint : `npm test -w @sprixe/frontend filter-bar && npx playwright test --project=arcade p1-filter-bar` → 0 fail
+
+7. **CSS design tokens, dark arcade theme**
+   - **Tests** :
+     - Vitest : N/A (CSS pur)
+     - E2E : `tests/e2e/arcade/p1-design-tokens.spec.ts` — `getComputedStyle` sur `--af-bg-primary` = `#0a0a10`, `--af-accent` = `#00d4ff`, `font-family` du titre = `Rajdhani`
+     - ✅ Checkpoint : `npx playwright test --project=arcade p1-design-tokens` → 0 fail
+
+8. **HTML splash screen**
+   - **Tests** :
+     - Vitest : N/A
+     - E2E : `tests/e2e/arcade/p1-boot-splash.spec.ts` — splash visible <100ms après `page.goto()`, fade-out déclenché par event `app-ready`, splash retiré du DOM après 300ms
+     - ✅ Checkpoint : `npx playwright test --project=arcade p1-boot-splash` → 0 fail
+
+9. **Navigation hints bar with dynamic button labels**
+   - **Tests** :
+     - Vitest : `src/ui/hints-bar.test.ts` — labels corrects pour les contextes `browser`, `paused`, `modal-open` ; pas de label pour les actions désactivées
+     - E2E : couvert via flows
+     - ✅ Checkpoint : `npm test -w @sprixe/frontend hints-bar` → 0 fail
+
+10. **Mock data: 5-10 hardcoded games with placeholder screenshots**
+    - **Tests** :
+      - Vitest : `src/data/mock-games.test.ts` — ≥5 jeux, IDs uniques, chaque entrée respecte le shape `GameDef` (champs requis : id, title, system, year, publisher), `screenshotUrl` pointe sur asset local existant
+      - E2E : consommé par `p1-browser-navigation.spec.ts`
+      - ✅ Checkpoint : `npm test -w @sprixe/frontend mock-games` → 0 fail
+
+**Validation Phase 1** : `npm test -w @sprixe/frontend && npx playwright test --project=arcade --grep="^p1-"` → 0 fail.
 
 **Deliverable**: Standalone page with gamepad-navigable game browser. No actual game loading.
 
 ### Phase 2: Game Loading + In-Game (2 weeks)
 **Goal**: Select → play → pause → quit loop.
 
-1. Add `loadRomFromBuffer()` to Emulator and NeoGeoEmulator
-2. Implement `RomDB` (IndexedDB)
-3. Wire game browser to real ROM data
-4. Input mapping screen (first-time controller setup)
-5. `InputRouter` — menu ↔ emulator mode switching
-6. Coin hold detection (1s threshold)
-7. Pause overlay (triggered by Coin hold or phone)
-8. Screen transition: browser → playing → browser
-9. Save state integration (IndexedDB instead of localStorage)
+> Chaque sous-étape suit la doctrine §5.0.
+
+1. **Add `loadRomFromBuffer()` to Emulator and NeoGeoEmulator**
+   - **Tests** :
+     - Vitest : `src/engine-bridge/load-rom.test.ts` — charger fixture `tests/fixtures/test.zip` → état émulateur `ready`, charger ROM Neo-Geo mock idem, ROM corrompue (bad magic) → throw `InvalidRomError`, ROM système inconnu → throw `UnsupportedSystemError`
+     - E2E : couvert par sous-étape 8
+     - ✅ Checkpoint : `npm test -w @sprixe/frontend load-rom` → 0 fail
+
+2. **Implement `RomDB` (IndexedDB)**
+   - **Tests** :
+     - Vitest : `src/storage/rom-db.test.ts` (avec `fake-indexeddb`) — `put/get/list/delete` round-trip, ROM 100MB ne crashe pas, simulation `QuotaExceededError` capturée et remontée, listage trié par `lastPlayedAt` desc
+     - E2E : couvert par sous-étape 3
+     - ✅ Checkpoint : `npm test -w @sprixe/frontend rom-db` → 0 fail
+
+3. **Wire game browser to real ROM data**
+   - **Tests** :
+     - Vitest : `src/screens/browser/rom-source.test.ts` — transformation `RomEntry` (IDB) → `GameDef` (browser), fallback metadata si CDN absent
+     - E2E : `tests/e2e/arcade/p2-browser-real-roms.spec.ts` — seed IDB avec 3 ROMs mock via `page.evaluate()` → reload → vérifier 3 cartes visibles avec titres corrects
+     - ✅ Checkpoint : `npm test -w @sprixe/frontend rom-source && npx playwright test --project=arcade p2-browser-real-roms` → 0 fail
+
+4. **Input mapping screen (first-time controller setup)**
+   - **Tests** :
+     - Vitest : `src/screens/mapping/mapper.test.ts` — capture séquence (UP, DOWN, A, B, START, COIN), persistance dans localStorage sous clé `sprixe.input.mapping.v1`, détection axes analogiques (deadzone 0.3), refus si même bouton mappé deux fois
+     - E2E : `tests/e2e/arcade/p2-first-boot-mapping.spec.ts` — IDB et localStorage vides → écran mapping s'affiche → séquencer 6 boutons via gamepad mock → écran browser s'affiche → reload → mapping toujours présent (skip écran)
+     - ✅ Checkpoint : `npm test -w @sprixe/frontend mapper && npx playwright test --project=arcade p2-first-boot-mapping` → 0 fail
+
+5. **`InputRouter` — menu ↔ emulator mode switching**
+   - **Tests** :
+     - Vitest : `src/input/input-router.test.ts` — mode `menu` route vers `FocusManager`, mode `emu` route vers émulateur, switch atomique (pas de double-fire), conflit Start mappé sur 2 actions → priorité au mode actif
+     - E2E : couvert par sous-étape 8
+     - ✅ Checkpoint : `npm test -w @sprixe/frontend input-router` → 0 fail
+
+6. **Coin hold detection (1s threshold)**
+   - **Tests** :
+     - Vitest : `src/input/coin-hold.test.ts` (avec fake timers) — `fire` après 1000ms maintenu, **pas** de fire si relâché à 999ms, coin-tap court (<200ms) toujours fonctionnel, double-tap n'arme pas le hold
+     - E2E : couvert par sous-étape 7
+     - ✅ Checkpoint : `npm test -w @sprixe/frontend coin-hold` → 0 fail
+
+7. **Pause overlay (triggered by Coin hold or phone)**
+   - **Tests** :
+     - Vitest : `src/screens/pause/pause-overlay.test.ts` — ouverture pause l'émulateur (mock), fermeture le reprend, focus trap (Tab cycle reste dans overlay), Escape ferme
+     - E2E : `tests/e2e/arcade/p2-pause-flow.spec.ts` — démarrer ROM mock → `__holdButton(COIN, 1200)` → overlay visible → bouton resume → overlay disparaît, FPS reprend
+     - ✅ Checkpoint : `npm test -w @sprixe/frontend pause-overlay && npx playwright test --project=arcade p2-pause-flow` → 0 fail
+
+8. **Screen transition: browser → playing → browser**
+   - **Tests** :
+     - Vitest : N/A (couvert par `ScreenRouter` Phase 1)
+     - E2E : `tests/e2e/arcade/p2-select-play-quit.spec.ts` — **golden path** : démarrer sur browser → presser A sur jeu mock → écran playing visible (canvas WebGL non-vide) → coin hold 1.2s → pause → quit → retour browser, sélection préservée. Vérifier `performance.memory.usedJSHeapSize` n'augmente pas de >10MB après cycle complet (anti-leak).
+     - ✅ Checkpoint : `npx playwright test --project=arcade p2-select-play-quit` → 0 fail
+
+9. **Save state integration (IndexedDB instead of localStorage)**
+   - **Tests** :
+     - Vitest : `src/state/save-state-idb.test.ts` — round-trip save→serialize→IDB→deserialize→load identique (deep equal sur RAM 64KB + VRAM 192KB), 4 slots indépendants, migration auto depuis ancien localStorage si présent
+     - E2E : `tests/e2e/arcade/p2-save-state.spec.ts` — démarrer ROM → laisser tourner 60 frames → save slot 1 → quitter → relancer → load slot 1 → frame N+1 == frame N pré-save (hash canvas identique)
+     - ✅ Checkpoint : `npm test -w @sprixe/frontend save-state-idb && npx playwright test --project=arcade p2-save-state` → 0 fail
+
+**Validation Phase 2** : `npm test -w @sprixe/frontend && npx playwright test --project=arcade --grep="^p2-"` → 0 fail.
 
 **Deliverable**: Load ROM manually, see in browser, play, pause, save, quit.
 
@@ -1381,44 +1626,164 @@ Temps total : ~3 minutes. Zéro terminal. Zéro clavier. Zéro SSH.
 
 > **Estimation note**: Originally 2 weeks, extended to 3. WebRTC P2P with chunked file transfer, backpressure, reconnection, plus the phone UI (two tabs, responsive) is more complex than it looks. Plan accordingly.
 
+> **Doctrine de test** : conformément à §5.0, tous les tests P2P **mockent PeerJS** (Vitest et E2E). Le mock E2E utilise une `BroadcastChannel` injectée via `addInitScript` pour piper les messages entre les deux contexts Playwright. Aucun appel réseau réel à PeerJS Cloud en CI.
+
 **Week 1 — P2P foundation + basic transfer**:
-1. Integrate PeerJS (`peerjs@^1.5.4`) — use PeerJS Cloud for signaling (no custom server)
-2. Implement `peer-host.ts` (kiosk: `new Peer(roomId)`, listen for connections)
-3. Implement `peer-send.ts` (phone: `peer.connect(roomId)`, chunked file send with backpressure — see §3.8)
-4. ROM transfer → identification (reuse `rom-loader.ts`) → IndexedDB storage
-5. **E2E test**: open two browser tabs, transfer a ROM from one to another. Must work before proceeding.
+
+1. **Integrate PeerJS (`peerjs@^1.5.4`) — use PeerJS Cloud for signaling**
+   - **Tests** :
+     - Vitest : N/A (intégration deps)
+     - E2E : N/A
+     - ✅ Checkpoint : `import { Peer } from 'peerjs'` compile, `npm test -w @sprixe/frontend` baseline reste vert
+
+2. **Implement `peer-host.ts` (kiosk)**
+   - **Tests** :
+     - Vitest : `src/p2p/peer-host.test.ts` (mock PeerJS) — création room avec `roomId` déterministe, `onConnection` invoqué à l'arrivée d'un peer, handler `onData` reçoit un payload chunked complet réassemblé, fermeture propre libère les listeners
+     - E2E : couvert par sous-étape 5
+     - ✅ Checkpoint : `npm test -w @sprixe/frontend peer-host` → 0 fail
+
+3. **Implement `peer-send.ts` (phone)**
+   - **Tests** :
+     - Vitest : `src/p2p/peer-send.test.ts` (mock PeerJS) — chunking par blocs de 16 KB, pause d'envoi quand `bufferedAmount` mock > 1 MB et reprise quand ≤ 256 KB, retry une fois sur erreur transitoire, callback `onProgress(sent, total)` appelé à chaque chunk
+     - E2E : couvert par sous-étape 5
+     - ✅ Checkpoint : `npm test -w @sprixe/frontend peer-send` → 0 fail
+
+4. **ROM transfer → identification (reuse `rom-loader.ts`) → IndexedDB storage**
+   - **Tests** :
+     - Vitest : `src/p2p/rom-pipeline.test.ts` — flow complet bytes → `rom-loader.identify()` → `RomDB.put()`, ROM corrompue → erreur typée renvoyée à l'expéditeur (pas swallow)
+     - E2E : couvert par sous-étape 5
+     - ✅ Checkpoint : `npm test -w @sprixe/frontend rom-pipeline` → 0 fail
+
+5. **End-to-end ROM transfer (formalisation du test « two browser tabs »)**
+   - **Tests** :
+     - Vitest : N/A (intégration uniquement)
+     - E2E : `tests/e2e/arcade/p3-rom-transfer-p2p.spec.ts` — deux `browser.newContext()` (host sur `/`, phone sur `/send/test-room-{nanoid}`), PeerJS remplacé par mock `BroadcastChannel` via `addInitScript`, `setInputFiles` une ROM 5 MB côté phone, vérifier progression visible côté phone, ROM apparaît dans la liste côté host en <3s
+     - ✅ Checkpoint : `npx playwright test --project=arcade p3-rom-transfer-p2p` → 0 fail. **Cette étape gate le passage à la Week 2.**
 
 **Week 2 — Phone UI + remote control**:
-6. Build phone page (`sprixe.app/send/{roomId}`): Upload tab (file picker, drag-drop, progress queue)
-7. Build phone page: Remote tab (pause, save, load, quit, volume)
-8. QR code display on kiosk (use `qrcode` npm package, canvas-based)
-9. Real-time state sync kiosk → phone (game playing, paused, browser)
-10. Empty state / first boot experience (QR prominent)
+
+6. **Build phone page: Upload tab (file picker, drag-drop, progress queue)**
+   - **Tests** :
+     - Vitest : `src/phone/upload-tab.test.ts` — ajout via file picker, ajout via drag-drop event simulé, ordre de la queue préservé, abort retire l'item de la queue
+     - E2E : `tests/e2e/arcade/p3-phone-upload.spec.ts` — `setInputFiles` 3 ROMs mock → 3 cartes en queue dans l'ordre → supprimer la 2e → 2 cartes restent (1ʳᵉ et 3ᵉ)
+     - ✅ Checkpoint : `npm test -w @sprixe/frontend upload-tab && npx playwright test --project=arcade p3-phone-upload` → 0 fail
+
+7. **Build phone page: Remote tab (pause, save, load, quit, volume)**
+   - **Tests** :
+     - Vitest : `src/phone/remote-tab.test.ts` — mapping `action → message` ({type, payload}), actions désactivées selon `kioskState` (save/load grisés en `browser`), volume slider émet messages debouncés (50ms)
+     - E2E : `tests/e2e/arcade/p3-phone-remote.spec.ts` — host démarre ROM mock → phone presse Pause → host passe en pause (<300ms), phone presse Volume 50 → host `audioGain` = 0.5
+     - ✅ Checkpoint : `npm test -w @sprixe/frontend remote-tab && npx playwright test --project=arcade p3-phone-remote` → 0 fail
+
+8. **QR code display on kiosk**
+   - **Tests** :
+     - Vitest : `src/ui/qr-code.test.ts` — génération canvas (taille 200×200), contenu URL exact `https://sprixe.app/send/{roomId}`, régénération uniquement quand `roomId` change (memo)
+     - E2E : couvert visuellement dans `p3-rom-transfer-p2p.spec.ts` (vérifier `canvas[data-testid="qr"]` non-vide)
+     - ✅ Checkpoint : `npm test -w @sprixe/frontend qr-code` → 0 fail
+
+9. **Real-time state sync kiosk → phone (game playing, paused, browser)**
+   - **Tests** :
+     - Vitest : `src/p2p/state-sync.test.ts` — diff-broadcast (state inchangé → 0 message), changement partiel → message contient seulement les champs modifiés, latence simulée <100ms
+     - E2E : `tests/e2e/arcade/p3-state-sync.spec.ts` — host transition browser → playing → phone affiche `state="playing"` dans <500ms
+     - ✅ Checkpoint : `npm test -w @sprixe/frontend state-sync && npx playwright test --project=arcade p3-state-sync` → 0 fail
+
+10. **Empty state / first boot experience (QR prominent)**
+    - **Tests** :
+      - Vitest : N/A
+      - E2E : `tests/e2e/arcade/p3-empty-state.spec.ts` — IDB vide au load → écran avec QR ≥200×200px visible et message « Welcome to your arcade » (cf. §2.3) ; aucun élément `game-card` dans le DOM
+      - ✅ Checkpoint : `npx playwright test --project=arcade p3-empty-state` → 0 fail
 
 **Week 3 — Polish + error handling**:
-11. Error handling: invalid ROM, unknown format, storage full, transfer timeout
-12. Reconnection: if data channel drops mid-transfer, attempt one reconnect
-13. Toast notifications on kiosk (receiving, complete, error)
-14. Phone UI responsive polish (tested on iOS Safari + Android Chrome)
+
+11. **Error handling: invalid ROM, unknown format, storage full, transfer timeout**
+    - **Tests** :
+      - Vitest : `src/p2p/error-handling.test.ts` — 4 cas (invalid magic, format inconnu, `QuotaExceededError` simulée, timeout 10s sans data) → erreurs typées remontées à l'UI avec message i18n-ready
+      - E2E : `tests/e2e/arcade/p3-transfer-errors.spec.ts` — envoyer un `.txt` (mauvais magic) → toast erreur côté host + côté phone
+      - ✅ Checkpoint : `npm test -w @sprixe/frontend error-handling && npx playwright test --project=arcade p3-transfer-errors` → 0 fail
+
+12. **Reconnection: if data channel drops mid-transfer, attempt one reconnect**
+    - **Tests** :
+      - Vitest : `src/p2p/reconnect.test.ts` (mock PeerJS) — drop simulé au chunk 50/100 → 1 reconnect → reprise depuis chunk 50 (pas redémarrage), 2ᵉ drop → abandon avec erreur
+      - E2E : non couvert (reproduction non-déterministe d'un drop réseau dans Playwright = flaky → laissé en Vitest)
+      - ✅ Checkpoint : `npm test -w @sprixe/frontend reconnect` → 0 fail
+
+13. **Toast notifications on kiosk (receiving, complete, error)**
+    - **Tests** :
+      - Vitest : `src/ui/toast.test.ts` — queue (max 3 visibles), durée par type (info 3s, success 4s, error 6s), dismissal manuel, pas de duplicate consécutif identique
+      - E2E : couvert par `p3-rom-transfer-p2p.spec.ts` et `p3-transfer-errors.spec.ts` (assertions sur visibilité du toast)
+      - ✅ Checkpoint : `npm test -w @sprixe/frontend toast` → 0 fail
+
+14. **Phone UI responsive polish (tested on iOS Safari + Android Chrome)**
+    - **Tests** :
+      - Vitest : N/A
+      - E2E : `tests/e2e/arcade/p3-phone-responsive.spec.ts` — viewports iPhone 14 (390×844) et Pixel 7 (412×915), pas de scroll horizontal (`document.body.scrollWidth <= viewport.width`), tous les `button` ont une bounding box ≥44×44px (touch target WCAG)
+      - ⚠️ Tests Safari/Android Chrome **manuels** en plus (Playwright sur Chromium-only en CI)
+      - ✅ Checkpoint : `npx playwright test --project=arcade p3-phone-responsive` → 0 fail + smoke test manuel iOS/Android avant tag de version
+
+**Validation Phase 3** : `npm test -w @sprixe/frontend && npx playwright test --project=arcade --grep="^p3-"` → 0 fail.
 
 **Deliverable**: Scan QR, send ROMs P2P, see them appear, control the borne from phone.
 
 ### Phase 4: Polish + Settings (1 week)
 **Goal**: Feature-complete V1.
 
-1. Settings screen (display, audio, controls, network, storage, about)
-2. CRT filter, integer scaling, TATE auto-detect
-3. CDN media pipeline: upload screenshots + MP4 clips to CDN (ScreenScraper scrape)
-4. Video preview: lazy-fetch screenshot from CDN → MP4 crossfade after 1s
-5. Recently played / favorites persistence
-6. Alphabetical jump (letter wheel)
-7. Animation polish (transitions, parallax, glow effects)
-8. Volume control in pause menu
+> Chaque sous-étape suit la doctrine §5.0.
+
+1. **Settings screen (display, audio, controls, network, storage, about)**
+   - **Tests** :
+     - Vitest : `src/screens/settings/settings-store.test.ts` — schema Zod-style validé, persistance localStorage clé `sprixe.settings.v1`, reset to defaults, migration depuis schema v0 si présent
+     - E2E : `tests/e2e/arcade/p4-settings-persistence.spec.ts` — modifier 3 settings (volume 60, CRT off, integer scaling on) → reload → valeurs restaurées
+     - ✅ Checkpoint : `npm test -w @sprixe/frontend settings-store && npx playwright test --project=arcade p4-settings-persistence` → 0 fail
+
+2. **CRT filter, integer scaling, TATE auto-detect**
+   - **Tests** :
+     - Vitest : `src/render/scaling.test.ts` — calcul `scaleFactor` pour 1080p (×4 CPS-1, ×3 Neo-Geo), détection TATE (`game.width > game.height` pour pacland, etc.), CRT shader applique `filter:` CSS attendu
+     - E2E : couvert par `p4-video-preview.spec.ts` (vérifier transform appliqué)
+     - ✅ Checkpoint : `npm test -w @sprixe/frontend scaling` → 0 fail
+
+3. **CDN media pipeline: upload screenshots + MP4 clips to CDN (ScreenScraper scrape)**
+   - **Tests** :
+     - Vitest : `scripts/cdn-upload/__tests__/scraper.test.ts` — parsing réponse ScreenScraper mock (XML fixture), résolution URL screenshot/MP4, fallback si jeu absent
+     - E2E : N/A (script offline, hors runtime arcade)
+     - ✅ Checkpoint : `npm test scraper` → 0 fail
+
+4. **Video preview: lazy-fetch screenshot from CDN → MP4 crossfade after 1s**
+   - **Tests** :
+     - Vitest : `src/media/preview-loader.test.ts` — fetch screenshot, cache dans IDB sous clé `media:{gameId}:screenshot`, fallback placeholder si 404, crossfade vers MP4 démarre après 1000ms (fake timers)
+     - E2E : `tests/e2e/arcade/p4-video-preview.spec.ts` — `page.route('**/cdn/**')` sert un MP4 fixture local, sélectionner jeu → screenshot visible → après 1s, `<video>` joue (vérifier `currentTime > 0`)
+     - ✅ Checkpoint : `npm test -w @sprixe/frontend preview-loader && npx playwright test --project=arcade p4-video-preview` → 0 fail
+
+5. **Recently played / favorites persistence**
+   - **Tests** :
+     - Vitest : `src/state/history.test.ts` — `markPlayed(gameId)` ajoute en tête, dedup, limite à 20, `toggleFavorite` persiste, tri stable
+     - E2E : couvert via filtres en `p1-filter-bar.spec.ts` (étendre pour assert favorites apparaissent)
+     - ✅ Checkpoint : `npm test -w @sprixe/frontend history` → 0 fail
+
+6. **Alphabetical jump (letter wheel)**
+   - **Tests** :
+     - Vitest : `src/ui/letter-wheel.test.ts` — calcul des lettres présentes (≥1 jeu commençant par cette lettre), jump à `findIndex(g => g.title[0].toUpperCase() === letter)`
+     - E2E : `tests/e2e/arcade/p4-letter-wheel.spec.ts` — ouvrir wheel via gamepad Y, naviguer jusqu'à 'S', presser A → premier jeu commençant par 'S' (`Strider` dans dataset mock) sélectionné
+     - ✅ Checkpoint : `npm test -w @sprixe/frontend letter-wheel && npx playwright test --project=arcade p4-letter-wheel` → 0 fail
+
+7. **Animation polish (transitions, parallax, glow effects)**
+   - **Tests** :
+     - Vitest : N/A (CSS)
+     - E2E : `tests/e2e/arcade/p4-animations.spec.ts` — `emulateMedia({reducedMotion: 'reduce'})` → CSS var `--af-motion: 0` appliquée, durations `transition-duration: 0s` sur les éléments key
+     - ✅ Checkpoint : `npx playwright test --project=arcade p4-animations` → 0 fail
+
+8. **Volume control in pause menu**
+   - **Tests** :
+     - Vitest : `src/screens/pause/volume.test.ts` — slider 0-100 → `audioContext.gain.value` mappé linéaire 0.0-1.0, persistance dans settings store, mute toggle préserve la valeur précédente
+     - E2E : `tests/e2e/arcade/p4-volume-pause.spec.ts` — démarrer ROM → coin hold pause → slider volume à 25 → resume → quit → `settings.audio.volume === 0.25`
+     - ✅ Checkpoint : `npm test -w @sprixe/frontend volume && npx playwright test --project=arcade p4-volume-pause` → 0 fail
+
+**Validation Phase 4** : `npm test -w @sprixe/frontend && npx playwright test --project=arcade --grep="^p4-"` → 0 fail.
 
 **Deliverable**: Full arcade frontend, all features, visually polished.
 
 ### Phase 5: RPi Image — `@sprixe/image` (1 week)
 **Goal**: Flashable SD card (thin client) via `make image`.
+
+> **Doctrine de test** : sous-étapes 1-9 = infra OS (shell scripts, configs systemd, pi-gen), validation par inspection et exécution `make image`. Sous-étapes 10-11 = tests **manuels** sur hardware réel. Sous-étape 12 (nouvelle) = simulation kiosk en CI via Playwright headless pour attraper les régressions liées aux flags Chromium kiosk avant flashage.
 
 1. Configure pi-gen avec stage-sprixe custom
 2. `install-deps.sh` : chromium, xorg/cage (NO nodejs, no server)
@@ -1429,8 +1794,27 @@ Temps total : ~3 minutes. Zéro terminal. Zéro clavier. Zéro SSH.
 7. Network : wpa_supplicant pré-configuré (WiFi join, V1)
 8. `optimize-boot.sh` : désactiver bluetooth, avahi, apt-daily, ModemManager
 9. Makefile : `make image` (build), `make flash` (écriture SD), `make clean`
-10. Test sur vrai RPi 5 : boot time, FPS, audio latency, gamepad
-11. Fix perf issues GPU (VideoCore VII quirks)
+   - **Tests** (sous-étapes 1-9) :
+     - `make image` produit un fichier `.img.xz` non-vide
+     - `shellcheck packages/sprixe-image/stage-sprixe/**/*.sh` → 0 warning
+     - Inspection des unités systemd : `systemd-analyze verify <unit>`
+     - ✅ Checkpoint : pipeline `make image` réussit en CI Docker
+
+10. Test sur vrai RPi 5 : boot time, FPS, audio latency, gamepad **(manuel)**
+11. Fix perf issues GPU (VideoCore VII quirks) **(manuel)**
+
+12. **Kiosk simulation E2E (CI, anti-régression)**
+    - **Tests** :
+      - E2E : `tests/e2e/arcade/p5-kiosk-simulation.spec.ts` — projet Playwright dédié `kiosk` avec `launchOptions.args` reproduisant le mode kiosk RPi : `--kiosk`, `--enable-features=SharedArrayBuffer`, `--autoplay-policy=no-user-gesture-required`, `--noerrdialogs`, `--disable-translate`, viewport 1920×1080. Assertions :
+        1. `crossOriginIsolated === true` (COOP/COEP appliqués)
+        2. `typeof SharedArrayBuffer !== 'undefined'`
+        3. Flow complet : boot → splash visible <100ms → fade out → seed IDB avec 1 ROM mock → sélectionner → jouer 60 frames → quit → retour browser
+        4. Aucun message `console.error` ou `console.warn` pendant le flow (sauf whitelist documentée)
+        5. Aucune navigation vers une autre origine (vérifier `page.url()` reste sur `baseURL`)
+      - **Anti-flaky** : `expect.poll()` avec timeout 30s pour boot émulateur (WASM lent en CI), pas de `waitForTimeout` arbitraire, screenshot + trace `on-failure`. Si flakiness >1% sur 50 runs CI, désactiver et créer issue.
+      - ✅ Checkpoint : `npx playwright test --project=kiosk p5-kiosk-simulation` → 0 fail sur 3 runs consécutifs
+
+**Validation Phase 5** : `make image` produit l'artefact + `npx playwright test --project=kiosk` vert + smoke test manuel sur RPi 5 réel avant tag de release.
 
 **Deliverable**: `make image` produit `sprixe-arcade-v1.0.0.img.xz`. Flash → boot → Chromium ouvre sprixe.app → arcade.
 
@@ -1485,7 +1869,12 @@ Each session should start by reading `PROGRESS.md` (at repo root) to know where 
 ### 7.2 Rules for Agents
 
 1. **One sub-step at a time**: Never move to the next sub-step until the current checkpoint passes
-2. **Test after every move**: `npx tsc --noEmit` or `npm test` depending on the step
+2. **Test after every sub-step**: 3 gates séquentielles obligatoires :
+   1. `npx tsc --noEmit` (typage)
+   2. `npm test -w <package>` (Vitest unit)
+   3. `npx playwright test --project=arcade <scenario>` (E2E si la sous-étape touche UI/flow)
+
+   Aucun passage à la sous-étape suivante tant que les 3 gates ne sont pas vertes. Le bloc **Tests** de chaque sous-étape (Phases 1-4) précise quels fichiers exécuter — voir §5.0 pour la doctrine et §3.6 pour la config.
 3. **No speculative code**: Implement exactly what the plan says. If something seems wrong, ask the user
 4. **Phase 0 is sacred**: Zero new features. If you notice something to improve, note it in `PROGRESS.md` under "Notes", don't fix it now
 5. **Phase 5 is human-assisted**: Agent generates config files, but the user tests on real RPi hardware
