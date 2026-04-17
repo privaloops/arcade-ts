@@ -3,8 +3,17 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "vitest run --passWithNoTests"
+  },
   "dependencies": {
     "@sprixe/engine": "*",
     "peerjs": "^1.5.4"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "^6.0.0"
   }
 }
