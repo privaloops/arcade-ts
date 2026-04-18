@@ -718,6 +718,6 @@ html, body {
   color: var(--af-text-muted);
   border: none;
   cursor: pointer;
-  min-width: 32px;
-  min-height: 32px;
+  min-width: 44px;
+  min-height: 44px;
 }
