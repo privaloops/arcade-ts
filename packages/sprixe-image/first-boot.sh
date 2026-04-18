@@ -27,12 +27,12 @@ fi
 export DEBIAN_FRONTEND=noninteractive
 
 # ── Packages ────────────────────────────────────────────────────────
-# chromium-browser = RPi OS flavour of chromium (hardware-accelerated)
+# chromium = RPi OS flavour of chromium (hardware-accelerated)
 # xinit/xserver-xorg: Wayland via cage is an option but Xorg is more
 # predictable on RPi 5 today. Revisit after the image stabilises.
 apt-get update
 apt-get install -y --no-install-recommends \
-    chromium-browser \
+    chromium \
     xserver-xorg \
     xinit \
     unclutter \
@@ -55,7 +55,7 @@ ExecStartPre=/usr/bin/xinit -- :0 -nocursor &
 ExecStartPre=/bin/sleep 2
 ExecStartPre=/usr/bin/xset -dpms
 ExecStartPre=/usr/bin/xset s off
-ExecStart=/usr/bin/chromium-browser \
+ExecStart=/usr/bin/chromium \
   --kiosk --no-first-run --disable-infobars \
   --noerrdialogs --disable-translate \
   --disable-session-crashed-bubble \

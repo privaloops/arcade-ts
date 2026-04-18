@@ -75,7 +75,7 @@ echo "=== systemd-analyze verify ==="
 # confirm an ExecStart that points at a missing executable, and we
 # mocked apt-get so the real packages never got installed in this
 # container.
-for b in /usr/bin/chromium-browser /usr/bin/xinit /usr/bin/xset; do
+for b in /usr/bin/chromium /usr/bin/xinit /usr/bin/xset; do
     : > "$b"
     chmod 755 "$b"
 done
