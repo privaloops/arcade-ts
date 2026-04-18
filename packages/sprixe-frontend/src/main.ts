@@ -87,9 +87,15 @@ function startBrowser(
   settings: SettingsStore,
   toast: Toast
 ): void {
+  // Dev uses the kiosk's own origin so screenshots under public/media/
+  // are reachable at /media/{system}/{id}/screenshot.png. Production
+  // deploys override this at build time (Phase 5 release workflow).
+  const cdnBase = typeof window !== "undefined"
+    ? `${window.location.origin}/media`
+    : "https://cdn.sprixe.app/media";
   const loader = new PreviewLoader({
     cache: new MediaCache(),
-    cdnBase: "https://cdn.sprixe.app/media",
+    cdnBase,
   });
   const browser = new BrowserScreen(app!, { initialGames: games, previewLoader: loader });
   const hints = new HintsBar(app!);
