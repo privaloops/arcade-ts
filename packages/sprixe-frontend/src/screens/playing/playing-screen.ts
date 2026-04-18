@@ -64,6 +64,22 @@ class MockEmulator implements EmulatorHandle {
     return this.frames;
   }
 
+  // Mock snapshot: we only have a frame counter to preserve. A real
+  // emulator would pack CPU + RAM + VRAM into the buffer. The shape
+  // is intentionally non-empty so load/save round-trips are visible
+  // on screen (the counter snaps back).
+  saveState(): ArrayBuffer {
+    const buf = new ArrayBuffer(8);
+    new DataView(buf).setFloat64(0, this.frames);
+    return buf;
+  }
+
+  loadState(data: ArrayBuffer): boolean {
+    if (data.byteLength < 8) return false;
+    this.frames = new DataView(data).getFloat64(0);
+    return true;
+  }
+
   private loop = (): void => {
     if (!this.running) return;
     if (!this.paused) {
@@ -127,7 +143,11 @@ export class PlayingScreen {
     this.root.remove();
   }
 
-  getEmulator(): EmulatorHandle & { getFrames(): number } {
+  getEmulator(): EmulatorHandle & {
+    getFrames(): number;
+    saveState(): ArrayBuffer;
+    loadState(data: ArrayBuffer): boolean;
+  } {
     return this.emulator;
   }
 

@@ -1,7 +1,11 @@
 import { defineConfig } from "vite";
 import { resolve } from "path";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import os from "node:os";
+
+const pkg = JSON.parse(
+  readFileSync(resolve(__dirname, "package.json"), "utf8")
+) as { version: string };
 
 /** Pick the first non-internal IPv4 address on the host. Null when no LAN
  * interface is up (pure localhost). */
@@ -45,8 +49,11 @@ export default defineConfig(({ command }) => ({
   },
   // __LAN_IP__ is baked into the bundle only in dev; production builds
   // leave it null so the QR falls back to window.location.origin.
+  // __APP_VERSION__ comes from package.json so About tab + logs show a
+  // real version in both dev ("0.0.0") and production builds.
   define: {
     __LAN_IP__: command === "serve" ? JSON.stringify(getLanIp()) : "null",
+    __APP_VERSION__: JSON.stringify(pkg.version),
   },
   plugins: [
     {

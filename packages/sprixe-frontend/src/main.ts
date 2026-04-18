@@ -9,7 +9,7 @@ import { MOCK_GAMES } from "./data/mock-games";
 import { romRecordToGameEntry } from "./data/rom-source";
 import type { GameEntry } from "./data/games";
 import { GamepadNav } from "./input/gamepad-nav";
-import { loadMapping, MAPPING_ROLES } from "./input/mapping-store";
+import { loadMapping, clearMapping, MAPPING_ROLES } from "./input/mapping-store";
 import { InputRouter } from "./input/input-router";
 import { BrowserScreen } from "./screens/browser/browser-screen";
 import { HintsBar } from "./ui/hints-bar";
@@ -28,6 +28,10 @@ import { RomPipeline } from "./p2p/rom-pipeline";
 import { RomDB, type RomRecord } from "./storage/rom-db";
 import { PreviewLoader } from "./media/preview-loader";
 import { MediaCache } from "./media/media-cache";
+import { SaveStateDB } from "./state/save-state-db";
+import { SaveStateController } from "./state/save-state-controller";
+
+declare const __APP_VERSION__: string;
 
 const app = document.getElementById("app");
 if (!app) throw new Error("#app container missing");
@@ -105,6 +109,10 @@ function startBrowser(
   let playing: PlayingScreen | null = null;
   let overlay: PauseOverlay | null = null;
   let settingsScreen: SettingsScreen | null = null;
+  let saveController: SaveStateController | null = null;
+  const saveDb = new SaveStateDB();
+  // Best-effort migration from the legacy edit-app localStorage keys.
+  saveDb.migrateFromLocalStorage().catch(() => {});
 
   const letterWheel = new LetterWheel(app!, {
     onJump: (index) => {
@@ -117,6 +125,8 @@ function startBrowser(
   });
 
   function exitToMenu(): void {
+    saveController?.dispose();
+    saveController = null;
     overlay?.close();
     overlay?.dispose();
     overlay?.root.remove();
@@ -133,11 +143,27 @@ function startBrowser(
     hints.setContext("paused");
     playing = new PlayingScreen(app!, { game });
     playing.start();
+    saveController = new SaveStateController({
+      emulator: playing.getEmulator(),
+      db: saveDb,
+      gameId: game.id,
+      toast,
+    });
     overlay = new PauseOverlay(app!, {
       emulator: playing.getEmulator(),
       settings,
       onResume: () => router.setMode("emu"),
       onQuit: () => exitToMenu(),
+      onSaveState: () => {
+        overlay?.close();
+        router.setMode("emu");
+        void saveController?.save();
+      },
+      onLoadState: () => {
+        overlay?.close();
+        router.setMode("emu");
+        void saveController?.load();
+      },
     });
     router.setMode("emu");
   });
@@ -174,7 +200,43 @@ function startBrowser(
       browser.root.hidden = true;
       settingsScreen = new SettingsScreen(app!, {
         settings,
-        version: "dev",
+        version: __APP_VERSION__,
+        controls: {
+          getMapping: () => loadMapping(),
+          onReset: () => {
+            clearMapping();
+            settingsScreen?.unmount();
+            settingsScreen = null;
+            browser.root.hidden = true;
+            void showMappingFlow().then(() => {
+              browser.root.hidden = false;
+            });
+          },
+        },
+        network: {
+          getRoomId: () => host.roomId,
+          isOpen: () => host.isOpen(),
+          onRegenerate: () => {
+            try { localStorage.removeItem("sprixe.roomId"); } catch { /* ignore */ }
+            window.location.reload();
+          },
+        },
+        storage: {
+          listRoms: () => db.list(),
+          deleteRom: async (id) => {
+            await db.delete(id);
+            const refreshed = (await db.list()).map(romRecordToGameEntry);
+            browser.setGames(refreshed);
+            toast.show("success", `Deleted ${id}`);
+          },
+          estimate: async () => {
+            if (typeof navigator === "undefined" || !navigator.storage?.estimate) {
+              return { usage: 0, quota: 0 };
+            }
+            const e = await navigator.storage.estimate();
+            return { usage: e.usage ?? 0, quota: e.quota ?? 0 };
+          },
+        },
         onClose: () => {
           settingsScreen = null;
           browser.root.hidden = false;

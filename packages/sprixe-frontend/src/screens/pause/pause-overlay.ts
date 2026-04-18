@@ -24,6 +24,10 @@ export interface EmulatorHandle {
   pause(): void;
   resume(): void;
   isPaused?(): boolean;
+  /** Phase 4b.polish: optional snapshot hooks. The mock emulator
+   * implements them; the real engine wiring arrives with Phase 5. */
+  saveState?(): ArrayBuffer | null;
+  loadState?(data: ArrayBuffer): boolean;
 }
 
 export type PauseAction = "resume" | "save-state" | "load-state" | "quit";

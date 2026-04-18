@@ -14,13 +14,35 @@
 
 import type { SettingsStore, SettingsV1, AspectRatio, AudioLatency } from "./settings-store";
 import type { NavAction } from "../../input/gamepad-nav";
+import type { InputMapping, MappingRole } from "../../input/mapping-store";
+import type { RomRecord } from "../../storage/rom-db";
 
-type TabId = "display" | "audio" | "about";
+type TabId = "display" | "audio" | "controls" | "network" | "storage" | "about";
 
 interface TabDef {
   id: TabId;
   label: string;
   render: (root: HTMLElement) => void;
+}
+
+/** Controls tab — displays the saved mapping + resets it. */
+export interface ControlsBinding {
+  getMapping: () => InputMapping | null;
+  onReset: () => void;
+}
+
+/** Network tab — peer room id + signal status. */
+export interface NetworkBinding {
+  getRoomId: () => string;
+  isOpen: () => boolean;
+  onRegenerate: () => void;
+}
+
+/** Storage tab — quota usage + per-ROM delete. */
+export interface StorageBinding {
+  listRoms: () => Promise<RomRecord[]>;
+  deleteRom: (id: string) => Promise<void>;
+  estimate: () => Promise<{ usage: number; quota: number }>;
 }
 
 export interface SettingsScreenOptions {
@@ -29,6 +51,9 @@ export interface SettingsScreenOptions {
   onClose: () => void;
   /** Arcade version string displayed in the About tab. */
   version?: string;
+  controls?: ControlsBinding;
+  network?: NetworkBinding;
+  storage?: StorageBinding;
 }
 
 export class SettingsScreen {
@@ -37,6 +62,9 @@ export class SettingsScreen {
   private readonly settings: SettingsStore;
   private readonly onClose: () => void;
   private readonly version: string;
+  private readonly controls: ControlsBinding | undefined;
+  private readonly network: NetworkBinding | undefined;
+  private readonly storage: StorageBinding | undefined;
   private readonly tabs: TabDef[];
   private readonly tabNav: HTMLDivElement;
   private readonly tabContent: HTMLDivElement;
@@ -47,6 +75,9 @@ export class SettingsScreen {
     this.settings = options.settings;
     this.onClose = options.onClose;
     this.version = options.version ?? "dev";
+    this.controls = options.controls;
+    this.network = options.network;
+    this.storage = options.storage;
 
     this.root = document.createElement("div");
     this.root.className = "af-settings-screen";
@@ -85,9 +116,12 @@ export class SettingsScreen {
     body.appendChild(this.tabContent);
 
     this.tabs = [
-      { id: "display", label: "Display", render: (r) => this.renderDisplay(r) },
-      { id: "audio",   label: "Audio",   render: (r) => this.renderAudio(r) },
-      { id: "about",   label: "About",   render: (r) => this.renderAbout(r) },
+      { id: "display",  label: "Display",  render: (r) => this.renderDisplay(r) },
+      { id: "audio",    label: "Audio",    render: (r) => this.renderAudio(r) },
+      { id: "controls", label: "Controls", render: (r) => this.renderControls(r) },
+      { id: "network",  label: "Network",  render: (r) => this.renderNetwork(r) },
+      { id: "storage",  label: "Storage",  render: (r) => this.renderStorage(r) },
+      { id: "about",    label: "About",    render: (r) => this.renderAbout(r) },
     ];
     for (const tab of this.tabs) {
       const btn = document.createElement("button");
@@ -215,6 +249,176 @@ export class SettingsScreen {
     ));
   }
 
+  // ── Controls tab ───────────────────────────────────────────────
+  private renderControls(root: HTMLElement): void {
+    const wrap = document.createElement("div");
+    wrap.className = "af-settings-controls";
+    wrap.setAttribute("data-testid", "settings-controls");
+    if (!this.controls) {
+      wrap.appendChild(this.makePlaceholder("Controls binding not configured."));
+      root.appendChild(wrap);
+      return;
+    }
+    const mapping = this.controls.getMapping();
+    const intro = document.createElement("p");
+    intro.className = "af-settings-intro";
+    intro.textContent = mapping
+      ? `Current mapping: ${mapping.type}`
+      : "No mapping saved yet.";
+    wrap.appendChild(intro);
+
+    if (mapping) {
+      const list = document.createElement("dl");
+      list.className = "af-settings-mapping-list";
+      for (const [role, binding] of Object.entries(mapping.p1) as [MappingRole, InputMapping["p1"][MappingRole]][]) {
+        if (!binding) continue;
+        const dt = document.createElement("dt");
+        dt.className = "af-settings-mapping-role";
+        dt.textContent = role;
+        const dd = document.createElement("dd");
+        dd.className = "af-settings-mapping-binding";
+        dd.textContent = formatBinding(binding);
+        list.appendChild(dt);
+        list.appendChild(dd);
+      }
+      wrap.appendChild(list);
+    }
+
+    const resetBtn = document.createElement("button");
+    resetBtn.type = "button";
+    resetBtn.className = "af-settings-btn af-settings-btn--danger";
+    resetBtn.setAttribute("data-testid", "settings-controls-reset");
+    resetBtn.textContent = "Reset mapping";
+    resetBtn.addEventListener("click", () => this.controls!.onReset());
+    wrap.appendChild(resetBtn);
+
+    root.appendChild(wrap);
+  }
+
+  // ── Network tab ────────────────────────────────────────────────
+  private renderNetwork(root: HTMLElement): void {
+    const wrap = document.createElement("div");
+    wrap.className = "af-settings-network";
+    wrap.setAttribute("data-testid", "settings-network");
+    if (!this.network) {
+      wrap.appendChild(this.makePlaceholder("Network binding not configured."));
+      root.appendChild(wrap);
+      return;
+    }
+    const rows: Array<[string, string]> = [
+      ["Room ID", this.network.getRoomId()],
+      ["Signal", this.network.isOpen() ? "Open (waiting)" : "Closed"],
+    ];
+    for (const [label, value] of rows) {
+      const row = document.createElement("div");
+      row.className = "af-settings-row";
+      const l = document.createElement("span");
+      l.className = "af-settings-label";
+      l.textContent = label;
+      const v = document.createElement("span");
+      v.className = "af-settings-value";
+      v.textContent = value;
+      row.appendChild(l);
+      row.appendChild(v);
+      wrap.appendChild(row);
+    }
+    const regen = document.createElement("button");
+    regen.type = "button";
+    regen.className = "af-settings-btn af-settings-btn--danger";
+    regen.setAttribute("data-testid", "settings-network-regenerate");
+    regen.textContent = "Regenerate Room ID";
+    regen.addEventListener("click", () => this.network!.onRegenerate());
+    wrap.appendChild(regen);
+
+    root.appendChild(wrap);
+  }
+
+  // ── Storage tab ────────────────────────────────────────────────
+  private renderStorage(root: HTMLElement): void {
+    const wrap = document.createElement("div");
+    wrap.className = "af-settings-storage";
+    wrap.setAttribute("data-testid", "settings-storage");
+    if (!this.storage) {
+      wrap.appendChild(this.makePlaceholder("Storage binding not configured."));
+      root.appendChild(wrap);
+      return;
+    }
+
+    const quotaRow = document.createElement("div");
+    quotaRow.className = "af-settings-row";
+    quotaRow.setAttribute("data-testid", "settings-storage-quota");
+    quotaRow.textContent = "Usage: computing…";
+    wrap.appendChild(quotaRow);
+
+    const listWrap = document.createElement("div");
+    listWrap.className = "af-settings-rom-list";
+    listWrap.setAttribute("data-testid", "settings-storage-list");
+    listWrap.textContent = "Loading ROMs…";
+    wrap.appendChild(listWrap);
+
+    root.appendChild(wrap);
+
+    // Async refresh — tab re-renders completely when setActiveTab fires,
+    // so we're guaranteed a fresh snapshot on every visit.
+    void this.refreshStorage(quotaRow, listWrap);
+  }
+
+  private async refreshStorage(quotaRow: HTMLElement, listWrap: HTMLElement): Promise<void> {
+    if (!this.storage) return;
+    try {
+      const estimate = await this.storage.estimate();
+      quotaRow.textContent = `Usage: ${formatBytes(estimate.usage)} / ${formatBytes(estimate.quota)}`;
+    } catch {
+      quotaRow.textContent = "Usage: unavailable";
+    }
+    let roms: RomRecord[] = [];
+    try {
+      roms = await this.storage.listRoms();
+    } catch {
+      listWrap.textContent = "Failed to load ROMs.";
+      return;
+    }
+    listWrap.textContent = "";
+    if (roms.length === 0) {
+      listWrap.appendChild(this.makePlaceholder("No ROMs installed."));
+      return;
+    }
+    for (const rom of roms) {
+      const row = document.createElement("div");
+      row.className = "af-settings-rom-row";
+      row.setAttribute("data-testid", `settings-storage-rom-${rom.id}`);
+
+      const info = document.createElement("span");
+      info.className = "af-settings-rom-info";
+      info.textContent = `${rom.id} · ${rom.system} · ${formatBytes(rom.size)}`;
+      row.appendChild(info);
+
+      const del = document.createElement("button");
+      del.type = "button";
+      del.className = "af-settings-btn af-settings-btn--danger";
+      del.setAttribute("data-testid", `settings-storage-delete-${rom.id}`);
+      del.textContent = "Delete";
+      del.addEventListener("click", async () => {
+        try {
+          await this.storage!.deleteRom(rom.id);
+          row.remove();
+        } catch {
+          info.textContent += " · delete failed";
+        }
+      });
+      row.appendChild(del);
+
+      listWrap.appendChild(row);
+    }
+  }
+
+  private makePlaceholder(text: string): HTMLElement {
+    const p = document.createElement("p");
+    p.className = "af-settings-placeholder";
+    p.textContent = text;
+    return p;
+  }
+
   // ── About tab ──────────────────────────────────────────────────
   private renderAbout(root: HTMLElement): void {
     const wrap = document.createElement("div");
@@ -324,6 +528,25 @@ export class SettingsScreen {
     row.appendChild(readout);
     return row;
   }
+}
+
+function formatBinding(binding: InputMapping["p1"][MappingRole]): string {
+  if (!binding) return "—";
+  if (binding.kind === "button") return `Button ${binding.index}`;
+  if (binding.kind === "axis") return `Axis ${binding.index} ${binding.dir > 0 ? "+" : "-"}`;
+  return `Key ${binding.code}`;
+}
+
+function formatBytes(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let value = n;
+  let i = 0;
+  while (value >= 1024 && i < units.length - 1) {
+    value /= 1024;
+    i += 1;
+  }
+  return `${value.toFixed(value >= 100 ? 0 : 1)} ${units[i]}`;
 }
 
 export type { SettingsV1 };
