@@ -28,6 +28,8 @@ import { RomPipeline } from "./p2p/rom-pipeline";
 import { RomDB, type RomRecord } from "./storage/rom-db";
 import { PreviewLoader } from "./media/preview-loader";
 import { MediaCache } from "./media/media-cache";
+import { SaveStateDB } from "./state/save-state-db";
+import { SaveStateController } from "./state/save-state-controller";
 
 declare const __APP_VERSION__: string;
 
@@ -107,6 +109,10 @@ function startBrowser(
   let playing: PlayingScreen | null = null;
   let overlay: PauseOverlay | null = null;
   let settingsScreen: SettingsScreen | null = null;
+  let saveController: SaveStateController | null = null;
+  const saveDb = new SaveStateDB();
+  // Best-effort migration from the legacy edit-app localStorage keys.
+  saveDb.migrateFromLocalStorage().catch(() => {});
 
   const letterWheel = new LetterWheel(app!, {
     onJump: (index) => {
@@ -119,6 +125,8 @@ function startBrowser(
   });
 
   function exitToMenu(): void {
+    saveController?.dispose();
+    saveController = null;
     overlay?.close();
     overlay?.dispose();
     overlay?.root.remove();
@@ -135,11 +143,27 @@ function startBrowser(
     hints.setContext("paused");
     playing = new PlayingScreen(app!, { game });
     playing.start();
+    saveController = new SaveStateController({
+      emulator: playing.getEmulator(),
+      db: saveDb,
+      gameId: game.id,
+      toast,
+    });
     overlay = new PauseOverlay(app!, {
       emulator: playing.getEmulator(),
       settings,
       onResume: () => router.setMode("emu"),
       onQuit: () => exitToMenu(),
+      onSaveState: () => {
+        overlay?.close();
+        router.setMode("emu");
+        void saveController?.save();
+      },
+      onLoadState: () => {
+        overlay?.close();
+        router.setMode("emu");
+        void saveController?.load();
+      },
     });
     router.setMode("emu");
   });
