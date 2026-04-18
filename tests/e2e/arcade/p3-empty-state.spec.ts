@@ -67,9 +67,12 @@ test.describe("Phase 3 — empty state", () => {
     expect(qrBox!.width).toBeGreaterThanOrEqual(200);
     expect(qrBox!.height).toBeGreaterThanOrEqual(200);
 
-    // The QR URL points at https://sprixe.app/send/<roomId>.
+    // The QR URL now points at the kiosk's own origin so local dev +
+    // LAN testing works without tweaking. The encoded URL should be
+    // {location.origin}/send/{roomId}.
     const url = await qr.getAttribute("data-url");
-    expect(url).toMatch(/^https:\/\/sprixe\.app\/send\/.+/);
+    const origin = new URL(page.url()).origin;
+    expect(url).toMatch(new RegExp(`^${origin.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}/send/.+`));
 
     // No game cards in the DOM — the empty-state path does not mount
     // the browser screen.

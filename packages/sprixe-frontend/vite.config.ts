@@ -12,6 +12,10 @@ export default defineConfig({
   server: {
     port: 5174,
     strictPort: true,
+    // Bind to every interface so a phone on the same WiFi can reach
+    // the kiosk via the Mac's LAN IP. The startup banner lists every
+    // reachable URL (Local: + Network:).
+    host: true,
     fs: {
       allow: [resolve(__dirname, "../..")],
     },

@@ -40,7 +40,14 @@ export class EmptyState {
 
     const qrWrap = document.createElement("div");
     qrWrap.className = "af-empty-qr";
-    this.qr = new QrCode(qrWrap, { size: 200, baseUrl: options.baseUrl ?? "https://sprixe.app/send" });
+    // Default: encode the kiosk's own origin + '/send' so the QR works
+    // in local dev (open kiosk via LAN IP → phone scans to the same IP)
+    // without hardcoding the production sprixe.app host. Production
+    // deploys that serve the kiosk from sprixe.app naturally end up with
+    // https://sprixe.app/send/ too, so no extra configuration needed.
+    const defaultBase =
+      typeof window !== "undefined" ? `${window.location.origin}/send` : "https://sprixe.app/send";
+    this.qr = new QrCode(qrWrap, { size: 200, baseUrl: options.baseUrl ?? defaultBase });
     this.root.appendChild(qrWrap);
 
     const prompt = document.createElement("p");
