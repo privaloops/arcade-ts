@@ -52,3 +52,22 @@ failures.
 We still validate every config file in CI through the `kiosk` Playwright
 project (same Chromium flags as the service), so breaking the kiosk
 flags fails a PR before any SD card is flashed.
+
+## Smoke-testing `first-boot.sh` locally
+
+Before flashing, you can validate the script end-to-end in an arm64
+Docker container:
+
+```bash
+cd packages/sprixe-image
+./test-first-boot.sh
+```
+
+It mocks `apt-get` / `systemctl` / `reboot`, runs `first-boot.sh`, then
+asserts every expected file exists, the watchdog is executable, the
+autologin drop-in points at `sprixe`, the kiosk unit targets
+`sprixe.app/play/` with the `SharedArrayBuffer` flag, and
+`systemd-analyze verify` accepts all three units. Finishes in ~30 s on
+a warm Docker cache. Needs Docker Desktop running; on Intel Macs /
+Linux x86_64 it registers arm64 binfmt handlers automatically on the
+first run.
