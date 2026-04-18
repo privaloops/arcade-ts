@@ -398,3 +398,53 @@ html, body {
   color: var(--af-text-primary);
   box-shadow: inset 3px 0 0 var(--af-accent);
 }
+
+/* --- Phone page (upload) --- */
+
+.af-phone-page {
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.af-phone-title {
+  font-family: var(--af-font-display);
+  color: var(--af-accent);
+  margin: 0;
+}
+
+.af-phone-sub {
+  color: var(--af-text-secondary);
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+.af-phone-upload {
+  padding: 14px 24px;
+  background: var(--af-accent);
+  color: var(--af-bg-primary);
+  border: none;
+  border-radius: 8px;
+  font-family: var(--af-font-display);
+  font-weight: 600;
+  font-size: 1.1rem;
+  cursor: pointer;
+  min-height: 44px;
+}
+
+.af-phone-upload:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.af-phone-status {
+  color: var(--af-text-secondary);
+}
+
+.af-phone-progress {
+  font-family: var(--af-font-display);
+  font-size: 1.2rem;
+}
