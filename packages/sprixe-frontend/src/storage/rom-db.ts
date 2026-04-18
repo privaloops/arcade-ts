@@ -42,13 +42,13 @@ export type RomRecordInput =
     });
 
 const DB_NAME = "sprixe-arcade";
-// Bumped to 3 in Phase 4b.2b so every storage class in the frontend
-// opens the same 'sprixe-arcade' database at a coherent version —
-// SaveStateDB adds 'savestates' at v2, MediaCache adds 'media' at v3.
-// Whichever module hits IndexedDB first runs the full upgrade path
-// (see runUpgrade below), so downstream opens never trigger a
-// second upgrade.
-const DB_VERSION = 3;
+// Bumped to 4 in Phase 4b.2c to heal databases left at v3 without the
+// 'media' store (an earlier SaveStateDB.onupgradeneeded missed it, so
+// installs that opened the DB via save-state path first landed at v3
+// with only 'roms' + 'savestates'). The idempotent onupgradeneeded
+// below creates whichever of the three stores is missing, so bumping
+// the version re-runs the creation block and repairs the schema.
+const DB_VERSION = 4;
 const STORE_ROMS = "roms";
 
 export class RomDB {

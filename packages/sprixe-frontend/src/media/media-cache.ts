@@ -14,7 +14,7 @@
  */
 
 const DB_NAME = "sprixe-arcade";
-const DB_VERSION = 3;
+const DB_VERSION = 4; // Phase 4b.2c: bumped to heal v3 DBs that landed without 'media'
 const STORE_MEDIA = "media";
 
 export interface MediaRecord {
