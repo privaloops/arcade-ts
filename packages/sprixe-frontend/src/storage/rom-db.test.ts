@@ -92,8 +92,8 @@ describe("RomDB", () => {
           id: r.id!,
           system: "cps1",
           zipData: bufOf([0]),
-          addedAt: r.addedAt,
-          lastPlayedAt: r.lastPlayedAt,
+          addedAt: r.addedAt!,
+          lastPlayedAt: r.lastPlayedAt!,
         });
       }
 

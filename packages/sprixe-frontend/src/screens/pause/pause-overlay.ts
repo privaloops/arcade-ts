@@ -49,10 +49,10 @@ export class PauseOverlay {
 
   private readonly emulator: EmulatorHandle;
   private readonly actions: readonly { action: PauseAction; label: string }[];
-  private readonly onResume?: () => void;
-  private readonly onQuit?: () => void;
-  private readonly onSaveState?: () => void;
-  private readonly onLoadState?: () => void;
+  private readonly onResume: (() => void) | undefined;
+  private readonly onQuit: (() => void) | undefined;
+  private readonly onSaveState: (() => void) | undefined;
+  private readonly onLoadState: (() => void) | undefined;
 
   private readonly itemEls: HTMLElement[] = [];
   private selectedIndex = 0;

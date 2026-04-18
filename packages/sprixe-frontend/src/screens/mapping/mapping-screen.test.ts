@@ -6,7 +6,7 @@ import { MAPPING_ROLES, loadMapping, clearMapping, STORAGE_KEY, type InputBindin
 type SetPad = (pad: Partial<Gamepad> | null) => void;
 const setPad: SetPad = (globalThis as unknown as { __setGamepad: SetPad }).__setGamepad;
 
-function gamepadWith(opts: { pressed?: number[]; axes?: number[] } = {}): Partial<Gamepad> {
+function gamepadWith(opts: { pressed?: number[] | undefined; axes?: number[] | undefined } = {}): Partial<Gamepad> {
   const pressed = new Set(opts.pressed ?? []);
   const buttons: GamepadButton[] = [];
   for (let i = 0; i < 16; i++) {
