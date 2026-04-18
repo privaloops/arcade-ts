@@ -13,6 +13,27 @@
 
 import { QrCode } from "../../ui/qr-code";
 
+/**
+ * __LAN_IP__ is injected by vite.config.ts `define` at dev-server
+ * startup — it holds the Mac's first non-internal IPv4 address so a
+ * phone that scans the QR lands on the kiosk's LAN IP even when the
+ * user happens to load the kiosk via localhost. Production builds
+ * replace this at build time with `null`, at which point we fall
+ * back to window.location.origin (the sprixe.app host in prod).
+ */
+declare const __LAN_IP__: string | null;
+
+function defaultBaseUrl(): string {
+  if (typeof window === "undefined") return "https://sprixe.app/send";
+  try {
+    if (typeof __LAN_IP__ === "string" && __LAN_IP__) {
+      const port = window.location.port || "5174";
+      return `http://${__LAN_IP__}:${port}/send`;
+    }
+  } catch { /* __LAN_IP__ undefined in non-vite contexts */ }
+  return `${window.location.origin}/send`;
+}
+
 export interface EmptyStateOptions {
   /** Override the QR target. Defaults to production sprixe.app. */
   baseUrl?: string;
@@ -40,14 +61,10 @@ export class EmptyState {
 
     const qrWrap = document.createElement("div");
     qrWrap.className = "af-empty-qr";
-    // Default: encode the kiosk's own origin + '/send' so the QR works
-    // in local dev (open kiosk via LAN IP → phone scans to the same IP)
-    // without hardcoding the production sprixe.app host. Production
-    // deploys that serve the kiosk from sprixe.app naturally end up with
-    // https://sprixe.app/send/ too, so no extra configuration needed.
-    const defaultBase =
-      typeof window !== "undefined" ? `${window.location.origin}/send` : "https://sprixe.app/send";
-    this.qr = new QrCode(qrWrap, { size: 200, baseUrl: options.baseUrl ?? defaultBase });
+    this.qr = new QrCode(qrWrap, {
+      size: 200,
+      baseUrl: options.baseUrl ?? defaultBaseUrl(),
+    });
     this.root.appendChild(qrWrap);
 
     const prompt = document.createElement("p");

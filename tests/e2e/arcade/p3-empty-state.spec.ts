@@ -67,12 +67,13 @@ test.describe("Phase 3 — empty state", () => {
     expect(qrBox!.width).toBeGreaterThanOrEqual(200);
     expect(qrBox!.height).toBeGreaterThanOrEqual(200);
 
-    // The QR URL now points at the kiosk's own origin so local dev +
-    // LAN testing works without tweaking. The encoded URL should be
-    // {location.origin}/send/{roomId}.
+    // The QR URL points at an http origin + /send/{roomId}. In dev the
+    // vite config injects __LAN_IP__ so the encoded host is the Mac's
+    // LAN IP; in local test runs where no LAN interface is up it falls
+    // back to the kiosk's own origin. Either way it must be an http
+    // URL ending in /send/<something>.
     const url = await qr.getAttribute("data-url");
-    const origin = new URL(page.url()).origin;
-    expect(url).toMatch(new RegExp(`^${origin.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}/send/.+`));
+    expect(url).toMatch(/^https?:\/\/[^\s]+\/send\/.+/);
 
     // No game cards in the DOM — the empty-state path does not mount
     // the browser screen.
