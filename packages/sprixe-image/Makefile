@@ -4,7 +4,11 @@
 # the monorepo root so it's invisible to workspaces). Override
 # PIGEN=/somewhere/else if you already have it checked out.
 PIGEN_REPO   ?= https://github.com/RPi-Distro/pi-gen.git
-PIGEN_BRANCH ?= master
+# 'arm64' targets Bookworm 64-bit (what the RPi 5 ships with). The
+# 'master' branch still defaults to armhf (linux32 personality) and
+# fails out of the gate on Apple Silicon / Docker Desktop's ARM64
+# emulation. Override if you need a different target.
+PIGEN_BRANCH ?= arm64
 PIGEN        ?= $(CURDIR)/pi-gen
 STAGE_NAME   := stage-sprixe
 DEPLOY_DIR   := $(PIGEN)/deploy
