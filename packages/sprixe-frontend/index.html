@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0a0a10" />
+    <title>Sprixe Arcade</title>
+    <style>
+      /* Inline splash styles so the overlay paints before any CSS bundle
+         or font network is resolved. Matches Plymouth boot theme visually
+         (§2.2) so the Chromium kiosk handoff is seamless. */
+      html, body { margin: 0; height: 100%; background: #0a0a10; color: #f0f0f5; font-family: system-ui, sans-serif; }
+      #splash {
+        position: fixed; inset: 0;
+        display: flex; align-items: center; justify-content: center;
+        flex-direction: column; gap: 8px;
+        background: #0a0a10;
+        z-index: 100;
+        opacity: 1;
+        transition: opacity 300ms cubic-bezier(0.16, 1, 0.3, 1);
+      }
+      #splash[data-hidden="true"] { opacity: 0; pointer-events: none; }
+      #splash .splash-logo {
+        font-size: clamp(2rem, 8vw, 5rem);
+        font-weight: 700;
+        letter-spacing: 0.3em;
+        color: #00d4ff;
+        text-shadow: 0 0 32px rgba(0, 212, 255, 0.55);
+        animation: splash-pulse 2s ease-in-out infinite;
+      }
+      #splash .splash-sub {
+        font-size: clamp(0.8rem, 2vw, 1.1rem);
+        letter-spacing: 0.6em;
+        color: #a0a0b0;
+      }
+      @keyframes splash-pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.75; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #splash .splash-logo { animation: none; }
+        #splash { transition: opacity 0ms; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="splash" data-testid="splash">
+      <div class="splash-logo">SPRIXE</div>
+      <div class="splash-sub">ARCADE</div>
+    </div>
+    <div id="app"></div>
+    <script>
+      // Dismiss the splash when the real app signals readiness. Keep the
+      // element around for the fade-out window (300ms) then remove it.
+      window.addEventListener("app-ready", () => {
+        const el = document.getElementById("splash");
+        if (!el) return;
+        el.setAttribute("data-hidden", "true");
+        setTimeout(() => el.remove(), 300);
+      });
+    </script>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
