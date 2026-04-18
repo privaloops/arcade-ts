@@ -1,20 +1,14 @@
 #!/bin/bash
 # Sprixe Arcade — first-boot provisioner for Raspberry Pi OS Lite 64-bit.
 #
-# Paste this whole file into the Raspberry Pi Imager's
-# "Run custom script on first boot" field. On the very first boot
-# after flashing, the script installs Chromium + supporting packages,
-# drops every systemd unit into place, enables autologin for the
-# 'sprixe' user, and reboots. From the second boot on the RPi lands
-# straight in the arcade.
+# Installs Chromium + Xorg, then wires the classic RPi-kiosk pattern:
+# autologin 'sprixe' on tty1 → .bash_profile exec startx → .xinitrc
+# launches Chromium in kiosk mode. When Chromium crashes, startx
+# exits, the shell loops back through .bash_profile, and the arcade
+# is back on screen in seconds — no systemd kiosk service, no
+# background/foreground tangling.
 #
-# Prerequisites (all set in the Imager's advanced panel BEFORE flashing):
-#   - WiFi SSID + password (first-boot does apt install, needs net)
-#   - Username: sprixe
-#   - Hostname: sprixe (optional but tidy)
-#
-# Re-running the script after success is safe — the marker file at
-# /var/lib/sprixe-installed short-circuits every subsequent run.
+# Re-running after success is safe — a marker short-circuits.
 
 set -euxo pipefail
 
@@ -27,94 +21,58 @@ fi
 export DEBIAN_FRONTEND=noninteractive
 
 # ── Packages ────────────────────────────────────────────────────────
-# chromium-browser = RPi OS flavour of chromium (hardware-accelerated)
-# xinit/xserver-xorg: Wayland via cage is an option but Xorg is more
-# predictable on RPi 5 today. Revisit after the image stabilises.
+# chromium = RPi OS flavour, ships with VideoCore GPU acceleration.
+# xserver-xorg + xinit: stable, boring, exactly what kiosk tutorials
+# converge on. unclutter hides the mouse cursor after 0.1s idle.
 apt-get update
 apt-get install -y --no-install-recommends \
-    chromium-browser \
+    chromium \
     xserver-xorg \
     xinit \
     unclutter \
-    plymouth \
-    plymouth-themes \
     fonts-noto-color-emoji
 
-# ── /etc/systemd/system/sprixe-kiosk.service ────────────────────────
-cat > /etc/systemd/system/sprixe-kiosk.service <<'UNIT'
-[Unit]
-Description=Sprixe Arcade Kiosk
-After=network-online.target
-Wants=network-online.target
+# ── /home/sprixe/.xinitrc — actual kiosk entry point ───────────────
+cat > /home/sprixe/.xinitrc <<'XINIT'
+#!/bin/sh
+# Kill screen blanking + DPMS so the arcade stays lit.
+xset -dpms
+xset s off
+xset s noblank
+# Hide the cursor once it's idle.
+unclutter -idle 0.1 -root &
+# Launch the arcade. exec hands control over so Chromium becomes the
+# X session root — when it exits, X exits, and the calling startx /
+# .bash_profile loop restarts us.
+exec /usr/bin/chromium \
+    --kiosk --no-first-run --disable-infobars \
+    --noerrdialogs --disable-translate \
+    --disable-session-crashed-bubble \
+    --disable-component-update \
+    --autoplay-policy=no-user-gesture-required \
+    --enable-features=SharedArrayBuffer \
+    --enable-gpu-rasterization --enable-zero-copy \
+    --ignore-gpu-blocklist \
+    --user-data-dir=/home/sprixe/.chromium \
+    https://sprixe.app/play/
+XINIT
+chown sprixe:sprixe /home/sprixe/.xinitrc
+chmod 755 /home/sprixe/.xinitrc
 
-[Service]
-Type=simple
-User=sprixe
-Environment=DISPLAY=:0
-ExecStartPre=/usr/bin/xinit -- :0 -nocursor &
-ExecStartPre=/bin/sleep 2
-ExecStartPre=/usr/bin/xset -dpms
-ExecStartPre=/usr/bin/xset s off
-ExecStart=/usr/bin/chromium-browser \
-  --kiosk --no-first-run --disable-infobars \
-  --noerrdialogs --disable-translate \
-  --disable-session-crashed-bubble \
-  --disable-component-update \
-  --autoplay-policy=no-user-gesture-required \
-  --enable-features=SharedArrayBuffer \
-  --enable-gpu-rasterization --enable-zero-copy \
-  --ignore-gpu-blocklist \
-  --user-data-dir=/home/sprixe/.chromium \
-  https://sprixe.app/play/
-Restart=always
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-
-# ── /etc/systemd/system/sprixe-watchdog.service + .timer ────────────
-cat > /etc/systemd/system/sprixe-watchdog.service <<'UNIT'
-[Unit]
-Description=Sprixe Kiosk Health Watchdog
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/sprixe-watchdog.sh
-UNIT
-
-cat > /etc/systemd/system/sprixe-watchdog.timer <<'UNIT'
-[Unit]
-Description=Run Sprixe watchdog every 30s
-
-[Timer]
-OnBootSec=60s
-OnUnitActiveSec=30s
-Unit=sprixe-watchdog.service
-
-[Install]
-WantedBy=timers.target
-UNIT
-
-# ── /usr/local/bin/sprixe-watchdog.sh ───────────────────────────────
-cat > /usr/local/bin/sprixe-watchdog.sh <<'SCRIPT'
-#!/bin/bash
-# Resets + restarts the kiosk service when systemd parks it in the
-# 'failed' state after exhausting Restart=always's budget.
-set -eu
-UNIT=sprixe-kiosk.service
-if systemctl is-failed --quiet "$UNIT"; then
-    logger -t sprixe-watchdog "$UNIT is failed — resetting and restarting"
-    systemctl reset-failed "$UNIT"
-    systemctl restart "$UNIT"
-elif ! systemctl is-active --quiet "$UNIT"; then
-    logger -t sprixe-watchdog "$UNIT is inactive — starting"
-    systemctl start "$UNIT"
+# ── /home/sprixe/.bash_profile — auto-startx on tty1 ────────────────
+cat > /home/sprixe/.bash_profile <<'PROFILE'
+# Triggered by the autologin drop-in on tty1. Runs startx once the
+# shell lands; `exec` means the shell is replaced by startx, so when
+# Chromium / xinit exits the login loop reclaims tty1 and re-runs
+# this file — the kiosk respawns automatically, no watchdog needed.
+if [ -z "$DISPLAY" ] && [ "$(tty)" = "/dev/tty1" ]; then
+    exec startx -- :0 -nocursor
 fi
-SCRIPT
-chmod 755 /usr/local/bin/sprixe-watchdog.sh
+PROFILE
+chown sprixe:sprixe /home/sprixe/.bash_profile
+chmod 644 /home/sprixe/.bash_profile
 
-# ── Autologin for user 'sprixe' on tty1 ─────────────────────────────
+# ── Autologin 'sprixe' on tty1 ──────────────────────────────────────
 install -d -m 755 /etc/systemd/system/getty@tty1.service.d
 cat > /etc/systemd/system/getty@tty1.service.d/autologin.conf <<'CONF'
 [Service]
@@ -122,22 +80,30 @@ ExecStart=
 ExecStart=-/sbin/agetty --autologin sprixe --noclear %I $TERM
 CONF
 
+# ── Allow 'sprixe' to run X as a regular user ───────────────────────
+# Debian locks /usr/lib/xorg/Xorg down to 'console' sessions — without
+# this override, startx aborts with "only console users are allowed
+# to run the X server". The allowed_users line below is the Debian-
+# blessed way to relax it for a dedicated kiosk user.
+install -d -m 755 /etc/X11
+cat > /etc/X11/Xwrapper.config <<'WRAPPER'
+allowed_users=anybody
+needs_root_rights=yes
+WRAPPER
+
 # ── Trim services irrelevant to a kiosk appliance ───────────────────
-# Silently shrug on units that aren't installed (e.g. ModemManager on
-# Lite, hciuart on a board without bluetooth).
+# Note: avahi-daemon is intentionally kept enabled — it publishes the
+# 'sprixe.local' mDNS hostname that the maintainer uses for SSH.
 for svc in \
     bluetooth.service hciuart.service \
-    avahi-daemon.service ModemManager.service \
+    ModemManager.service \
     apt-daily.service apt-daily.timer apt-daily-upgrade.timer
 do
     systemctl disable --now "$svc" 2>/dev/null || true
 done
 
-# ── Enable Sprixe stack + reboot ────────────────────────────────────
+# ── Finish ──────────────────────────────────────────────────────────
 systemctl daemon-reload
-systemctl enable sprixe-kiosk.service
-systemctl enable sprixe-watchdog.timer
-
 touch "$MARKER"
 
 echo "sprixe-first-boot: provisioning complete — rebooting into the kiosk"
