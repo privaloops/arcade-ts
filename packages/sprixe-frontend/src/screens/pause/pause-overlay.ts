@@ -17,6 +17,7 @@
  */
 
 import type { NavAction } from "../../input/gamepad-nav";
+import type { SettingsStore } from "../settings/settings-store";
 
 /** Minimal surface the overlay needs from the emulator. */
 export interface EmulatorHandle {
@@ -33,6 +34,9 @@ export interface PauseOverlayOptions {
   onQuit?: () => void;
   onSaveState?: () => void;
   onLoadState?: () => void;
+  /** Phase 4b.4: when provided, the overlay shows a volume slider
+   * bound to settings.audio.masterVolume. */
+  settings?: SettingsStore;
   /** Override the menu entries. Mostly for tests. */
   actions?: readonly { action: PauseAction; label: string }[];
 }
@@ -53,6 +57,9 @@ export class PauseOverlay {
   private readonly onQuit: (() => void) | undefined;
   private readonly onSaveState: (() => void) | undefined;
   private readonly onLoadState: (() => void) | undefined;
+  private readonly settings: SettingsStore | undefined;
+  private volumeSlider: HTMLInputElement | null = null;
+  private settingsUnsub: (() => void) | null = null;
 
   private readonly itemEls: HTMLElement[] = [];
   private selectedIndex = 0;
@@ -67,6 +74,7 @@ export class PauseOverlay {
     this.onQuit = options.onQuit;
     this.onSaveState = options.onSaveState;
     this.onLoadState = options.onLoadState;
+    this.settings = options.settings;
 
     this.root = document.createElement("div");
     this.root.className = "af-pause-overlay";
@@ -104,6 +112,34 @@ export class PauseOverlay {
     }
     dialog.appendChild(list);
 
+    if (this.settings) {
+      const volRow = document.createElement("div");
+      volRow.className = "af-pause-volume";
+      volRow.setAttribute("data-testid", "pause-volume");
+      const label = document.createElement("label");
+      label.className = "af-pause-volume-label";
+      label.textContent = "Volume";
+      const slider = document.createElement("input");
+      slider.type = "range";
+      slider.min = "0";
+      slider.max = "100";
+      slider.value = String(this.settings.get().audio.masterVolume);
+      slider.className = "af-pause-volume-slider";
+      slider.setAttribute("data-testid", "pause-volume-slider");
+      slider.addEventListener("input", () => {
+        const v = Number(slider.value);
+        this.settings!.update({ audio: { masterVolume: v } });
+      });
+      label.appendChild(slider);
+      volRow.appendChild(label);
+      dialog.appendChild(volRow);
+      this.volumeSlider = slider;
+      this.settingsUnsub = this.settings.onChange((s) => {
+        const value = String(s.audio.masterVolume);
+        if (slider.value !== value) slider.value = value;
+      });
+    }
+
     container.appendChild(this.root);
     this.refreshSelection();
 
@@ -140,6 +176,12 @@ export class PauseOverlay {
     this.emulator.resume();
     window.removeEventListener("keydown", this.keydownHandler);
     window.removeEventListener("keydown", this.keyboardTrapHandler);
+  }
+
+  /** Tear down subscriptions — call before removing root from the DOM. */
+  dispose(): void {
+    this.settingsUnsub?.();
+    this.settingsUnsub = null;
   }
 
   isOpen(): boolean {

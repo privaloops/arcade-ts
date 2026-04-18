@@ -98,6 +98,7 @@ function startBrowser(games: GameEntry[], db: RomDB, host: PeerHost, settings: S
 
   function exitToMenu(): void {
     overlay?.close();
+    overlay?.dispose();
     overlay?.root.remove();
     overlay = null;
     playing?.stop();
@@ -114,6 +115,7 @@ function startBrowser(games: GameEntry[], db: RomDB, host: PeerHost, settings: S
     playing.start();
     overlay = new PauseOverlay(app!, {
       emulator: playing.getEmulator(),
+      settings,
       onResume: () => router.setMode("emu"),
       onQuit: () => exitToMenu(),
     });
