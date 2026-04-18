@@ -19,22 +19,29 @@ import type { Page } from "@playwright/test";
  */
 export async function seedDefaultMapping(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    if (localStorage.getItem("sprixe.input.mapping.v1")) return;
-    localStorage.setItem(
-      "sprixe.input.mapping.v1",
-      JSON.stringify({
-        version: 1,
-        type: "gamepad",
-        p1: {
-          coin: { kind: "button", index: 8 },
-          start: { kind: "button", index: 9 },
-          up: { kind: "axis", index: 1, dir: -1 },
-          down: { kind: "axis", index: 1, dir: 1 },
-          confirm: { kind: "button", index: 0 },
-          back: { kind: "button", index: 1 },
-        },
-      })
-    );
+    if (!localStorage.getItem("sprixe.input.mapping.v1")) {
+      localStorage.setItem(
+        "sprixe.input.mapping.v1",
+        JSON.stringify({
+          version: 1,
+          type: "gamepad",
+          p1: {
+            coin: { kind: "button", index: 8 },
+            start: { kind: "button", index: 9 },
+            up: { kind: "axis", index: 1, dir: -1 },
+            down: { kind: "axis", index: 1, dir: 1 },
+            confirm: { kind: "button", index: 0 },
+            back: { kind: "button", index: 1 },
+          },
+        })
+      );
+    }
+    // Phase 3.10: tell main.ts to use MOCK_GAMES as fallback when the
+    // ROM store is empty. Production first boot hits EmptyState; tests
+    // that want the browser pre-populated opt in with this flag.
+    if (localStorage.getItem("sprixe.useMockCatalogue") === null) {
+      localStorage.setItem("sprixe.useMockCatalogue", "true");
+    }
   });
 }
 

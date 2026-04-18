@@ -42,6 +42,12 @@ test.describe("Phase 2 — first-boot input mapping", () => {
     // Use the gamepad-only helper so no default mapping is seeded —
     // this test inspects the raw "never configured" boot path.
     await installGamepadMockOnly(page);
+    // The post-mapping assertion expects the browser screen to mount
+    // immediately. Without this flag main.ts would route to the
+    // empty-state QR screen since IDB is wiped in resetAllState.
+    await page.addInitScript(() => {
+      localStorage.setItem("sprixe.useMockCatalogue", "true");
+    });
     await page.goto("/");
     await resetAllState(page);
     await page.reload();

@@ -103,6 +103,9 @@ export class InputCapture {
 
   private scheduleNextTick(): void {
     if (!this.running) return;
+    // Guard against hot-unload / test teardown where the rAF global
+    // has been torn down while a scheduled tick is still in flight.
+    if (typeof requestAnimationFrame !== "function") return;
     this.rafId = requestAnimationFrame(() => {
       this.tick();
       this.scheduleNextTick();

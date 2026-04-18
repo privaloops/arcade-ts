@@ -16,20 +16,38 @@ import { HintsBar } from "./ui/hints-bar";
 import { MappingScreen } from "./screens/mapping/mapping-screen";
 import { PlayingScreen } from "./screens/playing/playing-screen";
 import { PauseOverlay } from "./screens/pause/pause-overlay";
-import { RomDB } from "./storage/rom-db";
+import { PhonePage } from "./screens/phone/phone-page";
+import { EmptyState } from "./screens/empty/empty-state";
+import { PeerHost } from "./p2p/peer-host";
+import { RomPipeline } from "./p2p/rom-pipeline";
+import { RomDB, type RomRecord } from "./storage/rom-db";
 
 const app = document.getElementById("app");
 if (!app) throw new Error("#app container missing");
 
-async function loadCatalogue(): Promise<GameEntry[]> {
-  const db = new RomDB();
+const SEND_PATH_RE = /^\/send\/([^/]+)/;
+const USE_MOCK_KEY = "sprixe.useMockCatalogue";
+
+async function loadCatalogue(db: RomDB): Promise<{ games: GameEntry[]; source: "idb" | "mock" | "empty" }> {
+  let records: RomRecord[] = [];
   try {
-    const records = await db.list();
-    if (records.length > 0) return records.map(romRecordToGameEntry);
+    records = await db.list();
   } catch (e) {
-    console.warn("[arcade] RomDB unavailable, falling back to mock catalogue:", e);
+    console.warn("[arcade] RomDB unavailable:", e);
   }
-  return [...MOCK_GAMES];
+  if (records.length > 0) {
+    return { games: records.map(romRecordToGameEntry), source: "idb" };
+  }
+  // Dev / test escape hatch: only fall back to MOCK_GAMES when a local
+  // flag is set. Production first boot hits the empty state instead.
+  const wantMock = (() => {
+    try { return localStorage.getItem(USE_MOCK_KEY) === "true"; }
+    catch { return false; }
+  })();
+  if (wantMock) {
+    return { games: [...MOCK_GAMES], source: "mock" };
+  }
+  return { games: [], source: "empty" };
 }
 
 function showMappingFlow(): Promise<void> {
@@ -44,7 +62,18 @@ function showMappingFlow(): Promise<void> {
   });
 }
 
-function startBrowser(games: GameEntry[]): void {
+function pickRoomId(): string {
+  try {
+    const stored = localStorage.getItem("sprixe.roomId");
+    if (stored) return stored;
+  } catch { /* ignore */ }
+  const rand = Math.random().toString(36).slice(2, 10);
+  const id = `sprixe-${rand}`;
+  try { localStorage.setItem("sprixe.roomId", id); } catch { /* ignore */ }
+  return id;
+}
+
+function startBrowser(games: GameEntry[], db: RomDB, host: PeerHost): void {
   const browser = new BrowserScreen(app!, { initialGames: games });
   const hints = new HintsBar(app!);
   hints.setContext("browser");
@@ -84,7 +113,6 @@ function startBrowser(games: GameEntry[]): void {
       router.setMode("emu");
     } else {
       overlay.open();
-      // Overlay needs NavActions — temporarily switch back to menu mode.
       router.setMode("menu");
     }
   });
@@ -100,19 +128,64 @@ function startBrowser(games: GameEntry[]): void {
   const gamepad = new GamepadNav();
   gamepad.onAction((action) => router.feedAction(action));
   gamepad.start();
+
+  const pipeline = new RomPipeline({ db });
+  host.onFile(async (file) => {
+    try {
+      const { record } = await pipeline.process(file);
+      const refreshed = (await db.list()).map(romRecordToGameEntry);
+      browser.setGames(refreshed);
+      console.info("[arcade] ROM received + stored:", record.id);
+    } catch (e) {
+      console.error("[arcade] ROM processing failed:", e);
+    }
+  });
 }
 
-async function boot(): Promise<void> {
+async function bootKiosk(): Promise<void> {
   window.dispatchEvent(new CustomEvent("app-ready"));
 
   if (!loadMapping()) {
     await showMappingFlow();
   }
 
-  const games = await loadCatalogue();
-  startBrowser(games);
+  const db = new RomDB();
+  const host = new PeerHost({ roomId: pickRoomId() });
+  host.start().catch((e) => console.warn("[arcade] PeerHost start failed:", e));
+
+  const { games, source } = await loadCatalogue(db);
+
+  if (source === "empty") {
+    const empty = new EmptyState(app!);
+    await empty.setRoomId(host.roomId);
+    // When a ROM lands, swap the empty state for the real browser.
+    const pipeline = new RomPipeline({ db });
+    host.onFile(async (file) => {
+      try {
+        await pipeline.process(file);
+        const refreshed = (await db.list()).map(romRecordToGameEntry);
+        if (refreshed.length > 0) {
+          empty.unmount();
+          startBrowser(refreshed, db, host);
+        }
+      } catch (e) {
+        console.error("[arcade] empty-state ROM handling failed:", e);
+      }
+    });
+    return;
+  }
+
+  startBrowser(games, db, host);
 }
 
-boot().catch((e) => {
-  console.error("[arcade] boot failed:", e);
-});
+function bootPhone(roomId: string): void {
+  window.dispatchEvent(new CustomEvent("app-ready"));
+  new PhonePage(app!, { roomId });
+}
+
+const match = SEND_PATH_RE.exec(window.location.pathname);
+if (match) {
+  bootPhone(match[1]!);
+} else {
+  bootKiosk().catch((e) => console.error("[arcade] boot failed:", e));
+}
