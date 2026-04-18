@@ -4,6 +4,11 @@
 
 * { box-sizing: border-box; }
 
+/* Respect the HTML5 [hidden] attribute even when a class selector
+   later sets display — otherwise setting el.hidden=true is a no-op
+   against .af-* rules that declare display: flex/grid. */
+[hidden] { display: none !important; }
+
 html, body {
   margin: 0;
   padding: 0;

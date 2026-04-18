@@ -55,6 +55,7 @@ function startBrowser(games: GameEntry[]): void {
 
   function exitToMenu(): void {
     overlay?.close();
+    overlay?.root.remove();
     overlay = null;
     playing?.stop();
     playing = null;
