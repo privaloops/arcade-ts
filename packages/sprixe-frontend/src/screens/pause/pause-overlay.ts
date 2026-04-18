@@ -1,0 +1,209 @@
+/**
+ * PauseOverlay — in-game pause menu (§2.6).
+ *
+ * Triggered by coin-hold (Phase 2.6) or the phone remote's Pause
+ * button (Phase 3). Pauses the emulator immediately (CPUs + audio),
+ * renders the last frame behind a dark overlay, and offers the
+ * four actions called out in the UX spec:
+ *
+ *   Resume         — close and continue
+ *   Save State     — Phase 2.9 wires the slot picker
+ *   Load State     — ditto
+ *   Quit to Menu   — Phase 2.8 wires the transition back to browser
+ *
+ * The overlay is a focus trap: Tab cycles only within the menu, and
+ * the menu starts focused on the first item (Resume) so gamepad users
+ * land on the right action. Escape is a keyboard shortcut for Resume.
+ */
+
+import type { NavAction } from "../../input/gamepad-nav";
+
+/** Minimal surface the overlay needs from the emulator. */
+export interface EmulatorHandle {
+  pause(): void;
+  resume(): void;
+  isPaused?(): boolean;
+}
+
+export type PauseAction = "resume" | "save-state" | "load-state" | "quit";
+
+export interface PauseOverlayOptions {
+  emulator: EmulatorHandle;
+  onResume?: () => void;
+  onQuit?: () => void;
+  onSaveState?: () => void;
+  onLoadState?: () => void;
+  /** Override the menu entries. Mostly for tests. */
+  actions?: readonly { action: PauseAction; label: string }[];
+}
+
+const DEFAULT_ACTIONS: readonly { action: PauseAction; label: string }[] = [
+  { action: "resume",     label: "Resume" },
+  { action: "save-state", label: "Save State" },
+  { action: "load-state", label: "Load State" },
+  { action: "quit",       label: "Quit to Menu" },
+];
+
+export class PauseOverlay {
+  readonly root: HTMLDivElement;
+
+  private readonly emulator: EmulatorHandle;
+  private readonly actions: readonly { action: PauseAction; label: string }[];
+  private readonly onResume: (() => void) | undefined;
+  private readonly onQuit: (() => void) | undefined;
+  private readonly onSaveState: (() => void) | undefined;
+  private readonly onLoadState: (() => void) | undefined;
+
+  private readonly itemEls: HTMLElement[] = [];
+  private selectedIndex = 0;
+  private opened = false;
+  private readonly keydownHandler: (event: KeyboardEvent) => void;
+  private readonly keyboardTrapHandler: (event: KeyboardEvent) => void;
+
+  constructor(container: HTMLElement, options: PauseOverlayOptions) {
+    this.emulator = options.emulator;
+    this.actions = options.actions ?? DEFAULT_ACTIONS;
+    this.onResume = options.onResume;
+    this.onQuit = options.onQuit;
+    this.onSaveState = options.onSaveState;
+    this.onLoadState = options.onLoadState;
+
+    this.root = document.createElement("div");
+    this.root.className = "af-pause-overlay";
+    this.root.setAttribute("role", "dialog");
+    this.root.setAttribute("aria-modal", "true");
+    this.root.setAttribute("aria-label", "Paused");
+    this.root.setAttribute("data-testid", "pause-overlay");
+    this.root.hidden = true;
+
+    const backdrop = document.createElement("div");
+    backdrop.className = "af-pause-backdrop";
+    this.root.appendChild(backdrop);
+
+    const dialog = document.createElement("div");
+    dialog.className = "af-pause-dialog";
+    this.root.appendChild(dialog);
+
+    const title = document.createElement("h2");
+    title.className = "af-pause-title";
+    title.textContent = "PAUSED";
+    dialog.appendChild(title);
+
+    const list = document.createElement("ul");
+    list.className = "af-pause-list";
+    for (const { action, label } of this.actions) {
+      const li = document.createElement("li");
+      li.className = "af-pause-item";
+      li.setAttribute("role", "menuitem");
+      li.setAttribute("tabindex", "0");
+      li.dataset.action = action;
+      li.textContent = label;
+      li.addEventListener("click", () => this.activate(action));
+      list.appendChild(li);
+      this.itemEls.push(li);
+    }
+    dialog.appendChild(list);
+
+    container.appendChild(this.root);
+    this.refreshSelection();
+
+    this.keydownHandler = (event: KeyboardEvent) => {
+      if (!this.opened) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        this.activate("resume");
+      }
+    };
+    this.keyboardTrapHandler = (event: KeyboardEvent) => {
+      if (!this.opened) return;
+      if (event.key !== "Tab") return;
+      event.preventDefault();
+      this.moveSelection(event.shiftKey ? -1 : 1);
+    };
+  }
+
+  open(): void {
+    if (this.opened) return;
+    this.opened = true;
+    this.root.hidden = false;
+    this.selectedIndex = 0;
+    this.refreshSelection();
+    this.emulator.pause();
+    window.addEventListener("keydown", this.keydownHandler);
+    window.addEventListener("keydown", this.keyboardTrapHandler);
+  }
+
+  close(): void {
+    if (!this.opened) return;
+    this.opened = false;
+    this.root.hidden = true;
+    this.emulator.resume();
+    window.removeEventListener("keydown", this.keydownHandler);
+    window.removeEventListener("keydown", this.keyboardTrapHandler);
+  }
+
+  isOpen(): boolean {
+    return this.opened;
+  }
+
+  getSelectedAction(): PauseAction {
+    return this.actions[this.selectedIndex]!.action;
+  }
+
+  handleNavAction(action: NavAction): boolean {
+    if (!this.opened) return false;
+    switch (action) {
+      case "up":
+        this.moveSelection(-1);
+        return true;
+      case "down":
+        this.moveSelection(1);
+        return true;
+      case "confirm":
+        this.activate(this.getSelectedAction());
+        return true;
+      case "back":
+      case "coin-hold":
+        this.activate("resume");
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  private moveSelection(delta: number): void {
+    const len = this.actions.length;
+    this.selectedIndex = (this.selectedIndex + delta + len) % len;
+    this.refreshSelection();
+  }
+
+  private refreshSelection(): void {
+    this.itemEls.forEach((el, i) => {
+      const selected = i === this.selectedIndex;
+      el.classList.toggle("selected", selected);
+      el.setAttribute("aria-selected", selected ? "true" : "false");
+      if (selected) el.focus({ preventScroll: true });
+    });
+  }
+
+  private activate(action: PauseAction): void {
+    switch (action) {
+      case "resume":
+        this.close();
+        this.onResume?.();
+        return;
+      case "save-state":
+        this.onSaveState?.();
+        return;
+      case "load-state":
+        this.onLoadState?.();
+        return;
+      case "quit":
+        // Close the overlay first so onQuit handlers can mount a
+        // fresh screen on top of a clean DOM.
+        this.close();
+        this.onQuit?.();
+        return;
+    }
+  }
+}

@@ -4,6 +4,11 @@
 
 * { box-sizing: border-box; }
 
+/* Respect the HTML5 [hidden] attribute even when a class selector
+   later sets display — otherwise setting el.hidden=true is a no-op
+   against .af-* rules that declare display: flex/grid. */
+[hidden] { display: none !important; }
+
 html, body {
   margin: 0;
   padding: 0;
@@ -235,4 +240,161 @@ html, body {
 
 .af-hint-label {
   color: var(--af-text-secondary);
+}
+
+/* --- Mapping screen --- */
+
+.af-mapping-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 48px;
+  min-height: 100vh;
+  background: var(--af-bg-primary);
+}
+
+.af-mapping-title {
+  font-family: var(--af-font-display);
+  font-size: clamp(1.6rem, 3vw, 2.4rem);
+  letter-spacing: 0.15em;
+  color: var(--af-accent);
+  margin: 0;
+}
+
+.af-mapping-subtitle {
+  font-size: var(--af-size-metadata);
+  color: var(--af-text-secondary);
+  margin: 0;
+}
+
+.af-mapping-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-family: var(--af-font-display);
+  font-size: var(--af-size-section);
+}
+
+.af-mapping-prompt {
+  padding: 10px 16px;
+  border-radius: 6px;
+  background: var(--af-bg-card);
+  color: var(--af-text-secondary);
+}
+
+.af-mapping-prompt[data-state="active"] {
+  background: var(--af-accent-glow);
+  color: var(--af-text-primary);
+  box-shadow: 0 0 0 1px var(--af-accent-glow), 0 0 32px var(--af-accent-glow);
+}
+
+.af-mapping-prompt[data-state="done"] {
+  color: var(--af-text-primary);
+  border-left: 3px solid var(--af-accent);
+}
+
+.af-mapping-warning {
+  color: var(--af-accent-warm);
+  font-size: var(--af-size-metadata);
+}
+
+/* --- Playing screen --- */
+
+.af-playing-screen {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  background: var(--af-bg-deep);
+  z-index: 10;
+}
+
+.af-playing-title {
+  font-family: var(--af-font-display);
+  font-size: var(--af-size-section);
+  color: var(--af-text-primary);
+}
+
+.af-playing-canvas {
+  image-rendering: pixelated;
+  width: min(80vw, 1152px);
+  aspect-ratio: 384 / 224;
+  background: #000;
+}
+
+.af-playing-fps {
+  color: var(--af-text-secondary);
+  font-family: var(--af-font-body);
+  font-size: 0.85rem;
+}
+
+/* --- Pause overlay --- */
+
+.af-pause-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.af-pause-overlay[hidden] {
+  display: none;
+}
+
+.af-pause-backdrop {
+  position: absolute;
+  inset: 0;
+  background: var(--af-bg-overlay);
+}
+
+.af-pause-dialog {
+  position: relative;
+  min-width: 320px;
+  padding: 32px 40px;
+  background: var(--af-bg-card);
+  border-radius: 10px;
+  box-shadow: 0 0 48px var(--af-accent-glow);
+  border: 1px solid var(--af-accent-glow);
+}
+
+.af-pause-title {
+  margin: 0 0 20px;
+  font-family: var(--af-font-display);
+  font-size: clamp(1.4rem, 2vw, 1.8rem);
+  color: var(--af-accent);
+  letter-spacing: 0.2em;
+  text-align: center;
+}
+
+.af-pause-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.af-pause-item {
+  padding: 12px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--af-text-secondary);
+  font-family: var(--af-font-display);
+  font-size: var(--af-size-section);
+  outline: none;
+}
+
+.af-pause-item.selected {
+  background: var(--af-bg-card-hover);
+  color: var(--af-text-primary);
+  box-shadow: inset 3px 0 0 var(--af-accent);
 }

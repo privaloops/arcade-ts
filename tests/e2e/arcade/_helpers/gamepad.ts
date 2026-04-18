@@ -10,7 +10,40 @@ import type { Page } from "@playwright/test";
  * All arcade E2E specs start with `await installGamepadMock(page)` before
  * `page.goto()` so the mock is active from the very first frame.
  */
-export async function installGamepadMock(page: Page): Promise<void> {
+/**
+ * Seeds a default gamepad input mapping into localStorage BEFORE any
+ * page script runs. Phase 2.4 routes users without a mapping through
+ * the setup screen, so any E2E that wants to land directly in the
+ * browser must call this first. p2-first-boot-mapping.spec.ts opts
+ * out by wiping localStorage after the initial goto.
+ */
+export async function seedDefaultMapping(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    if (localStorage.getItem("sprixe.input.mapping.v1")) return;
+    localStorage.setItem(
+      "sprixe.input.mapping.v1",
+      JSON.stringify({
+        version: 1,
+        type: "gamepad",
+        p1: {
+          coin: { kind: "button", index: 8 },
+          start: { kind: "button", index: 9 },
+          up: { kind: "axis", index: 1, dir: -1 },
+          down: { kind: "axis", index: 1, dir: 1 },
+          confirm: { kind: "button", index: 0 },
+          back: { kind: "button", index: 1 },
+        },
+      })
+    );
+  });
+}
+
+/**
+ * Install only the Gamepad API mock. Use this when the test needs
+ * raw control over localStorage (e.g. p2-first-boot-mapping which
+ * explicitly tests the no-mapping state).
+ */
+export async function installGamepadMockOnly(page: Page): Promise<void> {
   await page.addInitScript(() => {
     let pad: Gamepad | null = null;
     let activeTimer: number | null = null;
@@ -65,4 +98,14 @@ export async function installGamepadMock(page: Page): Promise<void> {
       configurable: true,
     });
   });
+}
+
+/**
+ * Install gamepad mock + seed the default input mapping. This is
+ * what most arcade E2E tests want: land on the browser screen
+ * without hitting the first-boot mapping setup.
+ */
+export async function installGamepadMock(page: Page): Promise<void> {
+  await seedDefaultMapping(page);
+  await installGamepadMockOnly(page);
 }

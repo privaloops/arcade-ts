@@ -54,7 +54,7 @@ function getAllFiles(def: GameDef): string[] {
 /**
  * Identify a game from the filenames present in the ZIP archive.
  */
-function identifyGame(fileNames: string[]): GameDef | null {
+export function identifyGame(fileNames: string[]): GameDef | null {
   const lowerNames = new Set(fileNames.map(n => n.toLowerCase()));
 
   let bestMatch: GameDef | null = null;
