@@ -1,12 +1,18 @@
 #!/bin/bash
 # Sprixe Arcade — first-boot provisioner for Raspberry Pi OS Lite 64-bit.
 #
-# Installs Chromium + Xorg, then wires the classic RPi-kiosk pattern:
-# autologin 'sprixe' on tty1 → .bash_profile exec startx → .xinitrc
-# launches Chromium in kiosk mode. When Chromium crashes, startx
-# exits, the shell loops back through .bash_profile, and the arcade
-# is back on screen in seconds — no systemd kiosk service, no
-# background/foreground tangling.
+# Installs Chromium + cage (a 500-line Wayland kiosk compositor) and
+# wires the classic auto-startup chain:
+#   autologin 'sprixe' on tty1 → .bash_profile exec start-kiosk.sh →
+#   cage launches Chromium full-screen, talking Wayland directly.
+#
+# Why Wayland and not Xorg: the Xorg modesetting driver on RPi 5 +
+# Bookworm has known interop bugs with the KMS pipeline (HDMI seen
+# as "disconnected" by Xorg even when the kernel sees it connected,
+# Chromium rendering at ~half the panel width). Cage bypasses Xorg
+# entirely and lets Chromium use the kernel's own modesetting, so
+# the panel auto-detects at the resolution the user actually has
+# without any of that ceremony.
 #
 # Re-running after success is safe — a marker short-circuits.
 
@@ -22,30 +28,25 @@ export DEBIAN_FRONTEND=noninteractive
 
 # ── Packages ────────────────────────────────────────────────────────
 # chromium = RPi OS flavour, ships with VideoCore GPU acceleration.
-# xserver-xorg + xinit: stable, boring, exactly what kiosk tutorials
-# converge on. unclutter hides the mouse cursor after 0.1s idle.
+# cage     = minimal Wayland compositor: one window, full-screen.
+# seatd    = grants cage access to /dev/dri/card0 without root.
 apt-get update
 apt-get install -y --no-install-recommends \
     chromium \
-    xserver-xorg \
-    xinit \
-    unclutter \
+    cage \
+    seatd \
     fonts-noto-color-emoji
 
-# ── /home/sprixe/.xinitrc — actual kiosk entry point ───────────────
-cat > /home/sprixe/.xinitrc <<'XINIT'
+# ── /home/sprixe/start-kiosk.sh — the cage wrapper ──────────────────
+# `-d` makes cage exit when the inner command exits, so the
+# .bash_profile loop respawns the kiosk on Chromium crashes — the
+# auto-restart we'd otherwise need a watchdog for.
+cat > /home/sprixe/start-kiosk.sh <<'KIOSK'
 #!/bin/sh
-# Kill screen blanking + DPMS so the arcade stays lit.
-xset -dpms
-xset s off
-xset s noblank
-# Hide the cursor once it's idle.
-unclutter -idle 0.1 -root &
-# Launch the arcade. exec hands control over so Chromium becomes the
-# X session root — when it exits, X exits, and the calling startx /
-# .bash_profile loop restarts us.
-exec /usr/bin/chromium \
-    --kiosk --no-first-run --disable-infobars \
+exec cage -d -- /usr/bin/chromium \
+    --ozone-platform=wayland \
+    --kiosk \
+    --no-first-run --disable-infobars \
     --noerrdialogs --disable-translate \
     --disable-session-crashed-bubble \
     --disable-component-update \
@@ -54,19 +55,18 @@ exec /usr/bin/chromium \
     --enable-gpu-rasterization --enable-zero-copy \
     --ignore-gpu-blocklist \
     --user-data-dir=/home/sprixe/.chromium \
-    https://sprixe.app/play/
-XINIT
-chown sprixe:sprixe /home/sprixe/.xinitrc
-chmod 755 /home/sprixe/.xinitrc
+    https://www.sprixe.dev/
+KIOSK
+chown sprixe:sprixe /home/sprixe/start-kiosk.sh
+chmod 755 /home/sprixe/start-kiosk.sh
 
-# ── /home/sprixe/.bash_profile — auto-startx on tty1 ────────────────
+# ── /home/sprixe/.bash_profile — auto-launch on tty1 ────────────────
+# Triggered by the autologin drop-in below. exec replaces the shell
+# with start-kiosk.sh, so when Chromium / cage exits the login loop
+# reclaims tty1 and re-runs this file — auto-restart, no watchdog.
 cat > /home/sprixe/.bash_profile <<'PROFILE'
-# Triggered by the autologin drop-in on tty1. Runs startx once the
-# shell lands; `exec` means the shell is replaced by startx, so when
-# Chromium / xinit exits the login loop reclaims tty1 and re-runs
-# this file — the kiosk respawns automatically, no watchdog needed.
-if [ -z "$DISPLAY" ] && [ "$(tty)" = "/dev/tty1" ]; then
-    exec startx -- :0 -nocursor
+if [ -z "$WAYLAND_DISPLAY" ] && [ "$(tty)" = "/dev/tty1" ]; then
+    exec /home/sprixe/start-kiosk.sh
 fi
 PROFILE
 chown sprixe:sprixe /home/sprixe/.bash_profile
@@ -80,20 +80,19 @@ ExecStart=
 ExecStart=-/sbin/agetty --autologin sprixe --noclear %I $TERM
 CONF
 
-# ── Allow 'sprixe' to run X as a regular user ───────────────────────
-# Debian locks /usr/lib/xorg/Xorg down to 'console' sessions — without
-# this override, startx aborts with "only console users are allowed
-# to run the X server". The allowed_users line below is the Debian-
-# blessed way to relax it for a dedicated kiosk user.
-install -d -m 755 /etc/X11
-cat > /etc/X11/Xwrapper.config <<'WRAPPER'
-allowed_users=anybody
-needs_root_rights=yes
-WRAPPER
+# ── Add 'sprixe' to the groups cage needs to grab /dev/dri/* ───────
+# 'seat' only exists on distros with older seatd builds — Debian
+# trixie's seatd 0.9 runs in kernel backend with no group gate, so
+# skip any name that isn't present.
+for g in seat video render; do
+    if getent group "$g" >/dev/null; then
+        usermod -aG "$g" sprixe
+    fi
+done
 
 # ── Trim services irrelevant to a kiosk appliance ───────────────────
-# Note: avahi-daemon is intentionally kept enabled — it publishes the
-# 'sprixe.local' mDNS hostname that the maintainer uses for SSH.
+# Note: avahi-daemon stays enabled — it publishes the 'sprixe.local'
+# mDNS hostname the maintainer relies on for SSH.
 for svc in \
     bluetooth.service hciuart.service \
     ModemManager.service \
@@ -102,8 +101,10 @@ do
     systemctl disable --now "$svc" 2>/dev/null || true
 done
 
-# ── Finish ──────────────────────────────────────────────────────────
+# ── Enable seatd + finish ──────────────────────────────────────────
 systemctl daemon-reload
+systemctl enable --now seatd.service
+
 touch "$MARKER"
 
 echo "sprixe-first-boot: provisioning complete — rebooting into the kiosk"

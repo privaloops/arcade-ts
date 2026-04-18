@@ -13,6 +13,10 @@ apt-get install -y -qq --no-install-recommends passwd >/dev/null
 # The autologin drop-in references user 'sprixe'; create it so
 # chown / chmod in first-boot.sh succeed.
 useradd -m -s /bin/bash sprixe 2>/dev/null || true
+# Mirror the groups the real Pi will have — 'seat' is intentionally
+# absent on trixie (no group gate), 'video' and 'render' are.
+groupadd -f video
+groupadd -f render
 
 # Mock commands that would either hit the network (apt), speak to PID
 # 1 (systemctl), or reboot the host.
@@ -34,10 +38,9 @@ export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 echo ""
 echo "=== file presence ==="
 for f in \
-    /home/sprixe/.xinitrc \
+    /home/sprixe/start-kiosk.sh \
     /home/sprixe/.bash_profile \
     /etc/systemd/system/getty@tty1.service.d/autologin.conf \
-    /etc/X11/Xwrapper.config \
     /var/lib/sprixe-installed
 do
     if [ ! -e "$f" ]; then
@@ -48,25 +51,27 @@ do
 done
 
 echo ""
-echo "=== .xinitrc health ==="
-[ -x /home/sprixe/.xinitrc ] \
+echo "=== start-kiosk.sh health ==="
+[ -x /home/sprixe/start-kiosk.sh ] \
     || { echo "  not executable" >&2; exit 1; }
-sh -n /home/sprixe/.xinitrc \
+sh -n /home/sprixe/start-kiosk.sh \
     || { echo "  syntax error" >&2; exit 1; }
-grep -q 'sprixe.app/play' /home/sprixe/.xinitrc \
-    || { echo "  kiosk URL drift" >&2; exit 1; }
-grep -q 'enable-features=SharedArrayBuffer' /home/sprixe/.xinitrc \
+grep -q '^exec cage -d --' /home/sprixe/start-kiosk.sh \
+    || { echo "  cage launcher missing" >&2; exit 1; }
+grep -q -- '--ozone-platform=wayland' /home/sprixe/start-kiosk.sh \
+    || { echo "  Wayland ozone backend missing" >&2; exit 1; }
+grep -q -- '--enable-features=SharedArrayBuffer' /home/sprixe/start-kiosk.sh \
     || { echo "  SharedArrayBuffer flag missing" >&2; exit 1; }
-grep -q '^exec /usr/bin/chromium' /home/sprixe/.xinitrc \
-    || { echo "  chromium not exec'd (would leak X sessions)" >&2; exit 1; }
+grep -q 'sprixe.dev' /home/sprixe/start-kiosk.sh \
+    || { echo "  arcade URL drift" >&2; exit 1; }
 echo "  OK"
 
 echo ""
-echo "=== .bash_profile triggers startx on tty1 only ==="
+echo "=== .bash_profile triggers cage on tty1 only ==="
 grep -q 'tty.*tty1' /home/sprixe/.bash_profile \
     || { echo "  tty1 guard missing" >&2; exit 1; }
-grep -q 'exec startx' /home/sprixe/.bash_profile \
-    || { echo "  exec startx missing" >&2; exit 1; }
+grep -q 'exec /home/sprixe/start-kiosk.sh' /home/sprixe/.bash_profile \
+    || { echo "  exec start-kiosk.sh missing" >&2; exit 1; }
 echo "  OK"
 
 echo ""
@@ -76,9 +81,9 @@ grep -q 'autologin sprixe' /etc/systemd/system/getty@tty1.service.d/autologin.co
 echo "  OK"
 
 echo ""
-echo "=== Xwrapper allows non-console user ==="
-grep -q 'allowed_users=anybody' /etc/X11/Xwrapper.config \
-    || { echo "  Xwrapper would reject sprixe" >&2; exit 1; }
+echo "=== sprixe in video + render groups ==="
+id -nG sprixe | grep -qw video || { echo "  not in video" >&2; exit 1; }
+id -nG sprixe | grep -qw render || { echo "  not in render" >&2; exit 1; }
 echo "  OK"
 
 echo ""
