@@ -3,9 +3,9 @@
 > Tracked by agents across sessions. Read this first, update it last.
 > See `ARCADE-FRONTEND-PLAN.md` for full specs.
 
-## Current Phase: 4 — Polish + Settings
+## Current Phase: 5 — RPi Image
 ## Current Step: Not started
-## Status: PENDING (Phases 0, 1, 2 and 3 complete)
+## Status: PENDING (Phases 0, 1, 2, 3 and 4 complete)
 
 ## Completed
 
@@ -61,6 +61,31 @@
 - Default PeerJS Cloud signaling is reached by production PeerSend / PeerHost when `__PeerMock` is absent. Works on public networks; may be blocked on corporate VLANs (§6).
 - Phase 2.9 save/load flow still not wired into PauseOverlay — onSaveState / onLoadState hooks exist but fire no-ops.
 
+### Phase 4 — Polish + Settings (2026-04-18, branch `feature/phase-4-polish`)
+
+- [x] 4.1 — `SettingsStore` versioned localStorage (13 Vitest).
+- [x] 4.2 — `computeScale` + `isTateGame` + `crtFilterCss` render helpers (19 Vitest).
+- [x] 4.3 — `parseScreenScraperResponse` CDN-upload helper (15 Vitest).
+- [x] 4.4 — `MediaCache` + `PreviewLoader` + `scheduleVideoFade` (14 Vitest).
+- [x] 4.5 — `History` recently-played + favorites (17 Vitest).
+- [x] 4.6 — `LetterWheel` A-Z jump helper + overlay (18 Vitest).
+- [x] 4.7 — `p4-animations` reduced-motion E2E contract (2 E2E).
+- [x] 4.8 — `VolumeControl` pause-menu slider + mute memory (15 Vitest).
+
+### Phase 4 totals
+
+- Vitest: 435 tests / 33 files (+113 on top of Phase 3, grand total 1580 across all packages: 1002 engine + 143 edit + 435 frontend).
+- E2E arcade: 19 tests (5 Phase 1 + 5 Phase 2 + 7 Phase 3 + 2 Phase 4).
+
+### Phase 4 plan divergences
+
+- Settings *screen* DOM (tabs for Display/Audio/Controls/Network/Storage/About) deferred to Phase 4.1b — the SettingsStore ships first so 4.2 + 4.8 have a persistence layer to read/write against.
+- VideoPreview *DOM* not yet wired to PreviewLoader + scheduleVideoFade — Phase 4.4b in the same polish pass that wires RemoteTab into PhonePage.
+- LetterWheel not yet opened from BrowserScreen — plan §2.4 maps it to RB which already cycles filters in §1.6; mapping decision deferred to Phase 4.6b (likely `favorite` / Y).
+- VolumeControl slider not yet wired into PauseOverlay — `onSaveState` / `onLoadState` / volume hook land in Phase 4.8b alongside SaveStateDB integration (the two no-ops from Phase 2.9).
+- Phase 4.3 E2E (`p4-video-preview` with `page.route('**/cdn/**')`) deferred — it requires the VideoPreview DOM wiring from 4.4b.
+- Phase 4.8 E2E (`p4-volume-pause`) deferred — same reason (VolumeControl DOM not in PauseOverlay yet).
+
 ## Next Action
 
-- Start Phase 4, Step 1 — Settings screen (display / audio / controls / network / storage / about) with localStorage-backed `settings-store`.
+- Start Phase 5, Step 1 — Configure pi-gen stage-sprixe, shell scripts (chromium + X11), systemd services (sprixe-kiosk + watchdog), Plymouth theme, Makefile. `@sprixe/image` already has the directory scaffold from Phase 0.5 — Phase 5 fills in the logo.png + CI build workflow + hardware smoke tests.
