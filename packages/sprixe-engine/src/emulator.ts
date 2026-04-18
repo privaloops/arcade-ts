@@ -184,7 +184,18 @@ export class Emulator {
   // ── ROM loading ───────────────────────────────────────────────────────────
 
   async loadRom(file: File): Promise<void> {
-    // Stop any running emulation and reset state
+    await this.loadRomFromBuffer(await file.arrayBuffer());
+  }
+
+  /**
+   * Load a CPS1 ROM from an ArrayBuffer — used by the arcade frontend
+   * which reads ROMs out of IndexedDB instead of the browser file picker.
+   *
+   * Behaviour is identical to loadRom(file); the File argument was only
+   * ever used as a source of bytes. Keeping both entry points avoids
+   * breaking @sprixe/edit's existing drop-zone flow.
+   */
+  async loadRomFromBuffer(data: ArrayBuffer): Promise<void> {
     this.stop();
     this.terminateAudioWorker();
     this.audioOutput.suspend();
@@ -194,7 +205,7 @@ export class Emulator {
     this.prevRafTime = 0;
     this.frameDebt = 0;
 
-    const romSet: RomSet = await loadRomFromZip(file);
+    const romSet: RomSet = await loadRomFromZip(data);
     this.romStore = new RomStore(romSet);
 
     this.isQSound = romSet.qsound;

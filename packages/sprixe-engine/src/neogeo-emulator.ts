@@ -190,6 +190,21 @@ export class NeoGeoEmulator {
     await this.loadRom(romSet);
   }
 
+  /**
+   * Load a Neo-Geo ROM from an ArrayBuffer — used by the arcade frontend
+   * which reads ROMs out of IndexedDB. `biosData` is optional; if omitted,
+   * the neogeo.zip BIOS is auto-fetched from the dev server (same path
+   * resolution as loadRomFromFile).
+   */
+  async loadRomFromBuffer(data: ArrayBuffer, biosData?: ArrayBuffer): Promise<void> {
+    let bios: File | ArrayBuffer | undefined = biosData;
+    if (!bios) {
+      bios = await this.fetchBios();
+    }
+    const romSet = await loadNeoGeoRomFromZip(data, bios);
+    await this.loadRom(romSet);
+  }
+
   /** Try to fetch neogeo.zip from the server (checks neogeo/ subfolder first, then root) */
   private async fetchBios(): Promise<File | undefined> {
     for (const path of ['/roms/neogeo/neogeo.zip', '/roms/neogeo.zip']) {
