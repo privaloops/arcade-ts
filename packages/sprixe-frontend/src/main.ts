@@ -9,7 +9,7 @@ import { MOCK_GAMES } from "./data/mock-games";
 import { romRecordToGameEntry } from "./data/rom-source";
 import type { GameEntry } from "./data/games";
 import { GamepadNav } from "./input/gamepad-nav";
-import { loadMapping, MAPPING_ROLES } from "./input/mapping-store";
+import { loadMapping, clearMapping, MAPPING_ROLES } from "./input/mapping-store";
 import { InputRouter } from "./input/input-router";
 import { BrowserScreen } from "./screens/browser/browser-screen";
 import { HintsBar } from "./ui/hints-bar";
@@ -201,6 +201,42 @@ function startBrowser(
       settingsScreen = new SettingsScreen(app!, {
         settings,
         version: __APP_VERSION__,
+        controls: {
+          getMapping: () => loadMapping(),
+          onReset: () => {
+            clearMapping();
+            settingsScreen?.unmount();
+            settingsScreen = null;
+            browser.root.hidden = true;
+            void showMappingFlow().then(() => {
+              browser.root.hidden = false;
+            });
+          },
+        },
+        network: {
+          getRoomId: () => host.roomId,
+          isOpen: () => host.isOpen(),
+          onRegenerate: () => {
+            try { localStorage.removeItem("sprixe.roomId"); } catch { /* ignore */ }
+            window.location.reload();
+          },
+        },
+        storage: {
+          listRoms: () => db.list(),
+          deleteRom: async (id) => {
+            await db.delete(id);
+            const refreshed = (await db.list()).map(romRecordToGameEntry);
+            browser.setGames(refreshed);
+            toast.show("success", `Deleted ${id}`);
+          },
+          estimate: async () => {
+            if (typeof navigator === "undefined" || !navigator.storage?.estimate) {
+              return { usage: 0, quota: 0 };
+            }
+            const e = await navigator.storage.estimate();
+            return { usage: e.usage ?? 0, quota: e.quota ?? 0 };
+          },
+        },
         onClose: () => {
           settingsScreen = null;
           browser.root.hidden = false;

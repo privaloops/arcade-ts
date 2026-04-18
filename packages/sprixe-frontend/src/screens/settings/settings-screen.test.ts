@@ -43,10 +43,11 @@ describe("SettingsScreen", () => {
     });
 
     it("bumper-right / bumper-left cycle through tabs", () => {
-      screen.handleNavAction("bumper-right");
-      expect(screen.getActiveTab()).toBe("audio");
-      screen.handleNavAction("bumper-right");
-      expect(screen.getActiveTab()).toBe("about");
+      const order = ["display", "audio", "controls", "network", "storage", "about"];
+      for (let i = 1; i < order.length; i++) {
+        screen.handleNavAction("bumper-right");
+        expect(screen.getActiveTab()).toBe(order[i]);
+      }
       screen.handleNavAction("bumper-right"); // wraps
       expect(screen.getActiveTab()).toBe("display");
       screen.handleNavAction("bumper-left");  // wraps back
@@ -119,6 +120,95 @@ describe("SettingsScreen", () => {
     it("handleNavAction('coin-hold') closes the screen", () => {
       screen.handleNavAction("coin-hold");
       expect(onClose).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("controls tab", () => {
+    it("renders the saved mapping and a Reset button wired to onReset", () => {
+      const onReset = vi.fn<() => void>();
+      const screen2 = new SettingsScreen(container, {
+        settings,
+        onClose: onClose as unknown as () => void,
+        controls: {
+          getMapping: () => ({
+            version: 1,
+            type: "keyboard",
+            p1: { coin: { kind: "key", code: "Space" }, start: { kind: "key", code: "Enter" } },
+          }),
+          onReset: onReset as unknown as () => void,
+        },
+      });
+      screen2.setActiveTab("controls");
+      const pane = container.querySelector<HTMLElement>('[data-testid="settings-controls"]')!;
+      expect(pane.textContent).toContain("keyboard");
+      expect(pane.textContent).toContain("coin");
+      expect(pane.textContent).toContain("Key Space");
+      container.querySelector<HTMLButtonElement>('[data-testid="settings-controls-reset"]')!.click();
+      expect(onReset).toHaveBeenCalledTimes(1);
+      screen2.unmount();
+    });
+
+    it("falls back to a placeholder when no binding is provided", () => {
+      screen.setActiveTab("controls");
+      const pane = container.querySelector<HTMLElement>('[data-testid="settings-controls"]')!;
+      expect(pane.textContent).toContain("not configured");
+    });
+  });
+
+  describe("network tab", () => {
+    it("shows room id + open state and wires Regenerate", () => {
+      const onRegenerate = vi.fn<() => void>();
+      const screen2 = new SettingsScreen(container, {
+        settings,
+        onClose: onClose as unknown as () => void,
+        network: {
+          getRoomId: () => "sprixe-abcd",
+          isOpen: () => true,
+          onRegenerate: onRegenerate as unknown as () => void,
+        },
+      });
+      screen2.setActiveTab("network");
+      const pane = container.querySelector<HTMLElement>('[data-testid="settings-network"]')!;
+      expect(pane.textContent).toContain("sprixe-abcd");
+      expect(pane.textContent).toContain("Open");
+      container.querySelector<HTMLButtonElement>('[data-testid="settings-network-regenerate"]')!.click();
+      expect(onRegenerate).toHaveBeenCalledTimes(1);
+      screen2.unmount();
+    });
+  });
+
+  describe("storage tab", () => {
+    it("renders ROM list and wires per-row delete", async () => {
+      const deleteRom = vi.fn(async () => {});
+      const screen2 = new SettingsScreen(container, {
+        settings,
+        onClose: onClose as unknown as () => void,
+        storage: {
+          listRoms: async () => [
+            { id: "sf2", system: "cps1", zipData: new ArrayBuffer(0), addedAt: 0, lastPlayedAt: 0, playCount: 0, favorite: false, size: 1024 * 1024 },
+          ],
+          deleteRom: deleteRom as unknown as (id: string) => Promise<void>,
+          estimate: async () => ({ usage: 10 * 1024 * 1024, quota: 1024 * 1024 * 1024 }),
+        },
+      });
+      screen2.setActiveTab("storage");
+      // Async render — wait two microtasks.
+      await Promise.resolve();
+      await Promise.resolve();
+      await new Promise((r) => setTimeout(r, 0));
+      const quota = container.querySelector<HTMLElement>('[data-testid="settings-storage-quota"]')!;
+      expect(quota.textContent).toContain("10.0 MB");
+      const delBtn = container.querySelector<HTMLButtonElement>('[data-testid="settings-storage-delete-sf2"]')!;
+      delBtn.click();
+      await Promise.resolve();
+      expect(deleteRom).toHaveBeenCalledWith("sf2");
+      screen2.unmount();
+    });
+
+    it("falls back to placeholder when binding missing", () => {
+      screen.setActiveTab("storage");
+      const pane = container.querySelector<HTMLElement>('[data-testid="settings-storage"]')!;
+      expect(pane.textContent).toContain("not configured");
     });
   });
 

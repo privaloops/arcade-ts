@@ -125,14 +125,19 @@ describe("SaveStateController", () => {
     });
 
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "F5" }));
-    // Yield twice — controller.save() is async (awaits db.save()).
-    await Promise.resolve();
-    await new Promise((r) => setTimeout(r, 0));
+    // Poll the DB until the save has been committed (fake-indexeddb
+    // resolves transactions across several microtasks).
+    for (let i = 0; i < 50; i++) {
+      if (await db.load("sf2", 0)) break;
+      await new Promise((r) => setTimeout(r, 5));
+    }
     expect(emulator.saveState).toHaveBeenCalled();
 
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "F8" }));
-    await Promise.resolve();
-    await new Promise((r) => setTimeout(r, 0));
+    for (let i = 0; i < 50; i++) {
+      if ((emulator.loadState as ReturnType<typeof vi.fn>).mock.calls.length > 0) break;
+      await new Promise((r) => setTimeout(r, 5));
+    }
     expect(emulator.loadState).toHaveBeenCalled();
     expect(new DataView(emulator.lastLoaded!).getFloat64(0)).toBe(123);
 
