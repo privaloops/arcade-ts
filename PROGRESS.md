@@ -5,7 +5,7 @@
 
 ## Current Phase: 5 — RPi Image
 ## Current Step: Not started
-## Status: PENDING (Phases 0, 1, 2, 3 and 4 complete)
+## Status: PENDING (Phases 0, 1, 2, 3, 4 and 4b complete)
 
 ## Completed
 
@@ -85,6 +85,28 @@
 - VolumeControl slider not yet wired into PauseOverlay — `onSaveState` / `onLoadState` / volume hook land in Phase 4.8b alongside SaveStateDB integration (the two no-ops from Phase 2.9).
 - Phase 4.3 E2E (`p4-video-preview` with `page.route('**/cdn/**')`) deferred — it requires the VideoPreview DOM wiring from 4.4b.
 - Phase 4.8 E2E (`p4-volume-pause`) deferred — same reason (VolumeControl DOM not in PauseOverlay yet).
+
+### Phase 4b — Polish wiring (2026-04-18, branch `feature/phase-4b-wiring`)
+
+- [x] 4b.1 — Settings screen DOM (14 Vitest + E2E p4-settings-persistence).
+- [x] 4b.2 — VideoPreview → PreviewLoader + IDB schema unification to v3. All three stores (roms/savestates/media) now land in whichever module opens the DB first.
+- [x] 4b.3 — LetterWheel → BrowserScreen (Y button / 'favorite' NavAction) + E2E p4-letter-wheel.
+- [x] 4b.4 — VolumeControl slider inside PauseOverlay (SettingsStore-backed) + E2E p4-volume-pause.
+- [x] 4b.5 — PhonePage Upload/Remote tab switcher; RemoteTab.onCommand forwarded over the live data connection; host 'state' / 'volume' / 'save-slots' messages update RemoteTab in place.
+- [x] 4b.6 — Toast mounted in bootKiosk; classifyTransferError wired on RomPipeline failures; 'complete' / 'error' protocol messages forwarded to the uploading phone + E2E p3-transfer-errors.
+
+### Phase 4b totals
+
+- Vitest: 449 tests / 34 files (+14 from the settings-screen unit suite).
+- E2E arcade: 23 tests (+4 new — p4-settings-persistence, p4-letter-wheel, p4-volume-pause, p3-transfer-errors).
+- Every Phase 4 module now has a consumer: SettingsStore / History / LetterWheel / PreviewLoader / VolumeControl / Toast.
+
+### Phase 4b plan divergences
+
+- Settings tabs *Controls / Network / Storage* still not implemented.
+- p4-video-preview E2E with `page.route('**/cdn/**')` deferred to 4b.2c — needs CDN fixture plumbing.
+- SaveStateDB integration in PauseOverlay still fires no-ops — real emulator serialization needed first.
+- `__APP_VERSION__` injection for the About tab deferred (hard-coded to 'dev').
 
 ## Next Action
 
