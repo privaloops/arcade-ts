@@ -1,19 +1,21 @@
 #!/bin/bash
 # Runs inside the debian:bookworm-slim container started by
-# test-first-boot.sh. Installs the bare minimum to get
-# `systemd-analyze` + mocks external side-effects, then runs
-# first-boot.sh and asserts the result.
+# test-first-boot.sh. Installs the bare minimum + mocks the side
+# effects that would either need PID 1 or hit the network, runs
+# first-boot.sh, and asserts the artefacts it was supposed to land.
 
 set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq >/dev/null
-apt-get install -y -qq --no-install-recommends systemd >/dev/null
+apt-get install -y -qq --no-install-recommends passwd >/dev/null
+
+# The autologin drop-in references user 'sprixe'; create it so
+# chown / chmod in first-boot.sh succeed.
+useradd -m -s /bin/bash sprixe 2>/dev/null || true
 
 # Mock commands that would either hit the network (apt), speak to PID
-# 1 (systemctl), or reboot the host. Each mock records its args on
-# stderr so a failed assertion can be traced back to the call that
-# went wrong.
+# 1 (systemctl), or reboot the host.
 mkdir -p /mock-bin
 for cmd in apt-get apt-key systemctl reboot; do
     cat > "/mock-bin/$cmd" <<EOF
@@ -27,17 +29,15 @@ export PATH=/mock-bin:$PATH
 
 bash /first-boot.sh
 
-# Restore PATH so the verification calls use the real binaries.
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 echo ""
 echo "=== file presence ==="
 for f in \
-    /etc/systemd/system/sprixe-kiosk.service \
-    /etc/systemd/system/sprixe-watchdog.service \
-    /etc/systemd/system/sprixe-watchdog.timer \
-    /usr/local/bin/sprixe-watchdog.sh \
+    /home/sprixe/.xinitrc \
+    /home/sprixe/.bash_profile \
     /etc/systemd/system/getty@tty1.service.d/autologin.conf \
+    /etc/X11/Xwrapper.config \
     /var/lib/sprixe-installed
 do
     if [ ! -e "$f" ]; then
@@ -48,12 +48,26 @@ do
 done
 
 echo ""
-echo "=== watchdog script health ==="
-[ -x /usr/local/bin/sprixe-watchdog.sh ] \
+echo "=== .xinitrc health ==="
+[ -x /home/sprixe/.xinitrc ] \
     || { echo "  not executable" >&2; exit 1; }
-bash -n /usr/local/bin/sprixe-watchdog.sh \
-    || { echo "  bash syntax error" >&2; exit 1; }
-echo "  exec bit + syntax OK"
+sh -n /home/sprixe/.xinitrc \
+    || { echo "  syntax error" >&2; exit 1; }
+grep -q 'sprixe.app/play' /home/sprixe/.xinitrc \
+    || { echo "  kiosk URL drift" >&2; exit 1; }
+grep -q 'enable-features=SharedArrayBuffer' /home/sprixe/.xinitrc \
+    || { echo "  SharedArrayBuffer flag missing" >&2; exit 1; }
+grep -q '^exec /usr/bin/chromium' /home/sprixe/.xinitrc \
+    || { echo "  chromium not exec'd (would leak X sessions)" >&2; exit 1; }
+echo "  OK"
+
+echo ""
+echo "=== .bash_profile triggers startx on tty1 only ==="
+grep -q 'tty.*tty1' /home/sprixe/.bash_profile \
+    || { echo "  tty1 guard missing" >&2; exit 1; }
+grep -q 'exec startx' /home/sprixe/.bash_profile \
+    || { echo "  exec startx missing" >&2; exit 1; }
+echo "  OK"
 
 echo ""
 echo "=== autologin drop-in points at 'sprixe' ==="
@@ -62,27 +76,10 @@ grep -q 'autologin sprixe' /etc/systemd/system/getty@tty1.service.d/autologin.co
 echo "  OK"
 
 echo ""
-echo "=== kiosk service targets the arcade ==="
-grep -q 'sprixe.app/play' /etc/systemd/system/sprixe-kiosk.service \
-    || { echo "  kiosk URL drift" >&2; exit 1; }
-grep -q 'enable-features=SharedArrayBuffer' /etc/systemd/system/sprixe-kiosk.service \
-    || { echo "  SharedArrayBuffer flag missing" >&2; exit 1; }
+echo "=== Xwrapper allows non-console user ==="
+grep -q 'allowed_users=anybody' /etc/X11/Xwrapper.config \
+    || { echo "  Xwrapper would reject sprixe" >&2; exit 1; }
 echo "  OK"
-
-echo ""
-echo "=== systemd-analyze verify ==="
-# Stub binaries the kiosk unit calls — systemd-analyze refuses to
-# confirm an ExecStart that points at a missing executable, and we
-# mocked apt-get so the real packages never got installed in this
-# container.
-for b in /usr/bin/chromium /usr/bin/xinit /usr/bin/xset; do
-    : > "$b"
-    chmod 755 "$b"
-done
-systemd-analyze verify \
-    /etc/systemd/system/sprixe-kiosk.service \
-    /etc/systemd/system/sprixe-watchdog.service \
-    /etc/systemd/system/sprixe-watchdog.timer
 
 echo ""
 echo "=== idempotence: re-running short-circuits on marker ==="
