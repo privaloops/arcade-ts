@@ -50,8 +50,15 @@ PROFILE
 chown sprixe:sprixe /home/sprixe/.bash_profile
 chmod 644 /home/sprixe/.bash_profile
 
-# ── Add sprixe to the 'seat' group so cage can grab /dev/dri/card0 ──
-usermod -aG seat,video,render sprixe
+# ── Add sprixe to the groups cage needs to grab /dev/dri/* ─────────
+# 'seat' only exists on distros that ship an older seatd — Debian
+# trixie's seatd 0.9 runs in kernel backend with no group gate, so
+# skip any name that isn't present.
+for g in seat video render; do
+    if getent group "$g" >/dev/null; then
+        usermod -aG "$g" sprixe
+    fi
+done
 
 # ── Make sure seatd is running (cage relies on it) ──────────────────
 systemctl enable --now seatd.service
