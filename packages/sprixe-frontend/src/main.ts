@@ -14,14 +14,31 @@ import "./styles/tokens.css";
 import "./styles/base.css";
 
 import { MOCK_GAMES } from "./data/mock-games";
+import { romRecordToGameEntry } from "./data/rom-source";
+import type { GameEntry } from "./data/games";
 import { GamepadNav } from "./input/gamepad-nav";
 import { BrowserScreen } from "./screens/browser/browser-screen";
 import { HintsBar } from "./ui/hints-bar";
+import { RomDB } from "./storage/rom-db";
 
 const app = document.getElementById("app");
 if (!app) throw new Error("#app container missing");
 
-const browser = new BrowserScreen(app, { initialGames: MOCK_GAMES });
+async function loadCatalogue(): Promise<GameEntry[]> {
+  const db = new RomDB();
+  try {
+    const records = await db.list();
+    if (records.length > 0) return records.map(romRecordToGameEntry);
+  } catch (e) {
+    console.warn("[arcade] RomDB unavailable, falling back to mock catalogue:", e);
+  }
+  // Empty DB → Phase 3 will wire the first-boot empty state (QR upload).
+  // Until then, fall back to the mock catalogue so dev mode stays usable.
+  return [...MOCK_GAMES];
+}
+
+const games = await loadCatalogue();
+const browser = new BrowserScreen(app, { initialGames: games });
 const hints = new HintsBar(app);
 hints.setContext("browser");
 
