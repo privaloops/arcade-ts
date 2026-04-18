@@ -448,3 +448,94 @@ html, body {
   font-family: var(--af-font-display);
   font-size: 1.2rem;
 }
+
+/* --- Upload tab --- */
+
+.af-upload-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.af-upload-dropzone {
+  position: relative;
+  padding: 32px 16px;
+  border: 2px dashed var(--af-text-muted);
+  border-radius: 10px;
+  text-align: center;
+  color: var(--af-text-secondary);
+  cursor: pointer;
+  transition: border-color 120ms;
+}
+
+.af-upload-dropzone.is-over {
+  border-color: var(--af-accent);
+  background: var(--af-accent-glow);
+}
+
+.af-upload-dropzone-label {
+  font-family: var(--af-font-display);
+  font-size: 1.1rem;
+  color: var(--af-text-primary);
+}
+
+.af-upload-dropzone-hint {
+  font-size: 0.85rem;
+  margin-top: 8px;
+}
+
+.af-upload-queue {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.af-upload-entry {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--af-bg-card);
+  border-radius: 6px;
+}
+
+.af-upload-entry-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.af-upload-entry-status {
+  color: var(--af-text-secondary);
+  font-family: var(--af-font-display);
+  font-size: 0.9rem;
+  min-width: 72px;
+  text-align: right;
+}
+
+.af-upload-entry-remove {
+  background: transparent;
+  color: var(--af-text-muted);
+  border: none;
+  font-size: 1rem;
+  cursor: pointer;
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.af-upload-entry-remove:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.af-upload-entry[data-status="done"] .af-upload-entry-status {
+  color: var(--af-accent);
+}
+
+.af-upload-entry[data-status="error"] .af-upload-entry-status {
+  color: var(--af-accent-warm);
+}

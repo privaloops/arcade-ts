@@ -166,8 +166,8 @@ test.describe("Phase 3 — P2P ROM transfer (two contexts + BroadcastChannel)", 
     await page.goto(`/send/${ROOM_ID}`);
 
     await expect(page.locator('[data-testid="phone-page"]')).toBeVisible();
-    const uploadBtn = page.locator('[data-testid="phone-upload-btn"]');
-    await expect(uploadBtn).toBeVisible();
+    const dropzone = page.locator('[data-testid="upload-dropzone"]');
+    await expect(dropzone).toBeVisible();
     const status = page.locator('[data-testid="phone-status"]');
     await expect(status).toHaveText("Idle");
     await expect(page.locator('[data-testid="phone-page"]')).toHaveAttribute("data-room-id", ROOM_ID);
@@ -238,11 +238,11 @@ test.describe("Phase 3 — P2P ROM transfer (two contexts + BroadcastChannel)", 
     const phonePage = await context.newPage();
     await phonePage.goto(`/send/${ROOM_ID}`);
     const fixture = resolve(process.cwd(), "packages/sprixe-frontend/tests/fixtures/test.zip");
-    await phonePage.locator('[data-testid="phone-file-input"]').setInputFiles(fixture);
-    await phonePage.locator('[data-testid="phone-upload-btn"]').click();
+    await phonePage.locator('[data-testid="upload-file-input"]').setInputFiles(fixture);
 
-    await expect(phonePage.locator('[data-testid="phone-progress"]')).toHaveText("100%", { timeout: 5000 });
-    await expect(phonePage.locator('[data-testid="phone-status"]')).toHaveText("Done", { timeout: 5000 });
+    // Queue entry reaches 'done' once PeerSend finishes streaming.
+    const entryStatus = phonePage.locator(".af-upload-entry").first().locator(".af-upload-entry-status");
+    await expect(entryStatus).toHaveText(/Done/, { timeout: 5000 });
 
     await expect
       .poll(
