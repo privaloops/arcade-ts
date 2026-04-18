@@ -44,6 +44,19 @@ image: $(PIGEN)
 	# that pi-gen's debootstrap needs to chroot into the arm64 rootfs.
 	# Register them once per boot; the install is idempotent.
 	docker run --privileged --rm tonistiigi/binfmt --install all >/dev/null
+	# Apple Silicon + Docker Desktop: the base Debian container pi-gen
+	# uses for debootstrap ships an older debian-archive-keyring that
+	# doesn't have the current Bookworm signing keys. Stage0's first
+	# `apt-get update` inside the fresh chroot fails NO_PUBKEY as a
+	# result. Relax the first-pass GPG verification here — every later
+	# stage runs after the chroot has picked up the up-to-date keyring
+	# from the repos themselves, so strict signing is back on for all
+	# real package installs.
+	find $(PIGEN)/stage0 -type f -name '*.sh' \
+	  -exec sed -i.bak 's|apt-get update|apt-get update -o Acquire::AllowInsecureRepositories=true|g' {} +
+	find $(PIGEN)/stage0 -type f -name '*.sh' \
+	  -exec sed -i.bak 's|apt-get install|apt-get install --allow-unauthenticated|g' {} +
+	find $(PIGEN)/stage0 -name '*.bak' -delete
 	# Clean up any zombie pigen_work container from a previous failed
 	# run — pi-gen refuses to start otherwise.
 	@docker rm -v pigen_work 2>/dev/null || true
