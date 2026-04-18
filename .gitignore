@@ -18,8 +18,9 @@ public/roms/
 **/public/*.zip
 .rom-cache/
 
-# pi-gen checkout + build artifacts (Phase 5 @sprixe/image)
+# pi-gen residue from the earlier Phase 5 iteration (now archived —
+# the active workflow is Raspberry Pi Imager + first-boot.sh). Keep
+# the ignore entries so a local leftover checkout never lands in git.
 packages/sprixe-image/pi-gen/
-packages/sprixe-image/**/deploy/
 *.img
 *.img.xz
