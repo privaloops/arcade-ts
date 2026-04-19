@@ -61,7 +61,13 @@ export default defineConfig(({ command }) => ({
       configureServer(server) {
         server.middlewares.use((_req, res, next) => {
           res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
-          res.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
+          // `credentialless` keeps SharedArrayBuffer available (needed
+          // for the audio worker's ring buffer) while letting us load
+          // cross-origin images/videos from hosts that don't send
+          // CORP or CORS headers (ArcadeDB, third-party marquees).
+          // Credentials are stripped from those requests — fine here,
+          // every remote asset we hit is public anonymous content.
+          res.setHeader("Cross-Origin-Embedder-Policy", "credentialless");
           next();
         });
       },
