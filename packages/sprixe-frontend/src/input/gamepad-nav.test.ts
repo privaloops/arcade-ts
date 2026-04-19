@@ -221,6 +221,30 @@ describe("GamepadNav", () => {
     expect(actions).toEqual(["up", "up", "up"]);
   });
 
+  it("start() baselines stuck buttons so a sticky Start at connect time doesn't fire", () => {
+    const nav = new GamepadNav();
+    nav.onAction((a) => actions.push(a));
+
+    // Simulate an Xbox BT controller reporting Start already pressed
+    // at connection time — a real-world failure mode that launched
+    // the first game every boot.
+    setPad(pad([DEFAULT_MAPPING.confirm]));
+    nav.start();
+    nav.tick(0); // baseline pass — button registered, no emit
+    nav.tick(16); // still pressed — still no emit
+
+    expect(actions).toEqual([]);
+
+    // Release then re-press → real down-edge fires.
+    setPad(pad([]));
+    nav.tick(32);
+    setPad(pad([DEFAULT_MAPPING.confirm]));
+    nav.tick(48);
+
+    expect(actions).toEqual(["confirm"]);
+    nav.stop();
+  });
+
   it("axis binding below threshold stays silent", () => {
     const nav = new GamepadNav({
       bindings: { up: { kind: "axis", index: 1, dir: -1 } },

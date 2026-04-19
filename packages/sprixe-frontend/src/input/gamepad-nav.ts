@@ -137,6 +137,15 @@ export class GamepadNav {
   private running = false;
   private rafId: number | null = null;
   private coinHoldFired = false;
+  /**
+   * When set, the next tick with a live pad will register any already-
+   * pressed buttons/axes into `state` without emitting. Flipped true
+   * only by start() — the runtime entry point — so unit tests that
+   * drive tick() directly keep their "first press fires" contract.
+   * Without this, an Xbox BT controller that reports Start pressed at
+   * connect time triggers the 'start' action → launch on boot.
+   */
+  private needsBaseline = false;
 
   constructor(options: GamepadNavOptions = {}) {
     this.bindings = { ...DEFAULT_BINDINGS, ...options.bindings };
@@ -148,6 +157,7 @@ export class GamepadNav {
   start(): void {
     if (this.running) return;
     this.running = true;
+    this.needsBaseline = true;
     this.scheduleNextTick();
   }
 
@@ -178,6 +188,13 @@ export class GamepadNav {
       return;
     }
 
+    // First pass after start() with a live pad: record whichever
+    // inputs already read as pressed (stuck Start, unmapped triggers,
+    // noisy axes) into `state` without emitting. Real down-edges must
+    // start from a released sample.
+    const firstSeen = this.needsBaseline;
+    if (firstSeen) this.needsBaseline = false;
+
     for (const [action, binding] of this.mappedEntries()) {
       if (binding === null) continue;
       const key = bindingKey(binding);
@@ -186,6 +203,7 @@ export class GamepadNav {
 
       if (isPressed && !existing) {
         this.state.set(key, { pressedAt: now, lastRepeatAt: now });
+        if (firstSeen) continue; // baseline capture: no emit
         if (action === "coin-hold") continue;
         this.emit(action);
       } else if (isPressed && existing) {

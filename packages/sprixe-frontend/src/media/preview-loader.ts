@@ -31,12 +31,12 @@ export type AssetKind = "screenshot" | "video" | "marquee";
 export interface PreviewLoaderOptions {
   cache: MediaCache;
   /**
-   * CDN base URL without trailing slash. When it resolves for a given
-   * game, its asset takes priority over ArcadeDB. In dev we leave it
-   * pointing at window.origin/media which mostly 404s; the browser
-   * silently falls through to the next candidate.
+   * Optional operator CDN base URL (no trailing slash). When set, its
+   * `/{system}/{id}/{screenshot|marquee|video}` asset takes priority
+   * over ArcadeDB. Leave undefined / empty in dev so we don't spam
+   * the console with 404s for assets nobody ever published.
    */
-  cdnBase: string;
+  cdnBase?: string;
   /** Override the marquee canvas generator (unit tests). */
   marqueeGenImpl?: (title: string) => Promise<Blob | null>;
 }
@@ -48,22 +48,23 @@ export class PreviewLoader {
 
   constructor(options: PreviewLoaderOptions) {
     this.cache = options.cache;
-    this.cdnBase = options.cdnBase.replace(/\/$/, "");
+    this.cdnBase = (options.cdnBase ?? "").replace(/\/$/, "");
     this.marqueeGenImpl = options.marqueeGenImpl ?? generateMarquee;
   }
 
   // ── URL builders ────────────────────────────────────────────────
 
+  /** Empty string when no operator CDN is configured. */
   screenshotUrl(gameId: string, system: System): string {
-    return `${this.cdnBase}/${system}/${gameId}/screenshot.png`;
+    return this.cdnBase ? `${this.cdnBase}/${system}/${gameId}/screenshot.png` : "";
   }
 
   marqueeUrl(gameId: string, system: System): string {
-    return `${this.cdnBase}/${system}/${gameId}/marquee.png`;
+    return this.cdnBase ? `${this.cdnBase}/${system}/${gameId}/marquee.png` : "";
   }
 
   videoUrl(gameId: string, system: System): string {
-    return `${this.cdnBase}/${system}/${gameId}/video.mp4`;
+    return this.cdnBase ? `${this.cdnBase}/${system}/${gameId}/video.mp4` : "";
   }
 
   cacheKey(gameId: string, kind: AssetKind): string {
@@ -72,28 +73,21 @@ export class PreviewLoader {
 
   // ── Cascades ────────────────────────────────────────────────────
 
-  /** Ordered URLs the consumer should try (onerror → next) for the screenshot. */
+  /** Ordered URLs the consumer should try (onerror → next). Operator CDN skipped when unset. */
   screenshotCandidates(gameId: string, system: System): string[] {
-    return [
-      this.screenshotUrl(gameId, system),
-      arcadeDbUrl("ingames", gameId),
-    ];
+    return this.withCdn(this.screenshotUrl(gameId, system), arcadeDbUrl("ingames", gameId));
   }
 
-  /** Ordered URLs to try for the marquee. If all fail, use `generateMarqueeUrl()`. */
   marqueeCandidates(gameId: string, system: System): string[] {
-    return [
-      this.marqueeUrl(gameId, system),
-      arcadeDbUrl("marquees", gameId),
-    ];
+    return this.withCdn(this.marqueeUrl(gameId, system), arcadeDbUrl("marquees", gameId));
   }
 
-  /** Ordered URLs to try for the gameplay video. Empty array = no video. */
   videoCandidates(gameId: string, system: System): string[] {
-    return [
-      this.videoUrl(gameId, system),
-      arcadeDbUrl("videos", gameId),
-    ];
+    return this.withCdn(this.videoUrl(gameId, system), arcadeDbUrl("videos", gameId));
+  }
+
+  private withCdn(cdnUrl: string, arcadeDbUrl: string): string[] {
+    return cdnUrl ? [cdnUrl, arcadeDbUrl] : [arcadeDbUrl];
   }
 
   /**
