@@ -1361,3 +1361,25 @@ html, body {
   align-items: center;
   padding: 6px 0;
 }
+
+/* Two-column grid for the per-player setup inside Settings → Controls. */
+.af-settings-players {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 32px;
+  margin-bottom: 24px;
+}
+
+.af-settings-player {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.af-settings-player > .af-settings-autofire-title {
+  font-size: 1.15rem;
+  letter-spacing: 0.18em;
+  color: var(--af-accent);
+  margin-bottom: 4px;
+}

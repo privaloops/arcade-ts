@@ -17,7 +17,14 @@ import type { NavAction } from "../../input/gamepad-nav";
 import type { InputMapping, MappingRole } from "../../input/mapping-store";
 import type { RomRecord } from "../../storage/rom-db";
 import { QrCode, resolvePhoneBaseUrl } from "../../ui/qr-code";
-import { AUTOFIRE_BUTTONS, loadAutofire, toggleAutofire, type AutofireButton } from "../../input/autofire-store";
+import { AUTOFIRE_BUTTONS, loadAutofire, toggleAutofire, type AutofireButton, type PlayerIndex } from "../../input/autofire-store";
+import {
+  loadPlayerAssignment,
+  savePlayerAssignment,
+  listConnectedGamepads,
+  prettyGamepadName,
+  type PlayerAssignment,
+} from "../../input/player-assignments";
 
 type TabId = "display" | "audio" | "controls" | "network" | "storage" | "about" | "back";
 
@@ -381,12 +388,41 @@ export class SettingsScreen {
     const mapping = this.controls.getMapping();
     const intro = document.createElement("p");
     intro.className = "af-settings-intro";
-    intro.textContent = mapping
-      ? `Current mapping: ${mapping.type}`
-      : "No mapping saved yet.";
+    intro.textContent = "Pick a device for each player, then toggle autofire per button.";
     wrap.appendChild(intro);
 
-    if (mapping) {
+    const grid = document.createElement("div");
+    grid.className = "af-settings-players";
+    wrap.appendChild(grid);
+
+    this.appendPlayerColumn(grid, 0, mapping);
+    this.appendPlayerColumn(grid, 1, null);
+
+    const resetBtn = document.createElement("button");
+    resetBtn.type = "button";
+    resetBtn.className = "af-settings-btn af-settings-btn--danger";
+    resetBtn.setAttribute("data-testid", "settings-controls-reset");
+    resetBtn.textContent = "Reset P1 mapping";
+    resetBtn.addEventListener("click", () => this.controls!.onReset());
+    wrap.appendChild(resetBtn);
+
+    root.appendChild(wrap);
+  }
+
+  /** One column per player: device selector + (P1 only) mapping list + autofire. */
+  private appendPlayerColumn(grid: HTMLElement, player: PlayerIndex, mapping: InputMapping | null): void {
+    const col = document.createElement("div");
+    col.className = "af-settings-player";
+    col.setAttribute("data-testid", `settings-player-${player + 1}`);
+
+    const title = document.createElement("h3");
+    title.className = "af-settings-autofire-title";
+    title.textContent = `Player ${player + 1}`;
+    col.appendChild(title);
+
+    this.appendDeviceSelector(col, player);
+
+    if (player === 0 && mapping) {
       const list = document.createElement("dl");
       list.className = "af-settings-mapping-list";
       for (const [role, binding] of Object.entries(mapping.p1) as [MappingRole, InputMapping["p1"][MappingRole]][]) {
@@ -400,41 +436,79 @@ export class SettingsScreen {
         list.appendChild(dt);
         list.appendChild(dd);
       }
-      wrap.appendChild(list);
+      col.appendChild(list);
     }
 
-    const resetBtn = document.createElement("button");
-    resetBtn.type = "button";
-    resetBtn.className = "af-settings-btn af-settings-btn--danger";
-    resetBtn.setAttribute("data-testid", "settings-controls-reset");
-    resetBtn.textContent = "Reset mapping";
-    resetBtn.addEventListener("click", () => this.controls!.onReset());
-    wrap.appendChild(resetBtn);
+    this.appendAutofireSection(col, player);
 
-    this.appendAutofireSection(wrap);
+    grid.appendChild(col);
+  }
 
-    root.appendChild(wrap);
+  private appendDeviceSelector(col: HTMLElement, player: PlayerIndex): void {
+    const row = document.createElement("label");
+    row.className = "af-settings-row";
+    const span = document.createElement("span");
+    span.className = "af-settings-label";
+    span.textContent = "Device";
+    row.appendChild(span);
+
+    const select = document.createElement("select");
+    select.className = "af-settings-select";
+    select.setAttribute("data-testid", `settings-device-p${player + 1}`);
+
+    const kbOpt = document.createElement("option");
+    kbOpt.value = "keyboard";
+    kbOpt.textContent = "Keyboard";
+    select.appendChild(kbOpt);
+
+    const gamepads = listConnectedGamepads();
+    const current = loadPlayerAssignment(player);
+    // If the saved id is offline, still offer it so the selector
+    // reflects the saved choice — the engine will reconnect on plug-in.
+    const knownIds = new Set(gamepads.map((g) => g.id));
+    if (current.kind === "gamepad" && current.gamepadId && !knownIds.has(current.gamepadId)) {
+      gamepads.push({ index: -1, id: current.gamepadId });
+    }
+
+    for (const gp of gamepads) {
+      const opt = document.createElement("option");
+      opt.value = `gp:${gp.id}`;
+      const connected = gp.index >= 0 ? "" : " (offline)";
+      opt.textContent = `${prettyGamepadName(gp.id)}${connected}`;
+      select.appendChild(opt);
+    }
+
+    select.value = current.kind === "gamepad" && current.gamepadId ? `gp:${current.gamepadId}` : "keyboard";
+
+    select.addEventListener("change", () => {
+      const v = select.value;
+      if (v === "keyboard") {
+        savePlayerAssignment(player, { kind: "keyboard", gamepadId: null });
+      } else if (v.startsWith("gp:")) {
+        savePlayerAssignment(player, { kind: "gamepad", gamepadId: v.slice(3) });
+      }
+      // Rerender so both columns update if we reassigned a shared pad.
+      this.rerender();
+    });
+
+    row.appendChild(select);
+    col.appendChild(row);
   }
 
   /**
-   * Autofire toggle per play button. Writes to the same localStorage
-   * key (`cps1-autofire-p1`) that @sprixe/engine's InputManager reads
-   * at construction, so changes apply on the next game launch.
+   * Per-player autofire toggles. Writes to `cps1-autofire-p1` or
+   * `cps1-autofire-p2`; the engine re-reads the key at InputManager
+   * construction, so changes apply on the next game launch.
    */
-  private appendAutofireSection(wrap: HTMLElement): void {
+  private appendAutofireSection(col: HTMLElement, player: PlayerIndex): void {
     const section = document.createElement("div");
     section.className = "af-settings-autofire";
-    section.setAttribute("data-testid", "settings-autofire");
+    section.setAttribute("data-testid", `settings-autofire-p${player + 1}`);
 
-    const title = document.createElement("h3");
+    const title = document.createElement("h4");
     title.className = "af-settings-autofire-title";
-    title.textContent = "Autofire (P1)";
+    title.textContent = "Autofire";
     section.appendChild(title);
-
-    const hint = document.createElement("p");
-    hint.className = "af-settings-hint";
-    hint.textContent = "Held button fires at ~30 Hz. Applies on next game launch.";
-    section.appendChild(hint);
 
     const labels: Record<AutofireButton, string> = {
       button1: "Btn 1 (LP)",
@@ -444,7 +518,7 @@ export class SettingsScreen {
       button5: "Btn 5 (MK)",
       button6: "Btn 6 (HK)",
     };
-    const current = loadAutofire();
+    const current = loadAutofire(player);
     for (const key of AUTOFIRE_BUTTONS) {
       const row = document.createElement("label");
       row.className = "af-settings-row af-settings-autofire-row";
@@ -454,17 +528,17 @@ export class SettingsScreen {
       const cb = document.createElement("input");
       cb.type = "checkbox";
       cb.className = "af-settings-toggle";
-      cb.setAttribute("data-testid", `autofire-${key}`);
+      cb.setAttribute("data-testid", `autofire-p${player + 1}-${key}`);
       cb.checked = current.has(key);
       cb.addEventListener("change", () => {
-        toggleAutofire(key, cb.checked);
+        toggleAutofire(player, key, cb.checked);
       });
       row.appendChild(span);
       row.appendChild(cb);
       section.appendChild(row);
     }
 
-    wrap.appendChild(section);
+    col.appendChild(section);
   }
 
   // ── Network tab ────────────────────────────────────────────────
