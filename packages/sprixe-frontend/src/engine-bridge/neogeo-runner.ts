@@ -17,14 +17,16 @@ import { Renderer } from "@sprixe/engine/video/renderer";
 import type { RendererInterface } from "@sprixe/engine/types";
 import type { RomDB } from "../storage/rom-db";
 import type { EmulatorRunner } from "./emulator-runner";
-import type { EngineGamepadMappingPatch } from "../input/mapping-store";
+import type { InputMapping } from "../input/mapping-store";
 import { MissingBiosError } from "./errors";
+import { applyUserMapping } from "./apply-mapping";
 
 export interface NeoGeoRunnerOptions {
   canvas: HTMLCanvasElement;
   romBuffer: ArrayBuffer;
   romDb: RomDB;
-  gamepadMapping?: EngineGamepadMappingPatch;
+  /** User-captured mapping (P1 + optional P2). */
+  mapping?: InputMapping | null;
 }
 
 const BIOS_ID = "neogeo";
@@ -49,10 +51,7 @@ export async function createNeoGeoRunner(opts: NeoGeoRunnerOptions): Promise<Emu
   // game mute. sprixe-edit's drop-zone.ts uses the same order.
   await emu.initAudio();
   await emu.loadRomFromBuffer(opts.romBuffer, biosRec.zipData);
-  if (opts.gamepadMapping && Object.keys(opts.gamepadMapping).length > 0) {
-    const im = emu.getInputManager();
-    im.setGamepadMapping(0, { ...im.getGamepadMapping(0), ...opts.gamepadMapping });
-  }
+  applyUserMapping(emu.getInputManager(), opts.mapping ?? null);
 
   return {
     start: () => emu.start(),

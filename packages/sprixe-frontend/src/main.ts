@@ -66,10 +66,12 @@ async function loadCatalogue(db: RomDB): Promise<{ games: GameEntry[]; source: "
   return { games: [], source: "empty" };
 }
 
-function showMappingFlow(): Promise<void> {
+function showMappingFlow(player: 0 | 1 = 0): Promise<void> {
   return new Promise((resolve) => {
     const screen = new MappingScreen(app!, {
       roles: MAPPING_ROLES,
+      player,
+      existing: loadMapping(),
       onComplete: () => {
         screen.unmount();
         resolve();
@@ -403,7 +405,18 @@ function startBrowser(
           // (previously bound to Settings) would kick the MappingScreen
           // out of the DOM while the user is mapping the same button.
           gamepad?.stop();
-          void showMappingFlow().then(() => {
+          void showMappingFlow(0).then(() => {
+            window.location.reload();
+          });
+        },
+        onRemapPlayer: (player) => {
+          settingsScreen?.unmount();
+          settingsScreen = null;
+          browser.root.hidden = true;
+          gamepad?.stop();
+          void showMappingFlow(player).then(() => {
+            // Reload so the new mapping re-seeds GamepadNav bindings,
+            // InputManager defaults, and any cached projection.
             window.location.reload();
           });
         },

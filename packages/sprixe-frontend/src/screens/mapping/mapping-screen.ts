@@ -17,12 +17,20 @@ import {
   type MappingRole,
   type InputBinding,
   type InputMapping,
+  type PlayerIndex,
   saveMapping,
   findDuplicate,
+  upsertPlayerSlot,
 } from "../../input/mapping-store";
 import { InputCapture } from "../../input/input-capture";
 
-const ROLE_LABELS: Record<MappingRole, string> = MAPPING_ROLE_LABELS;
+function labelForRole(role: MappingRole, player: PlayerIndex): string {
+  // Only the "start" role labels the player number in hardware; direction
+  // arrows, buttons and coin read the same either way, so we swap just
+  // that one to avoid "1P Start" showing up in the P2 flow.
+  if (role === "start") return `${player + 1}P Start`;
+  return MAPPING_ROLE_LABELS[role];
+}
 
 function formatBinding(binding: InputBinding): string {
   switch (binding.kind) {
@@ -43,6 +51,11 @@ export interface MappingScreenOptions {
   capture?: InputCapture;
   /** Disable persistence (used by Vitest so it doesn't touch localStorage). */
   persist?: boolean;
+  /** Which player the flow is binding. Defaults to 0 (P1). */
+  player?: PlayerIndex;
+  /** Current stored mapping — used to preserve the other player's slot
+   *  when re-running the flow for just P1 or just P2 from Settings. */
+  existing?: InputMapping | null;
 }
 
 export class MappingScreen {
@@ -52,6 +65,8 @@ export class MappingScreen {
   private readonly roles: readonly MappingRole[];
   private readonly capture: InputCapture;
   private readonly persist: boolean;
+  private readonly player: PlayerIndex;
+  private readonly existing: InputMapping | null;
 
   private readonly mapping: Partial<Record<MappingRole, InputBinding>> = {};
   private inputType: "gamepad" | "keyboard" | null = null;
@@ -64,6 +79,8 @@ export class MappingScreen {
     this.roles = options.roles ?? MAPPING_ROLES;
     this.capture = options.capture ?? new InputCapture();
     this.persist = options.persist ?? true;
+    this.player = options.player ?? 0;
+    this.existing = options.existing ?? null;
 
     this.root = document.createElement("div");
     this.root.className = "af-mapping-screen";
@@ -71,7 +88,7 @@ export class MappingScreen {
 
     const title = document.createElement("h1");
     title.className = "af-mapping-title";
-    title.textContent = "CONTROLLER SETUP — Player 1";
+    title.textContent = `CONTROLLER SETUP — Player ${this.player + 1}`;
     this.root.appendChild(title);
 
     const subtitle = document.createElement("p");
@@ -86,7 +103,7 @@ export class MappingScreen {
       li.className = "af-mapping-prompt";
       li.dataset.role = role;
       li.setAttribute("data-state", "pending");
-      li.textContent = `${ROLE_LABELS[role]} — [pending]`;
+      li.textContent = `${labelForRole(role, this.player)} — [pending]`;
       list.appendChild(li);
       this.promptEls.set(role, li);
     }
@@ -128,7 +145,7 @@ export class MappingScreen {
       const dup = findDuplicate(this.mapping, binding);
       if (dup) {
         this.showWarning(
-          `That input is already mapped to ${ROLE_LABELS[dup]}. Press a different button.`
+          `That input is already mapped to ${labelForRole(dup, this.player)}. Press a different button.`
         );
         this.advance(); // re-arm for the same prompt
         return;
@@ -145,11 +162,11 @@ export class MappingScreen {
   }
 
   private finish(): void {
-    const mapping: InputMapping = {
-      version: 1,
-      type: this.inputType ?? "gamepad",
-      p1: this.mapping,
-    };
+    // Merge into the stored mapping so remapping one player keeps the
+    // other slot intact. P1's type drives menu-nav derivation; P2 only
+    // writes its slot.
+    const slotType = this.inputType ?? "gamepad";
+    const mapping = upsertPlayerSlot(this.existing, this.player, this.mapping, slotType);
     if (this.persist) saveMapping(mapping);
     this.onComplete(mapping);
   }
@@ -157,11 +174,12 @@ export class MappingScreen {
   private refresh(role: MappingRole, state: "pending" | "active" | "done", detail?: string): void {
     const el = this.promptEls.get(role);
     if (!el) return;
+    const label = labelForRole(role, this.player);
     el.setAttribute("data-state", state);
     if (state === "active") {
-      el.textContent = `${ROLE_LABELS[role]} — [awaiting input]`;
+      el.textContent = `${label} — [awaiting input]`;
     } else if (state === "done") {
-      el.textContent = `${ROLE_LABELS[role]} — ✓ ${detail ?? ""}`.trim();
+      el.textContent = `${label} — ✓ ${detail ?? ""}`.trim();
     }
   }
 

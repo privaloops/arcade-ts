@@ -38,6 +38,12 @@ interface TabDef {
 export interface ControlsBinding {
   getMapping: () => InputMapping | null;
   onReset: () => void;
+  /**
+   * Launch the remap flow for a specific player. The Settings screen
+   * will have been unmounted by the caller before the mapping screen
+   * takes over.
+   */
+  onRemapPlayer?: (player: PlayerIndex) => void;
 }
 
 /** Network tab — peer room id + signal status. */
@@ -421,6 +427,7 @@ export class SettingsScreen {
     col.appendChild(title);
 
     this.appendDeviceSelector(col, player);
+    this.appendRemapButton(col, player);
 
     if (player === 0 && mapping) {
       const list = document.createElement("dl");
@@ -442,6 +449,17 @@ export class SettingsScreen {
     this.appendAutofireSection(col, player);
 
     grid.appendChild(col);
+  }
+
+  private appendRemapButton(col: HTMLElement, player: PlayerIndex): void {
+    if (!this.controls?.onRemapPlayer) return;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "af-settings-btn";
+    btn.setAttribute("data-testid", `settings-remap-p${player + 1}`);
+    btn.textContent = `Remap controls`;
+    btn.addEventListener("click", () => this.controls!.onRemapPlayer!(player));
+    col.appendChild(btn);
   }
 
   private appendDeviceSelector(col: HTMLElement, player: PlayerIndex): void {

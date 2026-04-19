@@ -8,7 +8,7 @@
 import type { RomDB } from "../storage/rom-db";
 import type { EmulatorRunner } from "./emulator-runner";
 import type { System } from "./identify";
-import type { EngineGamepadMappingPatch } from "../input/mapping-store";
+import type { InputMapping } from "../input/mapping-store";
 import { createCps1Runner } from "./cps1-runner";
 import { createNeoGeoRunner } from "./neogeo-runner";
 
@@ -16,7 +16,9 @@ export interface CreateRunnerOptions {
   canvas: HTMLCanvasElement;
   romBuffer: ArrayBuffer;
   romDb: RomDB;
-  gamepadMapping?: EngineGamepadMappingPatch;
+  /** User-captured mapping (P1 + optional P2). Runners merge it on top
+   *  of the engine's defaults for both gamepad and keyboard. */
+  mapping?: InputMapping | null;
 }
 
 export interface SystemSpec {
@@ -27,12 +29,8 @@ export interface SystemSpec {
 
 const SYSTEMS: Record<System, SystemSpec> = {
   cps1: {
-    createRunner: ({ canvas, romBuffer, gamepadMapping }) => {
-      const o: { canvas: HTMLCanvasElement; romBuffer: ArrayBuffer; gamepadMapping?: EngineGamepadMappingPatch } =
-        { canvas, romBuffer };
-      if (gamepadMapping) o.gamepadMapping = gamepadMapping;
-      return createCps1Runner(o);
-    },
+    createRunner: ({ canvas, romBuffer, mapping }) =>
+      createCps1Runner(mapping ? { canvas, romBuffer, mapping } : { canvas, romBuffer }),
   },
   neogeo: {
     requiredBios: "neogeo",

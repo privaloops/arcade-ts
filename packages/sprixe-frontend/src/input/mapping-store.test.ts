@@ -17,7 +17,7 @@ describe("mapping-store", () => {
   describe("saveMapping + loadMapping", () => {
     it("round-trips a gamepad mapping", () => {
       const mapping: InputMapping = {
-        version: 1,
+        version: 2,
         type: "gamepad",
         p1: {
           coin: { kind: "button", index: 8 },
@@ -31,9 +31,20 @@ describe("mapping-store", () => {
 
     it("round-trips a keyboard mapping", () => {
       const mapping: InputMapping = {
-        version: 1,
+        version: 2,
         type: "keyboard",
         p1: { button1: { kind: "key", code: "Enter" } },
+      };
+      saveMapping(mapping);
+      expect(loadMapping()).toEqual(mapping);
+    });
+
+    it("round-trips a v2 mapping with both players", () => {
+      const mapping: InputMapping = {
+        version: 2,
+        type: "gamepad",
+        p1: { button1: { kind: "button", index: 0 } },
+        p2: { button1: { kind: "key", code: "KeyT" } },
       };
       saveMapping(mapping);
       expect(loadMapping()).toEqual(mapping);
@@ -44,7 +55,7 @@ describe("mapping-store", () => {
     });
 
     it("loadMapping rejects a payload with a different version", () => {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 2, type: "gamepad", p1: {} }));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 99, type: "gamepad", p1: {} }));
       expect(loadMapping()).toBeNull();
     });
 
@@ -53,8 +64,20 @@ describe("mapping-store", () => {
       expect(loadMapping()).toBeNull();
     });
 
+    it("migrates a legacy v1 mapping forward to v2 on first read", () => {
+      localStorage.setItem(
+        "sprixe.input.mapping.v1",
+        JSON.stringify({ version: 1, type: "keyboard", p1: { coin: { kind: "key", code: "Digit5" } } }),
+      );
+      const loaded = loadMapping();
+      expect(loaded?.version).toBe(2);
+      expect(loaded?.p1.coin).toEqual({ kind: "key", code: "Digit5" });
+      // The migration writes back to the v2 key so subsequent loads hit it.
+      expect(localStorage.getItem(STORAGE_KEY)).not.toBeNull();
+    });
+
     it("clearMapping removes the stored value", () => {
-      saveMapping({ version: 1, type: "gamepad", p1: {} });
+      saveMapping({ version: 2, type: "gamepad", p1: {} });
       clearMapping();
       expect(loadMapping()).toBeNull();
     });

@@ -14,7 +14,7 @@ import type { GameEntry } from "../../data/games";
 import type { EmulatorRunner } from "../../engine-bridge/emulator-runner";
 import { identifyRom } from "../../engine-bridge/identify";
 import { createRunner } from "../../engine-bridge/systems";
-import { loadMapping, mappingToEngineGamepadMapping } from "../../input/mapping-store";
+import { loadMapping } from "../../input/mapping-store";
 import type { RomDB } from "../../storage/rom-db";
 
 export interface PlayingScreenOptions {
@@ -92,10 +92,10 @@ export class PlayingScreen {
       canvas,
       romBuffer: options.romBuffer,
       romDb: options.romDb,
-      // Propagate the first-boot user mapping so the engine's input
-      // ports respond to the buttons the user actually picked for
-      // coin / start / directions, not the hardcoded CPS-B defaults.
-      gamepadMapping: mappingToEngineGamepadMapping(loadMapping()),
+      // Forward the user's full captured mapping (P1 + optional P2,
+      // keyboard + gamepad) so the engine binds to the buttons the
+      // user actually picked instead of the hardcoded defaults.
+      mapping: loadMapping(),
     });
     return new PlayingScreen(container, options.game, canvas, runner);
   }

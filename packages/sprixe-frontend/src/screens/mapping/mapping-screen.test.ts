@@ -65,7 +65,7 @@ describe("MappingScreen", () => {
 
     expect(onComplete).toHaveBeenCalledTimes(1);
     const mapping = onComplete.mock.calls[0]![0];
-    expect(mapping.version).toBe(1);
+    expect(mapping.version).toBe(2);
     expect(mapping.type).toBe("gamepad");
     expect(mapping.p1.coin).toEqual({ kind: "button", index: 8 });
     expect(mapping.p1.start).toEqual({ kind: "button", index: 9 });
