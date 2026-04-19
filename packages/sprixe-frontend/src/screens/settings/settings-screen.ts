@@ -14,7 +14,8 @@
 
 import type { SettingsStore, SettingsV1, AspectRatio, AudioLatency } from "./settings-store";
 import type { NavAction } from "../../input/gamepad-nav";
-import type { InputMapping, MappingRole } from "../../input/mapping-store";
+import type { InputBinding, InputMapping, MappingRole } from "../../input/mapping-store";
+import { MAPPING_ROLES } from "../../input/mapping-store";
 import type { RomRecord } from "../../storage/rom-db";
 import { QrCode, resolvePhoneBaseUrl } from "../../ui/qr-code";
 import { AUTOFIRE_BUTTONS, loadAutofire, toggleAutofire, type AutofireButton, type PlayerIndex } from "../../input/autofire-store";
@@ -25,6 +26,13 @@ import {
   prettyGamepadName,
   type PlayerAssignment,
 } from "../../input/player-assignments";
+import {
+  DEFAULT_P1_MAPPING,
+  DEFAULT_P2_MAPPING,
+  DEFAULT_GP_MAPPING,
+  type KeyMapping,
+  type GamepadMapping,
+} from "@sprixe/engine/input/input";
 
 type TabId = "display" | "audio" | "controls" | "wifi" | "roms" | "about" | "back";
 
@@ -402,20 +410,12 @@ export class SettingsScreen {
     wrap.appendChild(grid);
 
     this.appendPlayerColumn(grid, 0, mapping);
-    this.appendPlayerColumn(grid, 1, null);
-
-    const resetBtn = document.createElement("button");
-    resetBtn.type = "button";
-    resetBtn.className = "af-settings-btn af-settings-btn--danger";
-    resetBtn.setAttribute("data-testid", "settings-controls-reset");
-    resetBtn.textContent = "Reset P1 mapping";
-    resetBtn.addEventListener("click", () => this.controls!.onReset());
-    wrap.appendChild(resetBtn);
+    this.appendPlayerColumn(grid, 1, mapping);
 
     root.appendChild(wrap);
   }
 
-  /** One column per player: device selector + (P1 only) mapping list + autofire. */
+  /** One column per player: device selector + Remap button + mapping list + autofire. */
   private appendPlayerColumn(grid: HTMLElement, player: PlayerIndex, mapping: InputMapping | null): void {
     const col = document.createElement("div");
     col.className = "af-settings-player";
@@ -428,27 +428,37 @@ export class SettingsScreen {
 
     this.appendDeviceSelector(col, player);
     this.appendRemapButton(col, player);
-
-    if (player === 0 && mapping) {
-      const list = document.createElement("dl");
-      list.className = "af-settings-mapping-list";
-      for (const [role, binding] of Object.entries(mapping.p1) as [MappingRole, InputMapping["p1"][MappingRole]][]) {
-        if (!binding) continue;
-        const dt = document.createElement("dt");
-        dt.className = "af-settings-mapping-role";
-        dt.textContent = role;
-        const dd = document.createElement("dd");
-        dd.className = "af-settings-mapping-binding";
-        dd.textContent = formatBinding(binding);
-        list.appendChild(dt);
-        list.appendChild(dd);
-      }
-      col.appendChild(list);
-    }
+    this.appendBindingsList(col, player, mapping);
 
     this.appendAutofireSection(col, player);
 
     grid.appendChild(col);
+  }
+
+  /**
+   * Render the active bindings for a player — custom if the user ran
+   * the remap flow, else the engine defaults (keyboard or gamepad
+   * depending on device assignment). Previously we only listed P1's
+   * custom mapping, leaving P2 and default P1 invisible.
+   */
+  private appendBindingsList(col: HTMLElement, player: PlayerIndex, mapping: InputMapping | null): void {
+    const bindings = effectiveBindings(player, mapping);
+    const list = document.createElement("dl");
+    list.className = "af-settings-mapping-list";
+    list.setAttribute("data-testid", `settings-bindings-p${player + 1}`);
+    for (const role of MAPPING_ROLES) {
+      const binding = bindings[role];
+      if (!binding) continue;
+      const dt = document.createElement("dt");
+      dt.className = "af-settings-mapping-role";
+      dt.textContent = role;
+      const dd = document.createElement("dd");
+      dd.className = "af-settings-mapping-binding";
+      dd.textContent = formatBinding(binding);
+      list.appendChild(dt);
+      list.appendChild(dd);
+    }
+    col.appendChild(list);
   }
 
   private appendRemapButton(col: HTMLElement, player: PlayerIndex): void {
@@ -824,6 +834,46 @@ function formatBinding(binding: InputMapping["p1"][MappingRole]): string {
   if (binding.kind === "button") return `Button ${binding.index}`;
   if (binding.kind === "axis") return `Axis ${binding.index} ${binding.dir > 0 ? "+" : "-"}`;
   return `Key ${binding.code}`;
+}
+
+/**
+ * Build the active binding set for a player:
+ *   - if the user captured a custom slot, use it verbatim
+ *   - else project the engine defaults based on the device assigned
+ *     (keyboard → DEFAULT_P{n}_MAPPING, gamepad → DEFAULT_GP_MAPPING)
+ * So the Controls tab always shows what the game will actually see.
+ */
+function effectiveBindings(
+  player: PlayerIndex,
+  mapping: InputMapping | null,
+): Partial<Record<MappingRole, InputBinding>> {
+  const custom = player === 0 ? mapping?.p1 : mapping?.p2;
+  if (custom && Object.keys(custom).length > 0) return custom;
+
+  const assignment = loadPlayerAssignment(player);
+  if (assignment.kind === "gamepad") {
+    return projectGamepadDefaults(DEFAULT_GP_MAPPING);
+  }
+  const keyDefaults = player === 0 ? DEFAULT_P1_MAPPING : DEFAULT_P2_MAPPING;
+  return projectKeyDefaults(keyDefaults);
+}
+
+function projectKeyDefaults(defaults: KeyMapping): Partial<Record<MappingRole, InputBinding>> {
+  const out: Partial<Record<MappingRole, InputBinding>> = {};
+  for (const role of MAPPING_ROLES) {
+    const code = defaults[role];
+    if (code) out[role] = { kind: "key", code };
+  }
+  return out;
+}
+
+function projectGamepadDefaults(defaults: GamepadMapping): Partial<Record<MappingRole, InputBinding>> {
+  const out: Partial<Record<MappingRole, InputBinding>> = {};
+  for (const role of MAPPING_ROLES) {
+    const index = defaults[role];
+    if (typeof index === "number") out[role] = { kind: "button", index };
+  }
+  return out;
 }
 
 function formatBytes(n: number): string {

@@ -125,7 +125,7 @@ describe("SettingsScreen", () => {
   });
 
   describe("controls tab", () => {
-    it("renders the saved mapping and a Reset button wired to onReset", () => {
+    it("renders the saved P1 mapping with the custom bindings", () => {
       const onReset = vi.fn<() => void>();
       const screen2 = new SettingsScreen(container, {
         settings,
@@ -145,8 +145,13 @@ describe("SettingsScreen", () => {
       expect(pane.textContent).toContain("Keyboard");
       expect(pane.textContent).toContain("coin");
       expect(pane.textContent).toContain("Key Space");
-      container.querySelector<HTMLButtonElement>('[data-testid="settings-controls-reset"]')!.click();
-      expect(onReset).toHaveBeenCalledTimes(1);
+      // Both players expose a bindings list — P1 picks up the custom
+      // keyboard mapping, P2 falls back to engine defaults.
+      const p1List = container.querySelector<HTMLElement>('[data-testid="settings-bindings-p1"]')!;
+      const p2List = container.querySelector<HTMLElement>('[data-testid="settings-bindings-p2"]')!;
+      expect(p1List).not.toBeNull();
+      expect(p2List).not.toBeNull();
+      expect(p2List.textContent).toMatch(/Key|Button/);
       screen2.unmount();
     });
 
