@@ -486,6 +486,19 @@ export class InputManager {
   }
 
   /**
+   * Keyboard read scoped to a player slot. Once the user has pinned a
+   * gamepad to that slot, the keyboard stays silent for it — otherwise
+   * the default P1/P2 key mappings would drive the player in parallel
+   * with the pad (and worse, leak into the other slot when P2 is on
+   * the keyboard next to P1's default keys).
+   */
+  private readKey(playerIdx: number, code: string | undefined): boolean {
+    if (!code) return false;
+    if (this.playerGamepad[playerIdx] !== null) return false;
+    return this.keyState.has(code);
+  }
+
+  /**
    * Read the low byte of INx (directions + buttons 1-3).
    * Active-LOW: start with 0xFF, clear bits for pressed buttons.
    */
@@ -497,19 +510,19 @@ export class InputManager {
     const gp = this.getGamepad(player);
 
     // Directions (no autofire)
-    if (this.keyState.has(m.right) || this.isGamepadRight(gp, gm)) value &= ~(1 << 0);
-    if (this.keyState.has(m.left) || this.isGamepadLeft(gp, gm))   value &= ~(1 << 1);
-    if (this.keyState.has(m.down) || this.isGamepadDown(gp, gm))   value &= ~(1 << 2);
-    if (this.keyState.has(m.up) || this.isGamepadUp(gp, gm))       value &= ~(1 << 3);
+    if (this.readKey(idx, m.right) || this.isGamepadRight(gp, gm)) value &= ~(1 << 0);
+    if (this.readKey(idx, m.left)  || this.isGamepadLeft(gp, gm))  value &= ~(1 << 1);
+    if (this.readKey(idx, m.down)  || this.isGamepadDown(gp, gm))  value &= ~(1 << 2);
+    if (this.readKey(idx, m.up)    || this.isGamepadUp(gp, gm))    value &= ~(1 << 3);
 
     // Buttons 1-3 (autofire-aware)
-    if (this.isPressed(player, "button1", this.keyState.has(m.button1) || this.isGamepadButton(gp, gm.button1))) {
+    if (this.isPressed(player, "button1", this.readKey(idx, m.button1) || this.isGamepadButton(gp, gm.button1))) {
       value &= ~(1 << 4);
     }
-    if (this.isPressed(player, "button2", this.keyState.has(m.button2) || this.isGamepadButton(gp, gm.button2))) {
+    if (this.isPressed(player, "button2", this.readKey(idx, m.button2) || this.isGamepadButton(gp, gm.button2))) {
       value &= ~(1 << 5);
     }
-    if (this.isPressed(player, "button3", this.keyState.has(m.button3) || this.isGamepadButton(gp, gm.button3))) {
+    if (this.isPressed(player, "button3", this.readKey(idx, m.button3) || this.isGamepadButton(gp, gm.button3))) {
       value &= ~(1 << 6);
     }
 
@@ -527,13 +540,13 @@ export class InputManager {
     const gm = this.gamepadMappings[idx];
     const gp = this.getGamepad(player);
 
-    if (this.isPressed(player, "button4", this.keyState.has(m.button4) || this.isGamepadButton(gp, gm.button4))) {
+    if (this.isPressed(player, "button4", this.readKey(idx, m.button4) || this.isGamepadButton(gp, gm.button4))) {
       value &= ~(1 << 0);
     }
-    if (this.isPressed(player, "button5", this.keyState.has(m.button5) || this.isGamepadButton(gp, gm.button5))) {
+    if (this.isPressed(player, "button5", this.readKey(idx, m.button5) || this.isGamepadButton(gp, gm.button5))) {
       value &= ~(1 << 1);
     }
-    if (this.isPressed(player, "button6", this.keyState.has(m.button6) || this.isGamepadButton(gp, gm.button6))) {
+    if (this.isPressed(player, "button6", this.readKey(idx, m.button6) || this.isGamepadButton(gp, gm.button6))) {
       value &= ~(1 << 2);
     }
 
@@ -556,21 +569,21 @@ export class InputManager {
     const gp2 = this.getGamepad(1);
 
     // Bit 0: Coin 1
-    if (this.keyState.has(m1.coin) || this.isGamepadButton(gp1, gm1.coin)) {
+    if (this.readKey(0, m1.coin) || this.isGamepadButton(gp1, gm1.coin)) {
       value &= ~(1 << 0);
     }
     // Bit 1: Coin 2
-    if (this.keyState.has(m2.coin) || this.isGamepadButton(gp2, gm2.coin)) {
+    if (this.readKey(1, m2.coin) || this.isGamepadButton(gp2, gm2.coin)) {
       value &= ~(1 << 1);
     }
     // Bit 2: Service — not mapped
     // Bit 3: Unknown
     // Bit 4: Start 1
-    if (this.keyState.has(m1.start) || this.isGamepadButton(gp1, gm1.start)) {
+    if (this.readKey(0, m1.start) || this.isGamepadButton(gp1, gm1.start)) {
       value &= ~(1 << 4);
     }
     // Bit 5: Start 2
-    if (this.keyState.has(m2.start) || this.isGamepadButton(gp2, gm2.start)) {
+    if (this.readKey(1, m2.start) || this.isGamepadButton(gp2, gm2.start)) {
       value &= ~(1 << 5);
     }
     // Bits 6-7: unused — stay 1
