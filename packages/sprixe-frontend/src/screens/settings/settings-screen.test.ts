@@ -141,7 +141,8 @@ describe("SettingsScreen", () => {
       });
       screen2.setActiveTab("controls");
       const pane = container.querySelector<HTMLElement>('[data-testid="settings-controls"]')!;
-      expect(pane.textContent).toContain("keyboard");
+      // Keyboard is offered as a device option in the P1 selector.
+      expect(pane.textContent).toContain("Keyboard");
       expect(pane.textContent).toContain("coin");
       expect(pane.textContent).toContain("Key Space");
       container.querySelector<HTMLButtonElement>('[data-testid="settings-controls-reset"]')!.click();
