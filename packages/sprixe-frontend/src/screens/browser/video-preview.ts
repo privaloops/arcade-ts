@@ -41,7 +41,7 @@ export class VideoPreview {
   private readonly clearTimer: (id: number) => void;
 
   private currentId: string | null = null;
-  private currentBlobUrl: string | null = null;
+  /** Data URL returned by the generator — must be revoked on change. */
   private currentMarqueeBlobUrl: string | null = null;
   private currentVideoEl: HTMLVideoElement | null = null;
   private fadeTimerId: number | null = null;
@@ -100,8 +100,9 @@ export class VideoPreview {
       this.root.setAttribute("data-empty", "true");
       this.detachVideo();
       this.imgEl.removeAttribute("src");
+      this.imgEl.onerror = null;
       this.marqueeEl.removeAttribute("src");
-      this.revokeBlobUrl();
+      this.marqueeEl.onerror = null;
       this.revokeMarqueeBlobUrl();
       this.titleEl.textContent = "";
       this.metaEl.textContent = "";
@@ -114,37 +115,56 @@ export class VideoPreview {
     if (this.currentId === game.id) return;
     this.currentId = game.id;
 
-    // Immediate placeholder from the game metadata.
+    // Reset visuals + kill anything pending from the previous game.
     this.detachVideo();
-    this.setImageSrc(game.screenshotUrl, `${game.title} screenshot`);
     this.marqueeEl.removeAttribute("src");
+    this.marqueeEl.onerror = null;
     this.revokeMarqueeBlobUrl();
     this.titleEl.textContent = game.title;
     const systemLabel = game.system === "cps1" ? "CPS-1" : "Neo-Geo";
     this.metaEl.textContent = `${game.publisher} · ${game.year} · ${systemLabel}`;
     this.favoriteEl.textContent = game.favorite ? "★ Favorite" : "";
 
-    // With a loader, resolve marquee + CDN screenshot asynchronously
-    // and schedule the eventual crossfade to video. Each fetch is
-    // guarded by the token so a fast succession of hovers never races
-    // stale blobs onto the current selection.
     if (this.loader) {
       const token = this.pendingFetchToken;
 
-      void this.loader.loadMarquee(game.id, game.system, game.title).then((blob) => {
-        if (token !== this.pendingFetchToken) return;
-        if (blob) this.applyMarquee(blob, `${game.title} marquee`);
-      });
+      // Screenshot: try each candidate URL in order; set the GameEntry
+      // placeholder as the absolute last resort. Uses native <img>
+      // onerror cascade — no fetch() so CORS-less hosts like ArcadeDB
+      // serve us straight to the DOM.
+      this.tryImageCascade(
+        this.imgEl,
+        this.loader.screenshotCandidates(game.id, game.system),
+        game.screenshotUrl,
+        `${game.title} screenshot`,
+      );
 
-      void this.loader.loadScreenshot(game.id, game.system).then((blob) => {
-        if (token !== this.pendingFetchToken) return;
-        if (blob) this.applyCdnScreenshot(blob, `${game.title} screenshot`);
-      });
+      // Marquee: same cascade, plus a generated-canvas fallback when
+      // every remote URL 404s so the banner is never empty.
+      this.tryImageCascade(
+        this.marqueeEl,
+        this.loader.marqueeCandidates(game.id, game.system),
+        null,
+        `${game.title} marquee`,
+        async () => {
+          if (token !== this.pendingFetchToken) return null;
+          const url = await this.loader!.generateMarqueeUrl(game.id, game.title);
+          if (!url) return null;
+          this.currentMarqueeBlobUrl = url;
+          return url;
+        },
+      );
 
       this.fadeTimerId = this.setTimer(() => {
         if (token !== this.pendingFetchToken) return;
-        void this.tryMountVideo(game);
+        this.tryMountVideo(game);
       }, this.crossfadeMs);
+    } else {
+      // No loader → honour the GameEntry placeholder like Phase 1.
+      this.imgEl.onerror = null;
+      if (game.screenshotUrl) this.imgEl.src = game.screenshotUrl;
+      else this.imgEl.removeAttribute("src");
+      this.imgEl.alt = `${game.title} screenshot`;
     }
   }
 
@@ -153,15 +173,10 @@ export class VideoPreview {
     return this.currentVideoEl;
   }
 
-  private async tryMountVideo(game: GameEntry): Promise<void> {
+  private tryMountVideo(game: GameEntry): void {
     if (!this.loader) return;
-    let available = false;
-    try {
-      available = await this.loader.hasVideo(game.id, game.system);
-    } catch {
-      return;
-    }
-    if (!available || game.id !== this.currentId) return;
+    const candidates = this.loader.videoCandidates(game.id, game.system);
+    if (candidates.length === 0) return;
 
     const video = document.createElement("video");
     video.className = "af-video-preview-video";
@@ -169,10 +184,63 @@ export class VideoPreview {
     video.setAttribute("playsinline", "true");
     video.muted = true;
     video.loop = true;
-    video.src = this.loader.videoUrl(game.id, game.system);
+
+    let idx = 0;
+    const tryNext = (): void => {
+      if (game.id !== this.currentId) { video.remove(); return; }
+      if (idx >= candidates.length) { video.remove(); return; }
+      video.src = candidates[idx++]!;
+      // The browser raises an error on 404 via the media element.
+    };
+    video.addEventListener("error", () => tryNext());
+    video.addEventListener("loadeddata", () => {
+      if (game.id !== this.currentId) return;
+      this.currentVideoEl = video;
+      void video.play().catch(() => { /* autoplay blocked — leave visible */ });
+    });
+
     this.media.appendChild(video);
-    try { await video.play(); } catch { /* autoplay blocked — leave visible anyway */ }
-    this.currentVideoEl = video;
+    tryNext();
+  }
+
+  /**
+   * Walk a list of URL candidates setting them on `img.src` one after
+   * the other. On each onerror, move to the next candidate. When all
+   * remote URLs fail, fall back to `staticFallback` (e.g. GameEntry
+   * placeholder) or run `generator` — useful for marquees where the
+   * last step paints a canvas.
+   */
+  private tryImageCascade(
+    img: HTMLImageElement,
+    urls: string[],
+    staticFallback: string | null,
+    alt: string,
+    generator?: () => Promise<string | null>,
+  ): void {
+    img.alt = alt;
+    let idx = 0;
+    const applyFallback = (): void => {
+      if (staticFallback) {
+        img.onerror = null;
+        img.src = staticFallback;
+        return;
+      }
+      if (generator) {
+        void generator().then((url) => {
+          if (!url) { img.removeAttribute("src"); return; }
+          img.onerror = null;
+          img.src = url;
+        });
+        return;
+      }
+      img.removeAttribute("src");
+    };
+    const tryNext = (): void => {
+      if (idx >= urls.length) { applyFallback(); return; }
+      img.onerror = tryNext;
+      img.src = urls[idx++]!;
+    };
+    tryNext();
   }
 
   private detachVideo(): void {
@@ -180,40 +248,6 @@ export class VideoPreview {
       try { this.currentVideoEl.pause(); } catch { /* ignore */ }
       this.currentVideoEl.remove();
       this.currentVideoEl = null;
-    }
-  }
-
-  private setImageSrc(url: string | null, alt: string): void {
-    this.revokeBlobUrl();
-    if (url) {
-      this.imgEl.src = url;
-      this.imgEl.alt = alt;
-    } else {
-      this.imgEl.removeAttribute("src");
-      this.imgEl.alt = "";
-    }
-  }
-
-  private applyCdnScreenshot(blob: Blob, alt: string): void {
-    this.revokeBlobUrl();
-    const url = URL.createObjectURL(blob);
-    this.currentBlobUrl = url;
-    this.imgEl.src = url;
-    this.imgEl.alt = alt;
-  }
-
-  private applyMarquee(blob: Blob, alt: string): void {
-    this.revokeMarqueeBlobUrl();
-    const url = URL.createObjectURL(blob);
-    this.currentMarqueeBlobUrl = url;
-    this.marqueeEl.src = url;
-    this.marqueeEl.alt = alt;
-  }
-
-  private revokeBlobUrl(): void {
-    if (this.currentBlobUrl) {
-      URL.revokeObjectURL(this.currentBlobUrl);
-      this.currentBlobUrl = null;
     }
   }
 
