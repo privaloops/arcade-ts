@@ -637,6 +637,10 @@ export class NeoGeoEmulator {
     //   0x340001 System: bit 0=Start1, 1=Start2, 2=Select1, 3=Select2
     //   0x380001 Coins: bit 0=Coin1, 1=Coin2, 2=Service
 
+    // Without this tick the autofire counter stays at 0, isPressed()
+    // always returns true, and the "rapid fire" just holds the button.
+    this.input.tickAutofire();
+
     const p1Lo = this.input.readPort(0);
     const p1Hi = this.input.readPort(1);
     // Remap CPS1 directions (R/L/D/U bits 0-3) → Neo-Geo (U/D/L/R bits 0-3)

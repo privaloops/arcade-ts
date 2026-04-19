@@ -267,11 +267,22 @@ export class InputManager {
   }
 
   /**
+   * Advance the autofire counter by one frame. `isPressed()` uses this
+   * to toggle auto-fired buttons on/off every AUTOFIRE_PERIOD frames.
+   * CPS-1 drives this from `updateBusPorts`; Neo-Geo has its own port
+   * layout and must call `tickAutofire()` explicitly from its own
+   * per-frame input refresh.
+   */
+  tickAutofire(): void {
+    this.autofireCounter++;
+  }
+
+  /**
    * Update all I/O port bytes on the bus in one call.
    * Call this once per frame before the 68000 runs.
    */
   updateBusPorts(ioPorts: Uint8Array, cpsbRegs?: Uint8Array): void {
-    this.autofireCounter++;
+    this.tickAutofire();
     // IN1 at 0x800000-0x800007 (MAME: map(0x800000, 0x800007).portr("IN1"))
     // 16-bit port: P2 = high byte (even addr), P1 = low byte (odd addr)
     // Mirrored across 4 word positions.
