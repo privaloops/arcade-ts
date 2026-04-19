@@ -163,7 +163,19 @@ When the first ROM is uploaded, crossfade (300ms) to input mapping screen.
 
 #### Input Mapping (first time only)
 
-Triggered on first ROM upload OR from Settings. **10 inputs per player, ~30 seconds**.
+Triggered on first ROM upload OR from Settings → Controls → Reset mapping. **12 inputs per player, ~45 seconds**.
+
+> **Doctrine arcade (2026-04 audit)** : le MappingScreen ne capture QUE des rôles arcade (coin, start, 4 directions, 6 play buttons). Les actions du frontend (confirm, back, context menu, settings, pause) en sont **dérivées** :
+>
+> | Action frontend | Bouton arcade |
+> |---|---|
+> | Confirm | button1 (LP) |
+> | Back | button2 (MP) |
+> | Open context menu | button3 (HP) |
+> | Settings (global) | start |
+> | Pause overlay (in-game) | coin hold 1 s |
+>
+> Cette règle évite les « Y ouvre un overlay mystère » et garantit qu'un stick arcade sans boutons dédiés au menu sait quand même piloter toute la UI.
 
 Compatible with ALL USB encoders: Xin-Mo, Zero Delay, Brook, GP2040-CE, I-PAC (clavier détecté automatiquement si aucun gamepad connecté mais keydown arrive).
 
@@ -1563,15 +1575,23 @@ Le *deliverable* énoncé par chaque phase doit être couvert par **au moins un 
 
 > Chaque sous-étape suit la doctrine §5.0.
 
-1. **Add `loadRomFromBuffer()` to Emulator and NeoGeoEmulator**
-   - **Tests** :
-     - Vitest : `src/engine-bridge/load-rom.test.ts` — charger fixture `tests/fixtures/test.zip` → état émulateur `ready`, charger ROM Neo-Geo mock idem, ROM corrompue (bad magic) → throw `InvalidRomError`, ROM système inconnu → throw `UnsupportedSystemError`
-     - E2E : couvert par sous-étape 8
-     - ✅ Checkpoint : `npm test -w @sprixe/frontend load-rom` → 0 fail
+> **Post-mortem 2026-04 — faille de spec détectée** : les sous-étapes 1 / 8 / 9 initiales séparaient *"l'API existe"* et *"l'API est câblée"* sans jamais imposer le câblage. Résultat : `Emulator.loadRomFromBuffer()` implémenté côté engine, mais `PlayingScreen` tournait encore sur un `MockEmulator` (gradient rAF + compteur float64) indiscernable du réel par les assertions "canvas non-vide" et "heap <10MB". Les sous-étapes 1, 8, 9 ci-dessous ont été renforcées : elles testent désormais le **chemin complet** `RomDB → runner → Emulator/NeoGeoEmulator réel → canvas qui change frame à frame`. L'emplacement du BIOS Neo-Geo (contenu DMCA-sensible de SNK) est également explicité.
 
-2. **Implement `RomDB` (IndexedDB)**
+1. **Add `loadRomFromBuffer()` to Emulator and NeoGeoEmulator, wired through an engine-bridge runner**
+   - **Scope** :
+     - `Emulator.loadRomFromBuffer(data: ArrayBuffer)` et `NeoGeoEmulator.loadRomFromBuffer(data, biosData?)` existent côté engine (✓ déjà fait).
+     - Créer `packages/sprixe-frontend/src/engine-bridge/` : `errors.ts` (`InvalidRomError`, `UnsupportedSystemError`, `MissingBiosError`), `identify.ts`, `systems.ts` (registry `SystemId → { requiredBios?, createRunner(canvas, romBuffer, bios?) }`), `emulator-runner.ts` (interface `EmulatorHandle` uniforme pour pause/save), `cps1-runner.ts`, `neogeo-runner.ts`. Un nouveau système = une ligne dans le registry, pas de fork de `PlayingScreen`.
    - **Tests** :
-     - Vitest : `src/storage/rom-db.test.ts` (avec `fake-indexeddb`) — `put/get/list/delete` round-trip, ROM 100MB ne crashe pas, simulation `QuotaExceededError` capturée et remontée, listage trié par `lastPlayedAt` desc
+     - Vitest : `src/engine-bridge/identify.test.ts` — identification CPS-1 vs Neo-Geo vs invalid (déjà couvert par `load-rom.test.ts` actuel, simple rename).
+     - Vitest : `src/engine-bridge/cps1-runner.test.ts` — instancier le runner avec la fixture `tests/fixtures/test.zip`, démarrer, vérifier `getFrames() > 0` après ~100ms, `pause()` gèle le compteur, `resume()` le relance, `stop()` libère.
+     - Vitest : `src/engine-bridge/neogeo-runner.test.ts` — BIOS absent dans `RomDB` → `createRunner` throw `MissingBiosError("neogeo")`. Pas d'E2E Neo-Geo en CI (DMCA), tests manuels côté dev après upload du BIOS.
+     - ✅ Checkpoint : `npm test -w @sprixe/frontend engine-bridge` → 0 fail
+
+2. **Implement `RomDB` (IndexedDB) with `kind: "game" | "bios"`**
+   - **Scope** : `RomRecord.kind` distingue les ROMs de jeu des BIOS (Neo-Geo). Schema IDB bump v4 → v5, migration idempotente (records existants → `kind: "game"`). `RomDB.list({ kind? })` filtre par défaut sur `"game"` pour que la liste browser ne contienne jamais le BIOS. Un upload de `neogeo.zip` (id MAME `"neogeo"`) écrit `{ kind: "bios" }` automatiquement via `identifyRom`.
+   - **Rationale** : le BIOS Neo-Geo est copyright SNK, impossible à commit au repo (`.gitignore` `**/public/roms/`). Il doit transiter par le même flow d'upload que les ROMs de jeu — un run-time concern, pas un asset du build.
+   - **Tests** :
+     - Vitest : `src/storage/rom-db.test.ts` (avec `fake-indexeddb`) — `put/get/list/delete` round-trip, ROM 100MB ne crashe pas, simulation `QuotaExceededError` capturée et remontée, listage trié par `lastPlayedAt` desc, `list()` par défaut exclut `kind: "bios"`, migration v4→v5 tag les records existants.
      - E2E : couvert par sous-étape 3
      - ✅ Checkpoint : `npm test -w @sprixe/frontend rom-db` → 0 fail
 
@@ -1605,21 +1625,45 @@ Le *deliverable* énoncé par chaque phase doit être couvert par **au moins un 
      - E2E : `tests/e2e/arcade/p2-pause-flow.spec.ts` — démarrer ROM mock → `__holdButton(COIN, 1200)` → overlay visible → bouton resume → overlay disparaît, FPS reprend
      - ✅ Checkpoint : `npm test -w @sprixe/frontend pause-overlay && npx playwright test --project=arcade p2-pause-flow` → 0 fail
 
-8. **Screen transition: browser → playing → browser**
+8. **Screen transition: browser → playing → browser (with real emulator wiring)**
+
+   Scindé en 8a / 8b pour empêcher que "la transition marche" masque "l'émulateur est mocké".
+
+   **8a. Transition d'écran**
+   - **Scope** : `browser → playing → browser` pilotable par gamepad, sélection préservée au retour, heap stable.
    - **Tests** :
-     - Vitest : N/A (couvert par `ScreenRouter` Phase 1)
-     - E2E : `tests/e2e/arcade/p2-select-play-quit.spec.ts` — **golden path** : démarrer sur browser → presser A sur jeu mock → écran playing visible (canvas WebGL non-vide) → coin hold 1.2s → pause → quit → retour browser, sélection préservée. Vérifier `performance.memory.usedJSHeapSize` n'augmente pas de >10MB après cycle complet (anti-leak).
-     - ✅ Checkpoint : `npx playwright test --project=arcade p2-select-play-quit` → 0 fail
+     - E2E : `tests/e2e/arcade/p2-select-play-quit.spec.ts` — sélection via A, `data-testid="playing-screen"` apparaît, coin hold 1.2s → pause → quit → retour browser avec sélection identique, `performance.memory.usedJSHeapSize` +<10MB après cycle complet.
+   - **Anti-faux-positif** : cette assertion passe avec un canvas gradient. Elle ne suffit pas à valider le livrable — c'est 8b qui le fait.
 
-9. **Save state integration (IndexedDB instead of localStorage)**
+   **8b. Câblage réel de l'émulateur dans `PlayingScreen`** *(le vrai deliverable Phase 2)*
+   - **Scope** :
+     - `PlayingScreen(container, { game, romBuffer, romDb, settings? })` — supprime le `MockEmulator` historique, reçoit le `ArrayBuffer` de la ROM + un handle `RomDB` (nécessaire pour fetcher le BIOS Neo-Geo).
+     - Flow : `identifyRom(romBuffer)` → `systems.createRunner(system, canvas, romBuffer, { romDb })` → `runner.start()`. Le runner monte le vrai renderer WebGL / Canvas 2D sur le canvas, appelle `Emulator.loadRomFromBuffer()` ou `NeoGeoEmulator.loadRomFromBuffer(rom, bios)`, puis `start()`.
+     - `PauseOverlay.EmulatorHandle` (pause/resume/saveState/loadState) reste l'interface commune — les runners l'implémentent.
+     - `MissingBiosError` remonte à `main.ts` avant construction de `PlayingScreen` → affiche un écran "BIOS required" (retour browser à la validation). Les autres systèmes (CPS-1) ne sont pas affectés.
    - **Tests** :
-     - Vitest : `src/state/save-state-idb.test.ts` — round-trip save→serialize→IDB→deserialize→load identique (deep equal sur RAM 64KB + VRAM 192KB), 4 slots indépendants, migration auto depuis ancien localStorage si présent
-     - E2E : `tests/e2e/arcade/p2-save-state.spec.ts` — démarrer ROM → laisser tourner 60 frames → save slot 1 → quitter → relancer → load slot 1 → frame N+1 == frame N pré-save (hash canvas identique)
-     - ✅ Checkpoint : `npm test -w @sprixe/frontend save-state-idb && npx playwright test --project=arcade p2-save-state` → 0 fail
+     - E2E : `tests/e2e/arcade/p2-select-play-quit.spec.ts` renforcé. Assertions ajoutées :
+       - hash du canvas à la frame 30 ≠ hash à la frame 60 (le contenu bouge) ;
+       - FPS mesuré (compteur `data-testid="playing-fps"` ou `window.__fps`) > 0 et < 120 ;
+       - après quit, `heap growth` <10MB (inchangé).
+     - E2E : `tests/e2e/arcade/p2-missing-bios.spec.ts` — seeder un jeu Neo-Geo sans BIOS → presser A → screen "BIOS required" visible → action retour → browser avec sélection identique.
+     - Unit : `src/engine-bridge/cps1-runner.test.ts` (voir sous-étape 1) couvre le câblage.
+   - ✅ Checkpoint : `npx playwright test --project=arcade p2-select-play-quit p2-missing-bios` → 0 fail
 
-**Validation Phase 2** : `npm test -w @sprixe/frontend && npx playwright test --project=arcade --grep="^p2-"` → 0 fail.
+9. **Save state integration (real snapshot → IndexedDB)**
+   - **Scope** :
+     - Côté engine : extraire `captureState(): Promise<SaveState>` et `applyState(state): boolean` publics sur `Emulator`, puis wrapper `exportStateAsBuffer(): Promise<ArrayBuffer | null>` / `importStateFromBuffer(buf): boolean` qui sérialisent en JSON + `TextEncoder`. Les slots localStorage de `@sprixe/edit` restent en place (API inchangée).
+     - Côté frontend : `EmulatorHandle.saveState` devient `() => Promise<ArrayBuffer | null>` (async pour couvrir le state audio worker), `SaveStateController.save()` ajoute `await`. Le snapshot écrit dans `SaveStateDB` est le vrai buffer, plus un `Float64` de compteur.
+     - Neo-Geo save-state : **non implémenté en Phase 2** (engine n'a pas l'API). Signalé dans le runner comme `saveState() → null`. Ajouté en Phase 2.10 / Phase 5.
+   - **Tests** :
+     - Vitest : `src/state/save-state-db.test.ts` + `save-state-controller.test.ts` — déjà en place pour l'IDB.
+     - Vitest : `packages/sprixe-engine/src/__tests__/save-state.test.ts` renforcé — roundtrip `exportStateAsBuffer` → `importStateFromBuffer` : deep equal RAM 64KB + VRAM 192KB, `byteLength` du buffer ≥ 200KB (sanity anti-mock).
+     - E2E : `tests/e2e/arcade/p2-save-state.spec.ts` (nouveau) — démarrer ROM CPS-1 (fixture) → laisser tourner 60 frames → save slot 0 (hash canvas A) → attendre 30 frames (canvas change) → load slot 0 → frame suivante a un hash canvas == A.
+     - ✅ Checkpoint : `npm test && npx playwright test --project=arcade p2-save-state` → 0 fail
 
-**Deliverable**: Load ROM manually, see in browser, play, pause, save, quit.
+**Validation Phase 2** : `npm test && npx playwright test --project=arcade --grep="^p2-"` → 0 fail.
+
+**Deliverable** : sélection d'une ROM CPS-1 depuis le browser → écran playing avec **émulation réelle** (canvas qui bouge frame à frame, audio actif, inputs mappés au gamepad) → pause overlay → save-state IDB avec snapshot authentique (CPU + RAM 64KB + VRAM 192KB) → load-state reproduit l'état → quit retour browser. Neo-Geo suit la même trajectoire dès qu'un `neogeo.zip` BIOS est présent dans `RomDB`, sinon écran "BIOS required".
 
 ### Phase 3: ROM Transfer (WebRTC) + Phone Remote (3 weeks)
 **Goal**: Transfer ROMs from phone via QR code + remote control.
@@ -1627,6 +1671,15 @@ Le *deliverable* énoncé par chaque phase doit être couvert par **au moins un 
 > **Estimation note**: Originally 2 weeks, extended to 3. WebRTC P2P with chunked file transfer, backpressure, reconnection, plus the phone UI (two tabs, responsive) is more complex than it looks. Plan accordingly.
 
 > **Doctrine de test** : conformément à §5.0, tous les tests P2P **mockent PeerJS** (Vitest et E2E). Le mock E2E utilise une `BroadcastChannel` injectée via `addInitScript` pour piper les messages entre les deux contexts Playwright. Aucun appel réseau réel à PeerJS Cloud en CI.
+
+> **Post-mortem 2026-04 — code mort côté host** : l'audit post-Phase 2 a révélé que les sous-étapes 7 (Remote tab) et 9 (StateSync) avaient leur **unit** vert mais aucun wiring host :
+> - `peer-host.ts` recevait les messages `{ type: "cmd" }` et les jetait (commentaire "Phase 3.7 consumes these" jamais suivi).
+> - `StateSync` existait mais n'était pas instancié dans `main.ts` — les phones ne recevaient jamais d'état.
+> - Les E2E spec'd (`p3-phone-remote.spec.ts`, `p3-state-sync.spec.ts`) n'avaient jamais été écrits, donc la régression n'était pas détectée.
+> - Corollaire UX : après le premier upload, le QR disparaissait (visible uniquement sur EmptyState) et l'utilisateur perdait l'accès au phone.
+> - Corollaire audio : l'AudioContext était créé hors user gesture (press A via Gamepad API polling ≠ DOM gesture), donc sous autoplay policy le son restait muet en dev manuel.
+>
+> Corrections appliquées — cf. sous-étapes 7, 8, 9, 10 et 14 ci-dessous (assertions renforcées, E2E écrits, `onCommand` branché, `StateSync` câblé aux transitions, QR ajouté à Settings → Network, resume audio on first user gesture dans `PlayingScreen`).
 
 **Week 1 — P2P foundation + basic transfer**:
 
@@ -1668,22 +1721,34 @@ Le *deliverable* énoncé par chaque phase doit être couvert par **au moins un 
      - E2E : `tests/e2e/arcade/p3-phone-upload.spec.ts` — `setInputFiles` 3 ROMs mock → 3 cartes en queue dans l'ordre → supprimer la 2e → 2 cartes restent (1ʳᵉ et 3ᵉ)
      - ✅ Checkpoint : `npm test -w @sprixe/frontend upload-tab && npx playwright test --project=arcade p3-phone-upload` → 0 fail
 
-7. **Build phone page: Remote tab (pause, save, load, quit, volume)**
+7. **Build phone page: Remote tab (pause, save, load, quit, volume) — host dispatch obligatoire**
+   - **Scope** :
+     - Côté phone : `RemoteTab` émet des `{ type: "cmd", action, payload? }` sur la `DataConnection`.
+     - Côté host : `peer-host.ts` expose `onCommand(cb)` qui notifie un listener dédié. `main.ts` subscribe et route vers `openPauseOverlay()`, `closePauseOverlay()`, `saveController.save(slot?)`, `saveController.load(slot?)`, `exitToMenu()`, `settings.update({ audio: { masterVolume } })`. **Sans ce câblage la sous-étape est morte** (bug détecté dans l'audit 2026-04 : `case "cmd": return;`).
+     - `PhonePage` ouvre la connexion PeerSend au mount (pas à la première commande) pour que `StateSync` arrive immédiatement sur le phone.
    - **Tests** :
      - Vitest : `src/phone/remote-tab.test.ts` — mapping `action → message` ({type, payload}), actions désactivées selon `kioskState` (save/load grisés en `browser`), volume slider émet messages debouncés (50ms)
-     - E2E : `tests/e2e/arcade/p3-phone-remote.spec.ts` — host démarre ROM mock → phone presse Pause → host passe en pause (<300ms), phone presse Volume 50 → host `audioGain` = 0.5
+     - E2E : `tests/e2e/arcade/p3-phone-remote.spec.ts` — deux pages sur un même contexte avec `PeerMock` : host avec ROM fixture → phone `remote-pause` click → host `pause-overlay` visible <2s. Phone volume 35 → `localStorage.sprixe.settings.v1.audio.masterVolume === 35`. Phone `remote-quit` → host retour browser.
      - ✅ Checkpoint : `npm test -w @sprixe/frontend remote-tab && npx playwright test --project=arcade p3-phone-remote` → 0 fail
 
-8. **QR code display on kiosk**
+8. **QR code display on kiosk — prominent on EmptyState + fallback in Settings → Network**
+   - **Scope** :
+     - `QrCode` composant partagé (`src/ui/qr-code.ts`). `resolvePhoneBaseUrl()` exporté pour être consommé à la fois par `EmptyState` (first boot) et `SettingsScreen.renderNetwork()`.
+     - Audit 2026-04 : le QR n'était exposé que sur l'EmptyState → une fois une ROM uploadée l'utilisateur perdait l'accès au phone. Correction : QR intégré dans Settings → Network, réutilisable à tout moment.
    - **Tests** :
-     - Vitest : `src/ui/qr-code.test.ts` — génération canvas (taille 200×200), contenu URL exact `https://sprixe.app/send/{roomId}`, régénération uniquement quand `roomId` change (memo)
-     - E2E : couvert visuellement dans `p3-rom-transfer-p2p.spec.ts` (vérifier `canvas[data-testid="qr"]` non-vide)
+     - Vitest : `src/ui/qr-code.test.ts` — génération canvas (taille 200×200), contenu URL exact, memo sur `roomId`.
+     - E2E : couvert visuellement par `p3-empty-state.spec.ts` (first boot) + `p4-settings-persistence.spec.ts` doit être étendu pour vérifier `[data-testid="settings-network-qr"]` visible.
      - ✅ Checkpoint : `npm test -w @sprixe/frontend qr-code` → 0 fail
 
-9. **Real-time state sync kiosk → phone (game playing, paused, browser)**
+9. **Real-time state sync kiosk → phone (game playing, paused, browser) — broadcast obligatoire**
+   - **Scope** :
+     - `StateSync` instancié dans `main.ts` avec `broadcaster = (msg) => host.broadcast(msg)`.
+     - `host.onConnection(() => stateSync.broadcastFullState())` assure qu'un phone fraîchement connecté reçoit le screen/game/paused/volume courants.
+     - Transitions : lancement d'un jeu → `setState({ screen: "playing", game, title, paused: false, volume })`. Ouverture overlay → `setState({ screen: "paused", paused: true })`. Resume → `setState({ screen: "playing", paused: false })`. Quit → `setState({ screen: "browser", paused: false, game: "", title: "" })`. Settings audio change → broadcast `volume`.
+     - Audit 2026-04 : `StateSync` existait mais n'était jamais `new`'d → phone restait sur `kioskState: "browser"` par défaut quoi qu'il arrive. Correction : câblage ci-dessus.
    - **Tests** :
      - Vitest : `src/p2p/state-sync.test.ts` — diff-broadcast (state inchangé → 0 message), changement partiel → message contient seulement les champs modifiés, latence simulée <100ms
-     - E2E : `tests/e2e/arcade/p3-state-sync.spec.ts` — host transition browser → playing → phone affiche `state="playing"` dans <500ms
+     - E2E : `tests/e2e/arcade/p3-state-sync.spec.ts` — host transition browser → playing (press A) → pause (coin hold) → le phone `remote-state` passe par `browser` → `playing` → `paused` dans <2s à chaque saut.
      - ✅ Checkpoint : `npm test -w @sprixe/frontend state-sync && npx playwright test --project=arcade p3-state-sync` → 0 fail
 
 10. **Empty state / first boot experience (QR prominent)**
@@ -1721,7 +1786,7 @@ Le *deliverable* énoncé par chaque phase doit être couvert par **au moins un 
 
 **Validation Phase 3** : `npm test -w @sprixe/frontend && npx playwright test --project=arcade --grep="^p3-"` → 0 fail.
 
-**Deliverable**: Scan QR, send ROMs P2P, see them appear, control the borne from phone.
+**Deliverable** : scanner le QR (empty state OU Settings → Network), uploader des ROMs P2P, les voir apparaître dans le browser, et **piloter réellement la borne** depuis le phone (pause / resume / save / load / quit / volume). L'état du kiosque (browser / playing / paused + volume) se reflète en live sur le phone. Audio actif dès la première interaction DOM du kiosque (click / keydown / touchstart) ; en mode kiosk RPi avec `--autoplay-policy=no-user-gesture-required`, le son démarre d'emblée.
 
 ### Phase 4: Polish + Settings (1 week)
 **Goal**: Feature-complete V1.
@@ -1779,6 +1844,47 @@ Le *deliverable* énoncé par chaque phase doit être couvert par **au moins un 
 **Validation Phase 4** : `npm test -w @sprixe/frontend && npx playwright test --project=arcade --grep="^p4-"` → 0 fail.
 
 **Deliverable**: Full arcade frontend, all features, visually polished.
+
+### Phase 4b.8: Phone upload robustness (post-2026-04 audit, à planifier)
+
+> **Contexte** : les tests manuels d'avril 2026 ont montré que l'upload P2P iPhone → kiosque est instable — « lost connection to server » répété, même après regenerate roomId / reload phone. Causes probables (par ordre de vraisemblance) :
+> - PeerJS Cloud rate-limit (plan gratuit partagé, pics d'usage)
+> - Déconnexions réseau cellulaire ↔ Wi-Fi côté iPhone (Safari bascule entre interfaces)
+> - Pas de reconnect automatique côté PhonePage (`PeerSend.connect()` résout une fois, les drops ultérieurs laissent la conn morte jusqu'à un upload suivant qui re-ouvre).
+> - `reconnect.ts` existe côté engine-bridge mais n'est pas wired dans `PhonePage`.
+
+1. **Wire `reconnect.ts` dans `PhonePage`** — subscribe aux événements `close`/`error` de la DataConnection, relancer `connect()` avec backoff exponentiel (250 ms → 1 s → 4 s, max 3 retries). Afficher un toast `status="reconnecting"` tant que la boucle tourne.
+2. **UX phone visible** — la ligne `data-testid="phone-status"` doit refléter les états en temps réel : `Idle / Connecting / Ready / Sending {name} {pct}% / Reconnecting… / Disconnected`. Aujourd'hui c'est ad-hoc et saute des états.
+3. **Resume mid-file** — si une connexion drop pendant un chunked upload, re-reprendre au dernier chunk confirmé plutôt que relancer à zéro. Nécessite un `resumeFromChunk` dans `peer-host.ts` (actuellement les chunks manquants sont zero-filled).
+4. **Option « bring your own signaling server »** — Settings → Network → champ URL custom qui override `new Peer({ host, port, path })`. Sert aussi pour les tests E2E déterministes.
+5. **Fallback auto vers un signaling local** si PeerJS Cloud rate-limit → détection 429 / 503, swap vers `ws://localhost:9000` si un opérateur l'a démarré (RPi image pourrait en embarquer un).
+6. **Tests** :
+   - Vitest : `reconnect.test.ts` existe déjà, à étendre pour la machine à états `connect → drop → reconnect → drop → fail`.
+   - E2E : `p3-transfer-reconnect.spec.ts` — simuler un drop à mi-transfert via le PeerMock (close la MockDataConnection au chunk 50/100), vérifier que l'upload complète et que la ROM arrive intacte.
+
+**Dépendance** : rien. Peut être fait en parallèle de Phase 4b.7 (P2 support).
+**Estimation** : ~1 journée (logique de backoff + resume + tests).
+
+### Phase 4b.7: Player 2 support (post-2026-04 audit, à planifier)
+
+> **Contexte** : l'audit d'avril 2026 a révélé que le MappingScreen ne record que P1 (`mapping.p1`), et qu'un deuxième gamepad branché fonctionne accidentellement via le fallback `onGamepadConnected` du engine sans passer par une UI dédiée. Un utilisateur 2P doit aujourd'hui « deviner » que son pad est reconnu. Ce chantier rend le support P2 explicite et configurable.
+
+1. **Schema `InputMapping`** — ajouter `p2: Partial<Record<MappingRole, InputBinding>>` à côté de `p1`, avec migration depuis v1 (pas de cassure des mappings existants, juste `p2 = {}` au chargement).
+2. **Flow MappingScreen étendu** — si `navigator.getGamepads()` détecte ≥ 2 pads au moment du setup, proposer un second passage (12 prompts P2). Sinon rester sur le flow P1 actuel. Option « skip P2 » explicite.
+3. **InputManager.setGamepadMapping(1, mapping)** — déjà exposé, à appeler depuis `PlayingScreen.create` avec `mappingToEngineGamepadMapping(mapping.p2)`.
+4. **Fallback `getGamepad` symétrique** — étendre le rescue 2026-04 à P2 : si `playerGamepad[1]` est null **et** qu'un pad différent de celui de P1 est connecté, l'assigner automatiquement à P2.
+5. **Settings → Controls** — ajouter :
+   - un sélecteur `P1 pad` / `P2 pad` (liste des gamepads connectés avec nom lisible) pour réassigner manuellement.
+   - un bouton `Remap P2` séparé de `Reset mapping` qui relance le flow uniquement pour P2.
+6. **Coin-hold contextuel** — ne doit s'ouvrir en Settings QUE si déclenché par P1 (sinon en 2P en cours de partie, P2 pourrait ouvrir Settings et casser la session). P2 coin-hold = pause overlay (si en jeu) uniquement. Distinguer le coin-hold P1 / P2 dans `GamepadNav` (actuellement uniquement P1).
+7. **Tests** :
+   - Vitest : `mapping-store.test.ts` — round-trip d'un mapping P1+P2, migration depuis v1-p1-only.
+   - E2E : `p4b-p2-mapping.spec.ts` — seed 2 pads (fake Gamepad API), lancer reset mapping, vérifier que le flow demande P1 puis P2.
+   - Vitest : `input/input.test.ts` engine — deux pads distincts → `readPlayerLow(0)` et `readPlayerLow(1)` lisent indépendamment leurs propres indices.
+8. **Plan** — post-mortem inline dans §2.3 et §5.4 sur le fallback de l'engine (bug initial 2026-04 où P1 était correct mais P2 voyait les mêmes presses).
+
+**Dépendance** : rien. Ce chantier peut être fait en parallèle d'autres.
+**Estimation** : ~1/2 journée de code + tests.
 
 ### Phase 5: RPi Image — `@sprixe/image` (1 week)
 **Goal**: Flashable SD card (thin client) via `make image`.
