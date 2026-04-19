@@ -58,13 +58,20 @@ export async function seedDefaultMapping(page: Page): Promise<void> {
  */
 export async function installGamepadMockOnly(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    let pad: Gamepad | null = null;
+    // Pad is always present with all buttons released — mirrors real
+    // controllers that stay connected between presses. A null-pad
+    // default would make the very first live-pad tick coincide with
+    // the test's first press, and GamepadNav's start() baseline (which
+    // swallows stuck-button reports from BT controllers like Xbox with
+    // Start wedged) would eat it silently.
+    let activeIdx: number | null = null;
     let activeTimer: number | null = null;
 
-    const snapshot = (idx: number): Gamepad => {
+    const snapshot = (idx: number | null): Gamepad => {
       const buttons = [] as GamepadButton[];
       for (let i = 0; i < 16; i++) {
-        buttons[i] = { pressed: i === idx, touched: i === idx, value: i === idx ? 1 : 0 } as GamepadButton;
+        const pressed = i === idx;
+        buttons[i] = { pressed, touched: pressed, value: pressed ? 1 : 0 } as GamepadButton;
       }
       return {
         id: "mock",
@@ -87,19 +94,19 @@ export async function installGamepadMockOnly(page: Page): Promise<void> {
 
     (window as unknown as { __pressButton: (idx: number, ms?: number) => void }).__pressButton = (idx, ms = 50) => {
       clearActive();
-      pad = snapshot(idx);
+      activeIdx = idx;
       activeTimer = window.setTimeout(() => {
-        pad = null;
+        activeIdx = null;
         activeTimer = null;
       }, ms);
     };
 
     (window as unknown as { __holdButton: (idx: number, ms: number) => Promise<void> }).__holdButton = (idx, ms) => {
       clearActive();
-      pad = snapshot(idx);
+      activeIdx = idx;
       return new Promise<void>((r) => {
         activeTimer = window.setTimeout(() => {
-          pad = null;
+          activeIdx = null;
           activeTimer = null;
           r();
         }, ms);
@@ -107,7 +114,7 @@ export async function installGamepadMockOnly(page: Page): Promise<void> {
     };
 
     Object.defineProperty(navigator, "getGamepads", {
-      value: () => [pad, null, null, null] as (Gamepad | null)[],
+      value: () => [snapshot(activeIdx), null, null, null] as (Gamepad | null)[],
       configurable: true,
     });
   });
