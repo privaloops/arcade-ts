@@ -6,15 +6,25 @@
  * pressed: first repeat after `repeatDelay`, subsequent repeats every
  * `repeatRate`.
  *
- * Buttons not present in the mapping are ignored — prevents ghost emissions
- * on exotic arcade encoders that report spurious button indices.
+ * Bindings are typed: each nav action resolves to either a button index
+ * (`{ kind: "button", index }`) or an analogue axis threshold
+ * (`{ kind: "axis", index, dir, threshold? }`). This is how the first-boot
+ * mapping screen can record up/down on a joystick Y-axis without the
+ * menu going silent.
  *
  * Coin-hold detection (for opening the pause menu) lives here too: the
- * mapped coin button fires `coin-hold` exactly once after 1 s of sustained
+ * mapped coin binding fires `coin-hold` exactly once after 1 s of sustained
  * press. The normal down-edge on coin is suppressed so gameplay doesn't
  * eat a coin insert when the user actually meant to pause.
  */
 
+/**
+ * Frontend menu actions. The set deliberately mirrors the arcade
+ * surface: directions, a confirm/back pair (derived from the 1st/2nd
+ * play buttons), a context-menu action (3rd play button), settings
+ * (Start), and the coin-hold used by the pause overlay. No bespoke
+ * "menu buttons" — the arcade stick drives the whole UI.
+ */
 export type NavAction =
   | "up"
   | "down"
@@ -22,43 +32,60 @@ export type NavAction =
   | "right"
   | "confirm"
   | "back"
-  | "favorite"
-  | "settings"
+  | "context-menu"
+  | "start"
   | "bumper-left"
   | "bumper-right"
   | "coin-hold";
 
-/** Maps semantic nav actions onto standard-gamepad button indices. */
-export interface ButtonMapping {
-  up: number;
-  down: number;
-  left: number;
-  right: number;
-  confirm: number;
-  back: number;
-  favorite: number;
-  settings: number;
-  bumperLeft: number;
-  bumperRight: number;
-  coin: number;
+export type NavBinding =
+  | { kind: "button"; index: number }
+  | { kind: "axis"; index: number; dir: -1 | 1; threshold?: number };
+
+/**
+ * Maps semantic nav actions onto gamepad buttons or axes. `null` means
+ * the action is disabled — the physical button/axis can still be pressed,
+ * it just won't emit anything. This is how we avoid firing actions on
+ * buttons the user never mapped.
+ */
+export interface NavBindings {
+  up: NavBinding | null;
+  down: NavBinding | null;
+  left: NavBinding | null;
+  right: NavBinding | null;
+  confirm: NavBinding | null;
+  back: NavBinding | null;
+  contextMenu: NavBinding | null;
+  start: NavBinding | null;
+  bumperLeft: NavBinding | null;
+  bumperRight: NavBinding | null;
+  coin: NavBinding | null;
 }
 
-export const DEFAULT_MAPPING: ButtonMapping = {
-  up: 12,            // D-pad up
-  down: 13,          // D-pad down
-  left: 14,          // D-pad left
-  right: 15,         // D-pad right
-  confirm: 0,        // A / cross
-  back: 1,           // B / circle
-  favorite: 3,       // Y / triangle
-  settings: 9,       // Start
-  bumperLeft: 4,     // LB / L1
-  bumperRight: 5,    // RB / R1
-  coin: 8,           // Select
+const btn = (index: number): NavBinding => ({ kind: "button", index });
+
+/**
+ * Defaults for users who haven't gone through the MappingScreen yet
+ * (first boot before prompts complete). Mirrors the Xbox standard
+ * gamepad: A = confirm, B = back, X = context menu, Start = settings,
+ * Select = coin. Once a user mapping exists these are overridden.
+ */
+export const DEFAULT_BINDINGS: NavBindings = {
+  up: btn(12),             // D-pad up
+  down: btn(13),           // D-pad down
+  left: btn(14),           // D-pad left
+  right: btn(15),          // D-pad right
+  confirm: btn(0),         // A — Button 1 (LP)
+  back: btn(1),            // B — Button 2 (MP)
+  contextMenu: btn(2),     // X — Button 3 (HP)
+  bumperLeft: btn(4),      // LB — Button 5 (MK) — switches tabs in Settings
+  bumperRight: btn(5),     // RB — Button 6 (HK)
+  start: btn(9),           // Start — secondary launch in browser
+  coin: btn(8),            // Select — coin-hold = pause / Settings
 };
 
 export interface GamepadNavOptions {
-  mapping?: Partial<ButtonMapping>;
+  bindings?: Partial<NavBindings>;
   /** Delay before the first key-repeat fires (ms). */
   repeatDelay?: number;
   /** Interval between repeats once repeating starts (ms). */
@@ -74,14 +101,31 @@ interface ButtonState {
   lastRepeatAt: number;
 }
 
+const DEFAULT_AXIS_THRESHOLD = 0.5;
+
+function bindingKey(binding: NavBinding): string {
+  return binding.kind === "button"
+    ? `btn-${binding.index}`
+    : `axis-${binding.index}-${binding.dir}`;
+}
+
+function readBinding(pad: Gamepad, binding: NavBinding): boolean {
+  if (binding.kind === "button") {
+    return Boolean(pad.buttons[binding.index]?.pressed);
+  }
+  const value = pad.axes[binding.index] ?? 0;
+  const threshold = binding.threshold ?? DEFAULT_AXIS_THRESHOLD;
+  return binding.dir < 0 ? value <= -threshold : value >= threshold;
+}
+
 export class GamepadNav {
-  private readonly mapping: ButtonMapping;
+  private readonly bindings: NavBindings;
   private readonly repeatDelay: number;
   private readonly repeatRate: number;
   private readonly coinHoldMs: number;
 
   private readonly listeners = new Set<Listener>();
-  private readonly button: Map<number, ButtonState> = new Map();
+  private readonly state: Map<string, ButtonState> = new Map();
   /** Tracks which action keys are allowed to repeat. `coin-hold` is one-shot. */
   private readonly repeatable: ReadonlySet<NavAction> = new Set([
     "up",
@@ -95,7 +139,7 @@ export class GamepadNav {
   private coinHoldFired = false;
 
   constructor(options: GamepadNavOptions = {}) {
-    this.mapping = { ...DEFAULT_MAPPING, ...options.mapping };
+    this.bindings = { ...DEFAULT_BINDINGS, ...options.bindings };
     this.repeatDelay = options.repeatDelay ?? 250;
     this.repeatRate = options.repeatRate ?? 80;
     this.coinHoldMs = options.coinHoldMs ?? 1000;
@@ -113,7 +157,7 @@ export class GamepadNav {
       cancelAnimationFrame(this.rafId);
       this.rafId = null;
     }
-    this.button.clear();
+    this.state.clear();
     this.coinHoldFired = false;
   }
 
@@ -129,26 +173,22 @@ export class GamepadNav {
     const pads = navigator.getGamepads?.() ?? [];
     const pad = pads.find((p): p is Gamepad => p !== null && p.connected !== false) ?? null;
     if (!pad) {
-      // No pad plugged in → drop all state so a reconnect starts fresh.
-      this.button.clear();
+      this.state.clear();
       this.coinHoldFired = false;
       return;
     }
 
-    for (const [action, idx] of this.mappedEntries()) {
-      const isPressed = Boolean(pad.buttons[idx]?.pressed);
-      const existing = this.button.get(idx);
+    for (const [action, binding] of this.mappedEntries()) {
+      if (binding === null) continue;
+      const key = bindingKey(binding);
+      const isPressed = readBinding(pad, binding);
+      const existing = this.state.get(key);
 
       if (isPressed && !existing) {
-        // Down-edge
-        this.button.set(idx, { pressedAt: now, lastRepeatAt: now });
-        if (action === "coin-hold") {
-          // Don't fire on press — wait for hold threshold.
-          continue;
-        }
+        this.state.set(key, { pressedAt: now, lastRepeatAt: now });
+        if (action === "coin-hold") continue;
         this.emit(action);
       } else if (isPressed && existing) {
-        // Held
         if (action === "coin-hold") {
           if (!this.coinHoldFired && now - existing.pressedAt >= this.coinHoldMs) {
             this.coinHoldFired = true;
@@ -160,21 +200,14 @@ export class GamepadNav {
         const heldFor = now - existing.pressedAt;
         if (heldFor < this.repeatDelay) continue;
         const sinceLastRepeat = now - existing.lastRepeatAt;
-        // First repeat is delayed by repeatDelay since press; subsequent repeats every repeatRate.
         const interval = existing.lastRepeatAt === existing.pressedAt ? this.repeatDelay : this.repeatRate;
         if (sinceLastRepeat >= interval) {
           existing.lastRepeatAt = now;
           this.emit(action);
         }
       } else if (!isPressed && existing) {
-        // Release
-        this.button.delete(idx);
-        if (action === "coin-hold") {
-          // If released before the hold threshold, emit the normal tap
-          // (subscribers that care about the coin tap react to "coin-tap";
-          // GamepadNav is menu-only, so we just clear state).
-          this.coinHoldFired = false;
-        }
+        this.state.delete(key);
+        if (action === "coin-hold") this.coinHoldFired = false;
       }
     }
   }
@@ -187,23 +220,20 @@ export class GamepadNav {
     });
   }
 
-  /**
-   * Iterates the mapping as (action, buttonIndex) pairs. The Map preserves
-   * insertion order, so unit tests can rely on deterministic ordering.
-   */
-  private *mappedEntries(): Iterable<[NavAction, number]> {
-    const m = this.mapping;
-    yield ["up", m.up];
-    yield ["down", m.down];
-    yield ["left", m.left];
-    yield ["right", m.right];
-    yield ["confirm", m.confirm];
-    yield ["back", m.back];
-    yield ["favorite", m.favorite];
-    yield ["settings", m.settings];
-    yield ["bumper-left", m.bumperLeft];
-    yield ["bumper-right", m.bumperRight];
-    yield ["coin-hold", m.coin];
+  /** Yields (action, binding) pairs. Map preserves insertion order. */
+  private *mappedEntries(): Iterable<[NavAction, NavBinding | null]> {
+    const b = this.bindings;
+    yield ["up", b.up];
+    yield ["down", b.down];
+    yield ["left", b.left];
+    yield ["right", b.right];
+    yield ["confirm", b.confirm];
+    yield ["back", b.back];
+    yield ["context-menu", b.contextMenu];
+    yield ["bumper-left", b.bumperLeft];
+    yield ["bumper-right", b.bumperRight];
+    yield ["start", b.start];
+    yield ["coin-hold", b.coin];
   }
 
   private emit(action: NavAction): void {

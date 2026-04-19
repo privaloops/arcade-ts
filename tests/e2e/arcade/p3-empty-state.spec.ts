@@ -23,8 +23,8 @@ test.describe("Phase 3 — empty state", () => {
           p1: {
             coin: { kind: "button", index: 8 },
             start: { kind: "button", index: 9 },
-            up: { kind: "axis", index: 1, dir: -1 },
-            down: { kind: "axis", index: 1, dir: 1 },
+            up: { kind: "button", index: 12 },
+            down: { kind: "button", index: 13 },
             confirm: { kind: "button", index: 0 },
             back: { kind: "button", index: 1 },
           },

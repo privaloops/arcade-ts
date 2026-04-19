@@ -14,7 +14,9 @@
  */
 
 const DB_NAME = "sprixe-arcade";
-const DB_VERSION = 4; // Phase 4b.2c: bumped to heal v3 DBs that landed without 'media'
+// Must match rom-db.ts + save-state-db.ts — bumped to 5 when RomRecord
+// gained its `kind` field (Phase 2 real-emulator wiring).
+const DB_VERSION = 5;
 const STORE_MEDIA = "media";
 
 export interface MediaRecord {

@@ -59,37 +59,39 @@ export class SaveStateController {
     }
   }
 
-  async save(): Promise<void> {
+  async save(slotOverride?: number): Promise<void> {
     if (!this.emulator.saveState) {
       this.toast.show("info", "Save state unavailable");
       return;
     }
-    const buf = this.emulator.saveState();
-    if (!buf) {
-      this.toast.show("info", "Nothing to save yet");
-      return;
-    }
+    const slot = slotOverride ?? this.slot;
     try {
-      await this.db.save(this.gameId, this.slot, buf);
-      this.toast.show("success", `Saved slot ${this.slot + 1}`);
+      const buf = await this.emulator.saveState();
+      if (!buf) {
+        this.toast.show("info", "Nothing to save yet");
+        return;
+      }
+      await this.db.save(this.gameId, slot, buf);
+      this.toast.show("success", `Saved slot ${slot + 1}`);
     } catch (e) {
       this.toast.show("error", `Save failed: ${describe(e)}`);
     }
   }
 
-  async load(): Promise<void> {
+  async load(slotOverride?: number): Promise<void> {
     if (!this.emulator.loadState) {
       this.toast.show("info", "Load state unavailable");
       return;
     }
+    const slot = slotOverride ?? this.slot;
     try {
-      const rec = await this.db.load(this.gameId, this.slot);
+      const rec = await this.db.load(this.gameId, slot);
       if (!rec) {
-        this.toast.show("info", `Slot ${this.slot + 1} empty`);
+        this.toast.show("info", `Slot ${slot + 1} empty`);
         return;
       }
       const ok = this.emulator.loadState(rec.data);
-      if (ok) this.toast.show("success", `Loaded slot ${this.slot + 1}`);
+      if (ok) this.toast.show("success", `Loaded slot ${slot + 1}`);
       else this.toast.show("error", "Load failed");
     } catch (e) {
       this.toast.show("error", `Load failed: ${describe(e)}`);

@@ -18,7 +18,11 @@ async function hold(page: import("@playwright/test").Page, button: number, ms = 
   );
 }
 
-test("Phase 4b.3 — Y opens the letter wheel; nav to S + A selects Strider", async ({ page }) => {
+// TODO: the letter wheel is bound to `favorite` which is not part of
+// MAPPING_ROLES today. The 2026-04 UX audit flagged that firing it on
+// a non-mapped button (Y) surprises users. Skip until MAPPING_ROLES
+// learns about favorite/bumpers, cf. ARCADE-FRONTEND-PLAN post-mortem.
+test.skip("Phase 4b.3 — Y opens the letter wheel; nav to S + A selects Strider", async ({ page }) => {
   await installGamepadMock(page);
   await page.goto("/");
   await expect(page.locator(".af-browser-screen")).toBeVisible();

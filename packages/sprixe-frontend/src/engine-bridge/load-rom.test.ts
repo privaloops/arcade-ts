@@ -49,6 +49,22 @@ async function emptyZip(): Promise<ArrayBuffer> {
   return blob.buffer.slice(blob.byteOffset, blob.byteOffset + blob.byteLength) as ArrayBuffer;
 }
 
+/**
+ * Build a Neo-Geo BIOS shaped ZIP — recognised by the sp-s2.sp1 / sp-s.sp1
+ * system ROM. We don't ship the real BIOS (DMCA), so the test only asserts
+ * identification, not execution.
+ */
+async function mockNeoGeoBiosZip(): Promise<ArrayBuffer> {
+  const zip = new JSZip();
+  const pad = (size: number) => new Uint8Array(size);
+  zip.file("sp-s2.sp1", pad(128 * 1024));
+  zip.file("sfix.sfix", pad(128 * 1024));
+  zip.file("000-lo.lo", pad(65536));
+  zip.file("sm1.sm1", pad(128 * 1024));
+  const blob = await zip.generateAsync({ type: "uint8array" });
+  return blob.buffer.slice(blob.byteOffset, blob.byteOffset + blob.byteLength) as ArrayBuffer;
+}
+
 describe("identifyRom", () => {
   it("identifies the test.zip fixture as CPS-1", async () => {
     const data = await bufferFromFixture();
@@ -58,10 +74,25 @@ describe("identifyRom", () => {
     expect(result.fileNames.length).toBeGreaterThan(0);
   });
 
-  it("identifies a Neo-Geo-shaped ZIP as neogeo", async () => {
+  it("identifies a Neo-Geo-shaped ZIP as neogeo game", async () => {
     const data = await mockNeoGeoZip();
     const result = await identifyRom(data);
     expect(result.system).toBe("neogeo");
+    expect(result.kind).toBe("game");
+  });
+
+  it("identifies a Neo-Geo BIOS ZIP as kind=bios with setName=neogeo", async () => {
+    const data = await mockNeoGeoBiosZip();
+    const result = await identifyRom(data);
+    expect(result.system).toBe("neogeo");
+    expect(result.kind).toBe("bios");
+    expect(result.setName).toBe("neogeo");
+  });
+
+  it("identifies the test.zip fixture as a CPS-1 game (kind=game)", async () => {
+    const data = await bufferFromFixture();
+    const result = await identifyRom(data);
+    expect(result.kind).toBe("game");
   });
 
   it("throws InvalidRomError on bad ZIP magic", async () => {

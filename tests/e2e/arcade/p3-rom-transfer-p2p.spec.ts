@@ -146,8 +146,8 @@ async function seedDefaultMappingOnContext(context: import("@playwright/test").B
         p1: {
           coin: { kind: "button", index: 8 },
           start: { kind: "button", index: 9 },
-          up: { kind: "axis", index: 1, dir: -1 },
-          down: { kind: "axis", index: 1, dir: 1 },
+          up: { kind: "button", index: 12 },
+          down: { kind: "button", index: 13 },
           confirm: { kind: "button", index: 0 },
           back: { kind: "button", index: 1 },
         },
@@ -175,7 +175,11 @@ test.describe("Phase 3 — P2P ROM transfer (two contexts + BroadcastChannel)", 
     const dropzone = page.locator('[data-testid="upload-dropzone"]');
     await expect(dropzone).toBeVisible();
     const status = page.locator('[data-testid="phone-status"]');
-    await expect(status).toHaveText("Idle");
+    // PhonePage now eagerly connects on mount (Phase 3.9 state sync).
+    // The status cycles through Connecting → Ready very fast; before
+    // that cycle lands a sub-match of any of the expected states is
+    // enough to prove the page mounted.
+    await expect(status).toHaveText(/Idle|Connecting|Ready/);
     await expect(page.locator('[data-testid="phone-page"]')).toHaveAttribute("data-room-id", ROOM_ID);
 
     await context.close();

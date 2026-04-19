@@ -396,10 +396,27 @@ export class InputManager {
   }
 
   private getGamepad(player: number): Gamepad | null {
-    const idx = this.playerGamepad[player === 1 ? 1 : 0];
-    if (idx === null) return null;
+    const playerIdx = player === 1 ? 1 : 0;
+    const idx = this.playerGamepad[playerIdx];
     const gamepads = navigator.getGamepads();
-    return gamepads[idx] ?? null;
+    if (idx !== null) return gamepads[idx] ?? null;
+    // Fallback for P1 only: browsers fire `gamepadconnected` exactly
+    // once per pad, so if our listener was attached after the first
+    // press (e.g. InputManager is instantiated on game launch), the
+    // event was missed and playerGamepad[0] stays null forever. Scan
+    // the live gamepads list once — the first connected pad is
+    // assigned lazily and pinned. P2 must stay unassigned (null →
+    // keyboard-only) so a single pad doesn't drive both players.
+    if (playerIdx !== 0) return null;
+    const p2Idx = this.playerGamepad[1];
+    for (const gp of gamepads) {
+      if (!gp || gp.connected === false) continue;
+      if (gp.index === p2Idx) continue; // already held by P2
+      this.playerGamepad[0] = gp.index;
+      this.knownGamepads.set(gp.index, (gp.id.split("(")[0] ?? gp.id).trim());
+      return gp;
+    }
+    return null;
   }
 
   /** Assign a gamepad to a player. null = keyboard only. */

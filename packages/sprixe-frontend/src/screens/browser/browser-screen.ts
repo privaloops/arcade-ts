@@ -112,11 +112,11 @@ export class BrowserScreen {
       case "confirm":
         this.list.confirm();
         return true;
-      case "bumper-right":
-        this.filterBar.next();
-        return true;
-      case "bumper-left":
+      case "left":
         this.filterBar.previous();
+        return true;
+      case "right":
+        this.filterBar.next();
         return true;
       default:
         return false;

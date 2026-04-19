@@ -250,6 +250,14 @@ export class AudioOutput {
   private ringBuffer: RingBuffer | null = null;
   private workletNode: AudioWorkletNode | null = null;
   private scriptProcessorOutput: ScriptProcessorOutput | null = null;
+  /**
+   * Inserted between the workletNode (or ScriptProcessor) and
+   * ctx.destination so setVolume() affects the actual output stream.
+   * The legacy `_volume` applied inside pushSamples/_mix only fires on
+   * the ScriptProcessor mix path — with SharedArrayBuffer the worker
+   * writes straight to the ring buffer and bypasses that multiply.
+   */
+  private masterGain: GainNode | null = null;
 
   /** Resampler for each channel type (created after context is known) */
   private ymResamplerL: LinearResampler | null = null;
@@ -443,6 +451,13 @@ export class AudioOutput {
   /** Set master volume (0.0 = silent, 1.0 = full). Clamped automatically. */
   setVolume(vol: number): void {
     this._volume = Math.max(0, Math.min(1, vol));
+    // The legacy `_volume` multiply lives on the ScriptProcessor mix
+    // path; the AudioWorklet path has no such hook, so the value is
+    // applied via a shared GainNode inserted in front of the output.
+    if (this.masterGain && this.context) {
+      // Ramp to avoid zipper noise on fast slider drags.
+      this.masterGain.gain.setTargetAtTime(this._volume, this.context.currentTime, 0.01);
+    }
   }
 
   /** Suspend audio output (e.g. when tab is hidden). */
@@ -505,7 +520,9 @@ export class AudioOutput {
     // Send the SharedArrayBuffer to the worklet
     this.workletNode.port.postMessage({ type: 'init', sab: this.sab });
 
-    this.workletNode.connect(ctx.destination);
+    this.masterGain = ctx.createGain();
+    this.masterGain.gain.value = this._volume;
+    this.workletNode.connect(this.masterGain).connect(ctx.destination);
   }
 
   private _initScriptProcessor(): void {

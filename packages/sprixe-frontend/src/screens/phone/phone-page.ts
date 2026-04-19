@@ -99,6 +99,15 @@ export class PhonePage {
 
     container.appendChild(this.root);
     this.setActiveTab("upload");
+
+    // Establish the PeerSend connection eagerly so the RemoteTab sees
+    // live 'state' / 'volume' / 'save-slots' messages from the kiosk
+    // even before the user switches to the Remote tab. The
+    // disconnection is cheap; the upside is the phone always reflects
+    // what the kiosk is actually doing.
+    void this.ensureConnected().catch(() => {
+      // Status bar already surfaces the failure for the user.
+    });
   }
 
   getUploadTab(): UploadTab {

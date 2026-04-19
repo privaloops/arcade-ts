@@ -13,6 +13,7 @@
 
 import {
   MAPPING_ROLES,
+  MAPPING_ROLE_LABELS,
   type MappingRole,
   type InputBinding,
   type InputMapping,
@@ -21,16 +22,7 @@ import {
 } from "../../input/mapping-store";
 import { InputCapture } from "../../input/input-capture";
 
-const ROLE_LABELS: Record<MappingRole, string> = {
-  coin: "COIN",
-  start: "1P START",
-  up: "↑ UP",
-  down: "↓ DOWN",
-  left: "← LEFT",
-  right: "→ RIGHT",
-  confirm: "Btn1 (Confirm)",
-  back: "Btn2 (Back)",
-};
+const ROLE_LABELS: Record<MappingRole, string> = MAPPING_ROLE_LABELS;
 
 function formatBinding(binding: InputBinding): string {
   switch (binding.kind) {

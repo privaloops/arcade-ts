@@ -153,7 +153,7 @@ describe("LetterWheel", () => {
 
   it("unrelated actions are ignored while open", () => {
     wheel.open();
-    expect(wheel.handleNavAction("settings")).toBe(false);
+    expect(wheel.handleNavAction("start")).toBe(false);
     expect(wheel.isOpen()).toBe(true);
   });
 

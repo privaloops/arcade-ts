@@ -30,10 +30,10 @@ export const STANDARD_LABELS: ButtonLabels = {
   right: "→",
   confirm: "Btn1",
   back: "Btn2",
-  favorite: "Btn4",
-  settings: "Start",
-  "bumper-left": "LB",
-  "bumper-right": "RB",
+  "context-menu": "Btn3",
+  "bumper-left": "Btn5",
+  "bumper-right": "Btn6",
+  start: "Start",
   "coin-hold": "Coin-hold",
 };
 
@@ -41,9 +41,7 @@ export const CONTEXT_HINTS: Record<HintContext, readonly Hint[]> = {
   browser: [
     { action: "down", label: "Navigate" },
     { action: "confirm", label: "Play" },
-    { action: "favorite", label: "Favorite" },
-    { action: "bumper-right", label: "A-Z" },
-    { action: "settings", label: "Settings" },
+    { action: "coin-hold", label: "Settings" },
   ],
   paused: [
     { action: "down", label: "Navigate" },

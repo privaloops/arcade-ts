@@ -178,4 +178,36 @@ export function getNumSlots(): number {
   return NUM_SLOTS;
 }
 
+// ── Buffer-based API (arcade frontend / IndexedDB) ───────────────────────
+
+/**
+ * Serialize a SaveState to an opaque ArrayBuffer. Mirrors the JSON shape
+ * used by saveToSlot() so captures taken from one channel can be
+ * re-imported via the other.
+ */
+export function serializeSaveState(state: SaveState): ArrayBuffer {
+  const serializable = { ...state, m68k: serializeCpuState(state.m68k) };
+  const json = JSON.stringify(serializable);
+  return new TextEncoder().encode(json).buffer as ArrayBuffer;
+}
+
+export function deserializeSaveState(buf: ArrayBuffer): SaveState | null {
+  try {
+    const json = new TextDecoder().decode(new Uint8Array(buf));
+    const raw = JSON.parse(json) as Record<string, unknown>;
+    if ((raw["version"] as number) !== SAVE_STATE_VERSION) return null;
+    if (typeof raw["gameName"] !== 'string' ||
+        typeof raw["timestamp"] !== 'number' ||
+        typeof raw["workRam"] !== 'string' ||
+        typeof raw["vram"] !== 'string' ||
+        !raw["m68k"] || !raw["z80"]) {
+      return null;
+    }
+    raw["m68k"] = deserializeCpuState(raw["m68k"] as Record<string, unknown>);
+    return raw as unknown as SaveState;
+  } catch {
+    return null;
+  }
+}
+
 export { SAVE_STATE_VERSION };

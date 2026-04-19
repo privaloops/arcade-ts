@@ -10,8 +10,10 @@ import { installGamepadMock } from "./_helpers/gamepad";
 async function pressSettings(page: import("@playwright/test").Page): Promise<void> {
   await page.evaluate(async () => {
     const hold = (window as unknown as { __holdButton: (n: number, ms: number) => Promise<void> }).__holdButton;
-    // Button 9 = Start → NavAction 'settings' in default mapping.
-    await hold(9, 120);
+    // Button 8 = Coin. Holding it ≥ 1 s emits `coin-hold` which opens
+    // Settings on the browser screen (contextual — in-game it toggles
+    // the pause overlay). This is the 2026-04 arcade-doctrine gesture.
+    await hold(8, 1200);
     await new Promise((r) => setTimeout(r, 60));
   });
 }

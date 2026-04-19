@@ -33,7 +33,7 @@ describe("MappingScreen", () => {
     capture.tick();
   }
 
-  it("sequentially captures the 6 default roles and fires onComplete with a full mapping", () => {
+  it("sequentially captures the 12 arcade roles and fires onComplete with a full mapping", () => {
     const capture = new InputCapture();
     const onComplete = vi.fn();
     const screen = new MappingScreen(container, { capture, onComplete });
@@ -41,18 +41,25 @@ describe("MappingScreen", () => {
     // Baseline: no pad. advance() armed capture on the first role ('coin').
     expect(screen.getCurrentRole()).toBe("coin");
 
+    // 12 roles: coin, start, up, down, left, right, button1..button6.
+    // One distinct button per prompt (up/down also use axis variants).
     const binds: Array<[number[] | undefined, number[] | undefined]> = [
-      [[8], undefined],   // coin → button 8
-      [[9], undefined],   // start → button 9
-      [undefined, [0, -0.9, 0, 0]], // up → axis 1 dir -1
-      [undefined, [0, 0.9, 0, 0]],  // down → axis 1 dir +1
-      [[0], undefined],   // confirm → button 0
-      [[1], undefined],   // back → button 1
+      [[8], undefined],                // coin
+      [[9], undefined],                // start
+      [undefined, [0, -0.9, 0, 0]],    // up (axis 1 dir -1)
+      [undefined, [0, 0.9, 0, 0]],     // down (axis 1 dir +1)
+      [[14], undefined],               // left
+      [[15], undefined],               // right
+      [[0], undefined],                // button1
+      [[1], undefined],                // button2
+      [[2], undefined],                // button3
+      [[3], undefined],                // button4
+      [[4], undefined],                // button5
+      [[5], undefined],                // button6
     ];
 
     for (const [pressed, axes] of binds) {
       runCaptureWithPad(capture, gamepadWith({ pressed, axes }));
-      // Releasing the input clears snapshot for the next capture.
       runCaptureWithPad(capture, gamepadWith({}));
     }
 
@@ -64,8 +71,8 @@ describe("MappingScreen", () => {
     expect(mapping.p1.start).toEqual({ kind: "button", index: 9 });
     expect(mapping.p1.up).toEqual({ kind: "axis", index: 1, dir: -1 });
     expect(mapping.p1.down).toEqual({ kind: "axis", index: 1, dir: 1 });
-    expect(mapping.p1.confirm).toEqual({ kind: "button", index: 0 });
-    expect(mapping.p1.back).toEqual({ kind: "button", index: 1 });
+    expect(mapping.p1.button1).toEqual({ kind: "button", index: 0 });
+    expect(mapping.p1.button6).toEqual({ kind: "button", index: 5 });
     expect(screen.getCurrentRole()).toBeNull();
   });
 
@@ -75,9 +82,8 @@ describe("MappingScreen", () => {
     new MappingScreen(container, { capture, onComplete });
 
     for (const role of MAPPING_ROLES) {
-      void role;
-      // Fire a distinct button for each prompt so none duplicates.
-      const idx = MAPPING_ROLES.indexOf(role) + 2; // 2,3,4,5,6,7
+      // Fire a distinct button for each prompt (16 possible, 12 used).
+      const idx = MAPPING_ROLES.indexOf(role);
       runCaptureWithPad(capture, gamepadWith({ pressed: [idx] }));
       runCaptureWithPad(capture, gamepadWith({}));
     }
@@ -86,8 +92,8 @@ describe("MappingScreen", () => {
     const stored = loadMapping();
     expect(stored).not.toBeNull();
     expect(stored!.type).toBe("gamepad");
-    expect(stored!.p1.coin).toEqual({ kind: "button", index: 2 });
-    expect(stored!.p1.back).toEqual({ kind: "button", index: 7 });
+    expect(stored!.p1.coin).toEqual({ kind: "button", index: 0 });
+    expect(stored!.p1.button6).toEqual({ kind: "button", index: 11 });
   });
 
   it("refuses a duplicate binding and keeps the prompt active", () => {
@@ -134,7 +140,7 @@ describe("MappingScreen", () => {
   it("respects a custom roles list", () => {
     const capture = new InputCapture();
     const onComplete = vi.fn();
-    const roles: readonly MappingRole[] = ["coin", "confirm"];
+    const roles: readonly MappingRole[] = ["coin", "button1"];
     new MappingScreen(container, { capture, onComplete, roles });
 
     runCaptureWithPad(capture, gamepadWith({ pressed: [8] }));
@@ -144,13 +150,13 @@ describe("MappingScreen", () => {
 
     expect(onComplete).toHaveBeenCalledTimes(1);
     const m = onComplete.mock.calls[0]![0];
-    expect(Object.keys(m.p1)).toEqual(["coin", "confirm"]);
+    expect(Object.keys(m.p1)).toEqual(["coin", "button1"]);
   });
 
   it("keyboard mode flips the mapping type when the first binding is a key", () => {
     const capture = new InputCapture();
     const onComplete = vi.fn();
-    const screen = new MappingScreen(container, { capture, onComplete, roles: ["coin", "confirm"] as const });
+    const screen = new MappingScreen(container, { capture, onComplete, roles: ["coin", "button1"] as const });
     void screen;
 
     // Simulate a keydown — not via the capture.tick (no pad), but

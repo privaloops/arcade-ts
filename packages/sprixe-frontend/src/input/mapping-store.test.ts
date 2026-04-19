@@ -33,7 +33,7 @@ describe("mapping-store", () => {
       const mapping: InputMapping = {
         version: 1,
         type: "keyboard",
-        p1: { confirm: { kind: "key", code: "Enter" } },
+        p1: { button1: { kind: "key", code: "Enter" } },
       };
       saveMapping(mapping);
       expect(loadMapping()).toEqual(mapping);

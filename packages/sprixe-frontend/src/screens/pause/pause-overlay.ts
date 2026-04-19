@@ -24,9 +24,12 @@ export interface EmulatorHandle {
   pause(): void;
   resume(): void;
   isPaused?(): boolean;
-  /** Phase 4b.polish: optional snapshot hooks. The mock emulator
-   * implements them; the real engine wiring arrives with Phase 5. */
-  saveState?(): ArrayBuffer | null;
+  /**
+   * Optional snapshot hooks. saveState is async because the engine has
+   * to drain its Web Audio Worker state before it can return a frozen
+   * copy. Runners that don't support snapshots yet (Neo-Geo) omit both.
+   */
+  saveState?(): Promise<ArrayBuffer | null>;
   loadState?(data: ArrayBuffer): boolean;
 }
 
@@ -205,6 +208,12 @@ export class PauseOverlay {
       case "down":
         this.moveSelection(1);
         return true;
+      case "left":
+        this.adjustVolume(-5);
+        return true;
+      case "right":
+        this.adjustVolume(5);
+        return true;
       case "confirm":
         this.activate(this.getSelectedAction());
         return true;
@@ -215,6 +224,20 @@ export class PauseOverlay {
       default:
         return false;
     }
+  }
+
+  /**
+   * Nudge the master volume in 5 % increments. The slider fires the
+   * same 'input' event browsers emit on keyboard arrows, so the
+   * SettingsStore subscriber persists the new value just like a drag.
+   */
+  private adjustVolume(delta: number): void {
+    if (!this.volumeSlider) return;
+    const current = Number(this.volumeSlider.value) || 0;
+    const next = Math.max(0, Math.min(100, current + delta));
+    if (next === current) return;
+    this.volumeSlider.value = String(next);
+    this.volumeSlider.dispatchEvent(new Event("input", { bubbles: true }));
   }
 
   private moveSelection(delta: number): void {

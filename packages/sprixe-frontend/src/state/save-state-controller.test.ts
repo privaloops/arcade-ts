@@ -17,7 +17,7 @@ function makeBuffer(value: number): ArrayBuffer {
 }
 
 interface MockEmulator extends EmulatorHandle {
-  saveState(): ArrayBuffer | null;
+  saveState(): Promise<ArrayBuffer | null>;
   loadState(data: ArrayBuffer): boolean;
   lastLoaded: ArrayBuffer | null;
 }
@@ -26,7 +26,7 @@ function makeEmulator(initialSnapshot: number = 42): MockEmulator {
   return {
     pause: vi.fn(),
     resume: vi.fn(),
-    saveState: vi.fn(() => makeBuffer(initialSnapshot)) as () => ArrayBuffer,
+    saveState: vi.fn(async () => makeBuffer(initialSnapshot)) as () => Promise<ArrayBuffer | null>,
     loadState: vi.fn(function (this: MockEmulator, data: ArrayBuffer) {
       this.lastLoaded = data;
       return true;

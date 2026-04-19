@@ -44,29 +44,29 @@ describe("HintsBar", () => {
     it("disabled actions vanish from the visible hints", () => {
       const bar = new HintsBar(container);
       bar.setContext("browser");
-      expect(bar.getVisibleHints().some((h) => h.action === "favorite")).toBe(true);
+      expect(bar.getVisibleHints().some((h) => h.action === "coin-hold")).toBe(true);
 
-      bar.setEnabled("favorite", false);
+      bar.setEnabled("coin-hold", false);
 
-      expect(bar.getVisibleHints().some((h) => h.action === "favorite")).toBe(false);
+      expect(bar.getVisibleHints().some((h) => h.action === "coin-hold")).toBe(false);
     });
 
     it("does not render DOM for disabled actions (no grey-out)", () => {
       const bar = new HintsBar(container);
       bar.setContext("browser");
-      bar.setEnabled("favorite", false);
+      bar.setEnabled("coin-hold", false);
 
-      expect(container.querySelector('.af-hint[data-action="favorite"]')).toBeNull();
+      expect(container.querySelector('.af-hint[data-action="coin-hold"]')).toBeNull();
     });
 
     it("re-enabling restores the hint", () => {
       const bar = new HintsBar(container);
       bar.setContext("browser");
-      bar.setEnabled("settings", false);
-      expect(bar.getVisibleHints().some((h) => h.action === "settings")).toBe(false);
+      bar.setEnabled("coin-hold", false);
+      expect(bar.getVisibleHints().some((h) => h.action === "coin-hold")).toBe(false);
 
-      bar.setEnabled("settings", true);
-      expect(bar.getVisibleHints().some((h) => h.action === "settings")).toBe(true);
+      bar.setEnabled("coin-hold", true);
+      expect(bar.getVisibleHints().some((h) => h.action === "coin-hold")).toBe(true);
     });
 
     it("disabled state persists across context switches", () => {

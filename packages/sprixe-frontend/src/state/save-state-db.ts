@@ -15,7 +15,9 @@
 
 const DB_NAME = "sprixe-arcade";
 const STORE_STATES = "savestates";
-const DB_VERSION = 4; // Phase 4b.2c: bumped to heal v3 DBs that landed without the 'media' store
+// Must match rom-db.ts + media-cache.ts — bumped to 5 when RomRecord
+// gained its `kind` field (Phase 2 real-emulator wiring).
+const DB_VERSION = 5;
 
 /** Number of slots available per game (§2.6). */
 export const SLOT_COUNT = 4;

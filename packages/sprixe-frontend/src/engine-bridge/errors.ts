@@ -25,3 +25,20 @@ export class UnsupportedSystemError extends Error {
     Object.setPrototypeOf(this, UnsupportedSystemError.prototype);
   }
 }
+
+/**
+ * Thrown by a runner factory when a required system BIOS is not
+ * available in RomDB. The UI intercepts this before the playing screen
+ * is mounted and shows a per-system "upload the BIOS" message.
+ */
+export class MissingBiosError extends Error {
+  override readonly name = "MissingBiosError" as const;
+  readonly system: "neogeo";
+  readonly biosId: string;
+  constructor(system: "neogeo", biosId: string) {
+    super(`${system} BIOS not found in RomDB (expected id "${biosId}")`);
+    this.system = system;
+    this.biosId = biosId;
+    Object.setPrototypeOf(this, MissingBiosError.prototype);
+  }
+}

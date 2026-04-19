@@ -42,8 +42,8 @@ describe("SettingsScreen", () => {
       expect(screen.getActiveTab()).toBe("about");
     });
 
-    it("bumper-right / bumper-left cycle through tabs", () => {
-      const order = ["display", "audio", "controls", "network", "storage", "about"];
+    it("bumper-right / bumper-left cycle through tabs (including the Back entry)", () => {
+      const order = ["display", "audio", "controls", "network", "storage", "about", "back"];
       for (let i = 1; i < order.length; i++) {
         screen.handleNavAction("bumper-right");
         expect(screen.getActiveTab()).toBe(order[i]);
@@ -51,7 +51,7 @@ describe("SettingsScreen", () => {
       screen.handleNavAction("bumper-right"); // wraps
       expect(screen.getActiveTab()).toBe("display");
       screen.handleNavAction("bumper-left");  // wraps back
-      expect(screen.getActiveTab()).toBe("about");
+      expect(screen.getActiveTab()).toBe("back");
     });
   });
 
@@ -106,7 +106,8 @@ describe("SettingsScreen", () => {
   });
 
   describe("close", () => {
-    it("back button closes the screen and invokes onClose", () => {
+    it("back tab renders a Back button that closes the screen and invokes onClose", () => {
+      screen.setActiveTab("back");
       container.querySelector<HTMLButtonElement>('[data-testid="settings-back"]')!.click();
       expect(onClose).toHaveBeenCalledTimes(1);
       expect(container.querySelector('[data-testid="settings-screen"]')).toBeNull();
@@ -185,7 +186,7 @@ describe("SettingsScreen", () => {
         onClose: onClose as unknown as () => void,
         storage: {
           listRoms: async () => [
-            { id: "sf2", system: "cps1", zipData: new ArrayBuffer(0), addedAt: 0, lastPlayedAt: 0, playCount: 0, favorite: false, size: 1024 * 1024 },
+            { id: "sf2", system: "cps1", kind: "game", zipData: new ArrayBuffer(0), addedAt: 0, lastPlayedAt: 0, playCount: 0, favorite: false, size: 1024 * 1024 },
           ],
           deleteRom: deleteRom as unknown as (id: string) => Promise<void>,
           estimate: async () => ({ usage: 10 * 1024 * 1024, quota: 1024 * 1024 * 1024 }),

@@ -11,6 +11,32 @@
 
 import QRCode from "qrcode";
 
+/**
+ * __LAN_IP__ is injected by vite.config.ts `define` at dev-server
+ * startup — it holds the Mac's first non-internal IPv4 address so a
+ * phone that scans the QR lands on the kiosk's LAN IP even when the
+ * user happens to load the kiosk via localhost. Production builds
+ * replace this at build time with `null`, at which point we fall
+ * back to window.location.origin (the sprixe.app host in prod).
+ */
+declare const __LAN_IP__: string | null;
+
+/**
+ * Resolve the base URL the phone should land on. Shared between the
+ * empty-state QR (first boot) and the settings panel QR (re-access
+ * after the browser is populated).
+ */
+export function resolvePhoneBaseUrl(): string {
+  if (typeof window === "undefined") return "https://sprixe.app/send";
+  try {
+    if (typeof __LAN_IP__ === "string" && __LAN_IP__) {
+      const port = window.location.port || "5174";
+      return `http://${__LAN_IP__}:${port}/send`;
+    }
+  } catch { /* __LAN_IP__ undefined in non-vite contexts */ }
+  return `${window.location.origin}/send`;
+}
+
 export interface QrCodeOptions {
   /** Canvas pixel size (width == height). Default 200. */
   size?: number;

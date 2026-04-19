@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { installGamepadMock } from "./_helpers/gamepad";
+import { loadFixtureCps1Rom, resetAndSeedRomDB } from "./_helpers/rom-db";
 
 /**
  * p4-volume-pause — the pause overlay renders a volume slider
@@ -18,16 +19,23 @@ async function hold(page: import("@playwright/test").Page, button: number, ms = 
   );
 }
 
+test.setTimeout(30_000);
+
 test("Phase 4b.4 — pause → volume slider to 25 → resume → quit → settings.audio.masterVolume === 25", async ({
   page,
 }) => {
   await installGamepadMock(page);
+  const fixture = loadFixtureCps1Rom();
   await page.goto("/");
+  await resetAndSeedRomDB(page, [
+    { id: fixture.id, system: "cps1", zipB64: fixture.zipB64 },
+  ]);
+  await page.reload();
   await expect(page.locator(".af-browser-screen")).toBeVisible();
 
-  // Launch the first game. Confirm (button 0) triggers GameList.onSelect.
+  // Launch the seeded game. Confirm (button 0) triggers GameList.onSelect.
   await hold(page, 0);
-  await expect(page.locator('[data-testid="playing-screen"]')).toBeVisible();
+  await expect(page.locator('[data-testid="playing-screen"]')).toBeVisible({ timeout: 10_000 });
 
   // Coin-hold opens the pause overlay (Phase 2.7).
   await hold(page, 8, 1200);

@@ -47,6 +47,8 @@ export interface PeerHostOptions {
 type FileListener = (file: ReceivedFile, conn: DataConnection) => void;
 type ConnectionListener = (conn: DataConnection) => void;
 type ErrorListener = (err: Error) => void;
+export type PhoneCommand = Extract<PhoneToKioskMessage, { type: "cmd" }>;
+type CommandListener = (cmd: PhoneCommand, conn: DataConnection) => void;
 
 interface ReassemblyState {
   name: string;
@@ -67,6 +69,7 @@ export class PeerHost {
   private readonly fileListeners = new Set<FileListener>();
   private readonly connectionListeners = new Set<ConnectionListener>();
   private readonly errorListeners = new Set<ErrorListener>();
+  private readonly commandListeners = new Set<CommandListener>();
   private readonly connections = new Set<DataConnection>();
   private readonly reassemblyByConn = new WeakMap<DataConnection, ReassemblyState>();
   private readonly connCleanups = new WeakMap<DataConnection, () => void>();
@@ -110,6 +113,7 @@ export class PeerHost {
     this.fileListeners.clear();
     this.connectionListeners.clear();
     this.errorListeners.clear();
+    this.commandListeners.clear();
     this.peer.destroy();
     this.peer = null;
     this.opened = false;
@@ -137,6 +141,19 @@ export class PeerHost {
     this.errorListeners.add(cb);
     return () => {
       this.errorListeners.delete(cb);
+    };
+  }
+
+  /**
+   * Subscribe to remote control commands from any connected phone.
+   * Paired with Phase 3.7: the phone's RemoteTab emits
+   * { type: "cmd", action, payload } messages that the host must route
+   * to its local overlay / save controller / settings.
+   */
+  onCommand(cb: CommandListener): () => void {
+    this.commandListeners.add(cb);
+    return () => {
+      this.commandListeners.delete(cb);
     };
   }
 
@@ -209,9 +226,7 @@ export class PeerHost {
         return;
       }
       case "cmd":
-        // Phase 3.7 (phone remote) consumes these. The host exposes
-        // the connection via onConnection so downstream handlers can
-        // subscribe to 'data' for cmd-type messages directly.
+        for (const l of this.commandListeners) l(message, conn);
         return;
     }
   }

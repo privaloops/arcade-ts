@@ -28,10 +28,16 @@ export async function seedDefaultMapping(page: Page): Promise<void> {
           p1: {
             coin: { kind: "button", index: 8 },
             start: { kind: "button", index: 9 },
-            up: { kind: "axis", index: 1, dir: -1 },
-            down: { kind: "axis", index: 1, dir: 1 },
-            confirm: { kind: "button", index: 0 },
-            back: { kind: "button", index: 1 },
+            up: { kind: "button", index: 12 },
+            down: { kind: "button", index: 13 },
+            left: { kind: "button", index: 14 },
+            right: { kind: "button", index: 15 },
+            button1: { kind: "button", index: 0 },
+            button2: { kind: "button", index: 1 },
+            button3: { kind: "button", index: 2 },
+            button4: { kind: "button", index: 3 },
+            button5: { kind: "button", index: 4 },
+            button6: { kind: "button", index: 5 },
           },
         })
       );

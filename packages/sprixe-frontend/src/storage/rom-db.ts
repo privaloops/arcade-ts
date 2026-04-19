@@ -14,11 +14,18 @@
  */
 
 export type System = "cps1" | "neogeo";
+export type RomKind = "game" | "bios";
 
 export interface RomRecord {
   /** MAME ROM set name — stable id across the app. */
   id: string;
   system: System;
+  /**
+   * Distinguish playable games from system BIOS (e.g. Neo-Geo's
+   * `neogeo.zip`). BIOS records are filtered out of the browser list
+   * and fetched on demand by the matching runner.
+   */
+  kind: RomKind;
   /** Raw ZIP bytes. Binary ArrayBuffer, never base64. */
   zipData: ArrayBuffer;
   /** Unix ms timestamp. */
@@ -33,7 +40,8 @@ export interface RomRecord {
 
 export type RomRecordInput =
   | RomRecord
-  | (Omit<RomRecord, "addedAt" | "lastPlayedAt" | "playCount" | "favorite" | "size"> & {
+  | (Omit<RomRecord, "addedAt" | "lastPlayedAt" | "playCount" | "favorite" | "size" | "kind"> & {
+      kind?: RomKind;
       addedAt?: number;
       lastPlayedAt?: number;
       playCount?: number;
@@ -42,13 +50,15 @@ export type RomRecordInput =
     });
 
 const DB_NAME = "sprixe-arcade";
-// Bumped to 4 in Phase 4b.2c to heal databases left at v3 without the
-// 'media' store (an earlier SaveStateDB.onupgradeneeded missed it, so
-// installs that opened the DB via save-state path first landed at v3
-// with only 'roms' + 'savestates'). The idempotent onupgradeneeded
-// below creates whichever of the three stores is missing, so bumping
-// the version re-runs the creation block and repairs the schema.
-const DB_VERSION = 4;
+// v5 (2026-04 Phase 2 real-emulator wiring): RomRecord gains a `kind`
+// field to distinguish games from system BIOS. Migration runs inside
+// onupgradeneeded and tags every pre-existing record as `kind: "game"`
+// so the list() default filter still surfaces them.
+// v4 (Phase 4b.2c) healed databases left at v3 without the 'media'
+// store. The idempotent onupgradeneeded creates whichever of the three
+// stores is missing, so bumping the version re-runs the creation block
+// and repairs the schema.
+const DB_VERSION = 5;
 const STORE_ROMS = "roms";
 
 export class RomDB {
@@ -61,10 +71,12 @@ export class RomDB {
     if (this.dbPromise) return this.dbPromise;
     this.dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
       const req = indexedDB.open(this.dbName, DB_VERSION);
-      req.onupgradeneeded = () => {
+      req.onupgradeneeded = (event) => {
         const db = req.result;
+        const tx = req.transaction;
+        const oldVersion = event.oldVersion;
         // Shared schema creation — any module that opens the DB first
-        // lands all three stores so a later module's open() at v3 is
+        // lands all three stores so a later module's open() at v4 is
         // a no-op upgrade. See src/state/save-state-db.ts +
         // src/media/media-cache.ts for their own store contracts.
         if (!db.objectStoreNames.contains(STORE_ROMS)) {
@@ -78,6 +90,22 @@ export class RomDB {
         }
         if (!db.objectStoreNames.contains("media")) {
           db.createObjectStore("media", { keyPath: "key" });
+        }
+        // v4 → v5: tag legacy records with kind="game" so list()'s
+        // default game-only filter keeps surfacing them.
+        if (oldVersion > 0 && oldVersion < 5 && tx) {
+          const store = tx.objectStore(STORE_ROMS);
+          const cursorReq = store.openCursor();
+          cursorReq.onsuccess = () => {
+            const cursor = cursorReq.result;
+            if (!cursor) return;
+            const rec = cursor.value as RomRecord & { kind?: RomKind };
+            if (!rec.kind) {
+              rec.kind = "game";
+              cursor.update(rec);
+            }
+            cursor.continue();
+          };
         }
       };
       req.onsuccess = () => resolve(req.result);
@@ -99,6 +127,7 @@ export class RomDB {
     const now = Date.now();
     const full: RomRecord = {
       ...record,
+      kind: record.kind ?? "game",
       addedAt: record.addedAt ?? now,
       lastPlayedAt: record.lastPlayedAt ?? 0,
       playCount: record.playCount ?? 0,
@@ -135,11 +164,16 @@ export class RomDB {
   }
 
   /**
-   * List all ROMs ordered by lastPlayedAt descending (most recently
-   * played first). Never-played entries (lastPlayedAt===0) sort to the
-   * bottom, tied entries sort by addedAt descending.
+   * List ROMs ordered by lastPlayedAt descending (most recently played
+   * first). Never-played entries (lastPlayedAt===0) sort to the bottom,
+   * tied entries sort by addedAt descending.
+   *
+   * Filters by `kind` (default "game") so the browser list never
+   * surfaces BIOS records. Pass `kind: undefined` (explicit) to list
+   * everything (used by the storage-usage views in Settings).
    */
-  async list(): Promise<RomRecord[]> {
+  async list(opts: { kind?: RomKind | null } = {}): Promise<RomRecord[]> {
+    const kind = opts.kind === null ? null : (opts.kind ?? "game");
     const db = await this.open();
     const all = await new Promise<RomRecord[]>((resolve, reject) => {
       const tx = db.transaction(STORE_ROMS, "readonly");
@@ -147,7 +181,8 @@ export class RomDB {
       req.onsuccess = () => resolve((req.result as RomRecord[] | undefined) ?? []);
       req.onerror = () => reject(req.error ?? new Error("list() failed"));
     });
-    return all.sort((a, b) => {
+    const filtered = kind === null ? all : all.filter((r) => (r.kind ?? "game") === kind);
+    return filtered.sort((a, b) => {
       if (a.lastPlayedAt !== b.lastPlayedAt) return b.lastPlayedAt - a.lastPlayedAt;
       return b.addedAt - a.addedAt;
     });

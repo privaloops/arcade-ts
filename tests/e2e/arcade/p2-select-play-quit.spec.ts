@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { installGamepadMock } from "./_helpers/gamepad";
+import { loadFixtureCps1Rom, resetAndSeedRomDB } from "./_helpers/rom-db";
 
 async function holdButton(page: import("@playwright/test").Page, idx: number, ms: number): Promise<void> {
   await page.evaluate(
@@ -12,10 +13,49 @@ async function holdButton(page: import("@playwright/test").Page, idx: number, ms
   );
 }
 
+/**
+ * Sample a window of pixels from the playing canvas as a numeric
+ * fingerprint — the sum changes whenever the picture changes. Uses
+ * readPixels for WebGL contexts, getImageData for Canvas 2D.
+ */
+async function sampleCanvasHash(page: import("@playwright/test").Page): Promise<number> {
+  return page.evaluate(() => {
+    const c = document.querySelector('[data-testid="playing-canvas"]') as HTMLCanvasElement | null;
+    if (!c) return -1;
+    const gl = c.getContext("webgl2") as WebGL2RenderingContext | null;
+    if (gl) {
+      const pixels = new Uint8Array(4 * 32 * 32);
+      gl.readPixels(10, 10, 32, 32, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+      let sum = 0;
+      for (let i = 0; i < pixels.length; i++) sum = (sum + pixels[i]!) | 0;
+      return sum;
+    }
+    const ctx = c.getContext("2d");
+    if (ctx) {
+      const data = ctx.getImageData(10, 10, 32, 32).data;
+      let sum = 0;
+      for (let i = 0; i < data.length; i++) sum = (sum + data[i]!) | 0;
+      return sum;
+    }
+    return -1;
+  });
+}
+
 test.describe("Phase 2 — golden path browser → playing → browser", () => {
-  test("full select → play → pause → quit cycle keeps selection + stays under 10 MB heap growth", async ({ page }) => {
+  test.setTimeout(30_000);
+
+  test("real CPS-1 emulator boots, renders distinct frames, pauses, saves & quits under 10 MB heap growth", async ({ page }) => {
     await installGamepadMock(page);
+    const fixture = loadFixtureCps1Rom();
+
     await page.goto("/");
+    // Seed RomDB with the real test.zip fixture so db.get(id) returns
+    // a valid ZIP for PlayingScreen.create(). Overrides the mock
+    // catalogue — loadCatalogue prefers IDB whenever it has records.
+    await resetAndSeedRomDB(page, [
+      { id: fixture.id, system: "cps1", zipB64: fixture.zipB64 },
+    ]);
+    await page.reload();
 
     const browser = page.locator(".af-browser-screen");
     const playing = page.locator('[data-testid="playing-screen"]');
@@ -25,46 +65,65 @@ test.describe("Phase 2 — golden path browser → playing → browser", () => {
     const initiallySelected = await page
       .locator(".af-game-list-item.selected")
       .getAttribute("data-game-id");
-    expect(initiallySelected).not.toBeNull();
+    expect(initiallySelected).toBe(fixture.id);
 
-    // Chromium-only: sample heap before the loop. If performance.memory
-    // isn't exposed we skip the anti-leak check.
     const heapBefore = await page.evaluate(() => {
       const memory = (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory;
       return memory?.usedJSHeapSize ?? null;
     });
 
-    // 1. Confirm → PlayingScreen mounts.
+    // 1. Confirm → PlayingScreen boots the real engine.
     await holdButton(page, 0, 120);
-    await expect(playing).toBeVisible();
+    await expect(playing).toBeVisible({ timeout: 10_000 });
     await expect(browser).toBeHidden();
 
-    // Canvas is rendering mock frames — first two pixels are non-black.
-    await page.waitForTimeout(200);
-    const canvasPainted = await page.evaluate(() => {
-      const canvas = document.querySelector('[data-testid="playing-canvas"]') as HTMLCanvasElement | null;
-      if (!canvas) return false;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return false;
-      const px = ctx.getImageData(10, 10, 1, 1).data;
-      return px[0] + px[1] + px[2] > 0;
-    });
-    expect(canvasPainted).toBe(true);
+    // 2. Let the emulator run, then check that the engine really emulated
+    // frames (not just that a canvas is mounted). Reading data-engine-frames
+    // proves the real Emulator.getFrameCount() moved — a static mock can't
+    // fake it. We also sample the canvas to ensure it was painted with
+    // engine output (non-zero pixels), even though a minimal test ROM's
+    // picture can stay visually static after boot.
+    await page.waitForTimeout(600);
+    const framesA = await page.evaluate(() =>
+      parseInt(
+        (document.querySelector('[data-testid="playing-screen"]') as HTMLElement | null)
+          ?.dataset.engineFrames ?? "0",
+        10,
+      )
+    );
+    expect(framesA).toBeGreaterThan(0);
+    await page.waitForTimeout(500);
+    const framesB = await page.evaluate(() =>
+      parseInt(
+        (document.querySelector('[data-testid="playing-screen"]') as HTMLElement | null)
+          ?.dataset.engineFrames ?? "0",
+        10,
+      )
+    );
+    expect(framesB).toBeGreaterThan(framesA);
+    const hashA = await sampleCanvasHash(page);
+    expect(hashA).toBeGreaterThan(0);
 
-    // 2. Coin hold → PauseOverlay opens, selected=Resume.
+    // 3. FPS readout has updated at least once (≥1).
+    const fps = await page.evaluate(() => {
+      const el = document.querySelector('[data-testid="playing-fps"]');
+      return parseInt((el?.textContent ?? "").replace(/\D/g, ""), 10) || 0;
+    });
+    expect(fps).toBeGreaterThan(0);
+
+    // 5. Coin hold → PauseOverlay opens, selected=Resume.
     await holdButton(page, 8, 1200);
     await expect(overlay).toBeVisible();
     await expect(overlay.locator(".af-pause-item.selected")).toHaveAttribute("data-action", "resume");
 
-    // 3. Navigate down 3 times → Quit, then confirm.
+    // 6. Navigate down 3 times → Quit, then confirm.
     for (let i = 0; i < 3; i++) {
-      // Button 13 = D-pad down in our default standard mapping.
       await holdButton(page, 13, 120);
     }
     await expect(overlay.locator(".af-pause-item.selected")).toHaveAttribute("data-action", "quit");
-    await holdButton(page, 0, 120); // confirm quit
+    await holdButton(page, 0, 120);
 
-    // 4. Back on the browser, with the same game still selected.
+    // 7. Back on the browser, same game still selected.
     await expect(browser).toBeVisible();
     await expect(playing).toHaveCount(0);
     await expect(overlay).toHaveCount(0);
@@ -73,7 +132,7 @@ test.describe("Phase 2 — golden path browser → playing → browser", () => {
       initiallySelected!
     );
 
-    // 5. Anti-leak: heap growth after the full cycle stays under 10 MB.
+    // 8. Anti-leak: heap growth after the full cycle stays under 10 MB.
     if (heapBefore !== null) {
       const heapAfter = await page.evaluate(() => {
         const memory = (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory;

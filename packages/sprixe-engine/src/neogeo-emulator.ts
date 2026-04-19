@@ -177,6 +177,11 @@ export class NeoGeoEmulator {
     if (this.audioWorker) this.audioWorker.postMessage({ type: 'resume' });
   }
 
+  /** Master volume 0.0 .. 1.0 (mirrors CPS-1 Emulator.setVolume). */
+  setVolume(level: number): void {
+    this.audioOutput.setVolume(level);
+  }
+
   // ── ROM loading ───────────────────────────────────────────────────────────
 
   /** Load from a File (ZIP) — compatible with CPS1 Emulator.loadRom() API */
@@ -460,6 +465,10 @@ export class NeoGeoEmulator {
   }
   isPaused(): boolean { return this.running && this.paused; }
   isRunning(): boolean { return this.running && !this.paused; }
+
+  /** Expose the shared InputManager so the arcade frontend can
+   * propagate the user's gamepad mapping (coin / start / buttons). */
+  getInputManager(): InputManager { return this.input; }
 
   setVblankCallback(cb: () => void): void { this._vblankCallback = cb; }
 

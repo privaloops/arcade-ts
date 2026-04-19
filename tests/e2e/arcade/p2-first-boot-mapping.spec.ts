@@ -38,7 +38,7 @@ async function pressButton(page: import("@playwright/test").Page, idx: number): 
 }
 
 test.describe("Phase 2 — first-boot input mapping", () => {
-  test("empty state shows mapping screen, sequencing 6 buttons advances to browser", async ({ page }) => {
+  test("empty state shows mapping screen, sequencing 12 arcade buttons advances to browser", async ({ page }) => {
     // Use the gamepad-only helper so no default mapping is seeded —
     // this test inspects the raw "never configured" boot path.
     await installGamepadMockOnly(page);
@@ -57,9 +57,9 @@ test.describe("Phase 2 — first-boot input mapping", () => {
     await expect(mapping).toBeVisible();
     expect(await page.locator(".af-browser-screen").count()).toBe(0);
 
-    // Sequence: coin(8), start(9), up(12), down(13), confirm(0), back(1).
-    // Every press hits a distinct button so findDuplicate never trips.
-    for (const btn of [8, 9, 12, 13, 0, 1]) {
+    // 12-prompt arcade mapping: coin, start, directions, 6 play buttons.
+    // Each distinct index avoids findDuplicate warnings.
+    for (const btn of [8, 9, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5]) {
       await pressButton(page, btn);
     }
 
@@ -80,8 +80,8 @@ test.describe("Phase 2 — first-boot input mapping", () => {
     await installGamepadMock(page);
     await page.goto("/");
 
-    // Persist a mapping directly so the boot flow thinks the user
-    // already went through setup.
+    // Persist a full 12-role mapping directly so the boot flow thinks
+    // the user already went through setup.
     await page.evaluate(() => {
       const payload = {
         version: 1,
@@ -89,10 +89,16 @@ test.describe("Phase 2 — first-boot input mapping", () => {
         p1: {
           coin: { kind: "button", index: 8 },
           start: { kind: "button", index: 9 },
-          up: { kind: "axis", index: 1, dir: -1 },
-          down: { kind: "axis", index: 1, dir: 1 },
-          confirm: { kind: "button", index: 0 },
-          back: { kind: "button", index: 1 },
+          up: { kind: "button", index: 12 },
+          down: { kind: "button", index: 13 },
+          left: { kind: "button", index: 14 },
+          right: { kind: "button", index: 15 },
+          button1: { kind: "button", index: 0 },
+          button2: { kind: "button", index: 1 },
+          button3: { kind: "button", index: 2 },
+          button4: { kind: "button", index: 3 },
+          button5: { kind: "button", index: 4 },
+          button6: { kind: "button", index: 5 },
         },
       };
       localStorage.setItem("sprixe.input.mapping.v1", JSON.stringify(payload));

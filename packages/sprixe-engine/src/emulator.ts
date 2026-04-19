@@ -33,7 +33,7 @@ import { OKI6295 } from "./audio/oki6295";
 import { AudioOutput } from "./audio/audio-output";
 import { decodeKabuki } from "./memory/kabuki";
 import { EEPROM93C46 } from "./memory/eeprom-93c46";
-import { type SaveState, saveToSlot, loadFromSlot, bufToB64, b64ToBuf, SAVE_STATE_VERSION } from "./save-state";
+import { type SaveState, saveToSlot, loadFromSlot, bufToB64, b64ToBuf, SAVE_STATE_VERSION, serializeSaveState, deserializeSaveState } from "./save-state";
 
 // ── Timing constants (from MAME cps1.h) ─────────────────────────────────────
 //
@@ -423,9 +423,12 @@ export class Emulator {
 
   // ── Save State ──────────────────────────────────────────────────────────
 
-  /** Save complete emulator state to a localStorage slot. */
-  async saveState(slot: number): Promise<boolean> {
-    if (!this.romLoaded) return false;
+  /**
+   * Capture the complete emulator state into a plain JS object.
+   * Shared by slot-based and buffer-based save paths.
+   */
+  async captureState(): Promise<SaveState | null> {
+    if (!this.romLoaded) return null;
 
     // Get audio worker state (Z80 + Z80Bus + OKI)
     let workerState: Record<string, unknown> | null = null;
@@ -437,7 +440,7 @@ export class Emulator {
       }
     }
 
-    const state: SaveState = {
+    return {
       version: SAVE_STATE_VERSION,
       gameName: this.gameName,
       timestamp: Date.now(),
@@ -456,8 +459,23 @@ export class Emulator {
       frameCount: this.frameCount,
       audioWorkerState: workerState,
     };
+  }
 
+  /** Save complete emulator state to a localStorage slot. */
+  async saveState(slot: number): Promise<boolean> {
+    const state = await this.captureState();
+    if (!state) return false;
     return saveToSlot(slot, state);
+  }
+
+  /**
+   * Export current state as an opaque ArrayBuffer — used by the arcade
+   * frontend which persists to IndexedDB. Returns null if no ROM loaded.
+   */
+  async exportStateAsBuffer(): Promise<ArrayBuffer | null> {
+    const state = await this.captureState();
+    if (!state) return null;
+    return serializeSaveState(state);
   }
 
   /** Request the audio worker's internal state (with 2s timeout). */
@@ -479,10 +497,11 @@ export class Emulator {
     });
   }
 
-  /** Load emulator state from a localStorage slot. */
-  loadState(slot: number): boolean {
-    const state = loadFromSlot(slot);
-    if (!state) return false;
+  /**
+   * Apply a previously captured state to the emulator.
+   * Returns false if the state belongs to a different game.
+   */
+  applyState(state: SaveState): boolean {
     if (state.gameName !== this.gameName) {
       console.warn(`Save state is for ${state.gameName}, current game is ${this.gameName}`);
       return false;
@@ -525,6 +544,23 @@ export class Emulator {
     }
 
     return true;
+  }
+
+  /** Load emulator state from a localStorage slot. */
+  loadState(slot: number): boolean {
+    const state = loadFromSlot(slot);
+    if (!state) return false;
+    return this.applyState(state);
+  }
+
+  /**
+   * Import a previously exported buffer (IndexedDB path). Returns false
+   * if the buffer is corrupted or the state belongs to another game.
+   */
+  importStateFromBuffer(buf: ArrayBuffer): boolean {
+    const state = deserializeSaveState(buf);
+    if (!state) return false;
+    return this.applyState(state);
   }
 
   /** Debug: expose YM2151 for audio testing */
@@ -581,6 +617,16 @@ export class Emulator {
   resumeAudio(): void {
     this.audioOutput.resume();
     this.audioWorker?.postMessage({ type: 'resume' });
+  }
+
+  /**
+   * Apply a master volume level to the audio pipeline (0.0 = silent,
+   * 1.0 = full). Used by the arcade frontend's Settings + pause
+   * overlay sliders; the value bubbles down to AudioOutput's per-sample
+   * gain so the change is audible immediately.
+   */
+  setVolume(level: number): void {
+    this.audioOutput.setVolume(level);
   }
 
   // ── Cleanup ───────────────────────────────────────────────────────────────

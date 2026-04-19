@@ -126,12 +126,12 @@ describe("InputRouter", () => {
       const nav = vi.fn();
       router.onNavAction(nav);
 
-      router.feedAction("settings");
+      router.feedAction("start");
       router.setMode("emu");
-      router.feedAction("settings"); // same input semantically
+      router.feedAction("start"); // same input semantically
 
       expect(nav).toHaveBeenCalledTimes(1);
-      expect(nav).toHaveBeenCalledWith("settings");
+      expect(nav).toHaveBeenCalledWith("start");
     });
   });
 });

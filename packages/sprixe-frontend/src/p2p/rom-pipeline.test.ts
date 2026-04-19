@@ -50,6 +50,7 @@ describe("RomPipeline", () => {
     it("uses the catalogue set name as the id when identification resolves it", async () => {
       const identify = async (): Promise<Identification> => ({
         system: "cps1",
+        kind: "game",
         fileNames: [],
         setName: "sf2",
       });
@@ -66,6 +67,7 @@ describe("RomPipeline", () => {
     it("falls back to a sanitized filename when identification has no set name", async () => {
       const identify = async (): Promise<Identification> => ({
         system: "neogeo",
+        kind: "game",
         fileNames: [],
         setName: null,
       });
@@ -82,6 +84,7 @@ describe("RomPipeline", () => {
     it("overwrites an existing record for the same id (upsert semantics)", async () => {
       const identify = async (): Promise<Identification> => ({
         system: "cps1",
+        kind: "game",
         fileNames: [],
         setName: "sf2",
       });

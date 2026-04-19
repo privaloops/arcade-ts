@@ -16,8 +16,10 @@ import type { SettingsStore, SettingsV1, AspectRatio, AudioLatency } from "./set
 import type { NavAction } from "../../input/gamepad-nav";
 import type { InputMapping, MappingRole } from "../../input/mapping-store";
 import type { RomRecord } from "../../storage/rom-db";
+import { QrCode, resolvePhoneBaseUrl } from "../../ui/qr-code";
+import { AUTOFIRE_BUTTONS, loadAutofire, toggleAutofire, type AutofireButton } from "../../input/autofire-store";
 
-type TabId = "display" | "audio" | "controls" | "network" | "storage" | "about";
+type TabId = "display" | "audio" | "controls" | "network" | "storage" | "about" | "back";
 
 interface TabDef {
   id: TabId;
@@ -88,13 +90,6 @@ export class SettingsScreen {
 
     const header = document.createElement("div");
     header.className = "af-settings-header";
-    const backBtn = document.createElement("button");
-    backBtn.type = "button";
-    backBtn.className = "af-settings-back";
-    backBtn.setAttribute("data-testid", "settings-back");
-    backBtn.textContent = "← Back";
-    backBtn.addEventListener("click", () => this.close());
-    header.appendChild(backBtn);
     const title = document.createElement("h1");
     title.className = "af-settings-title";
     title.textContent = "SETTINGS";
@@ -122,6 +117,10 @@ export class SettingsScreen {
       { id: "network",  label: "Network",  render: (r) => this.renderNetwork(r) },
       { id: "storage",  label: "Storage",  render: (r) => this.renderStorage(r) },
       { id: "about",    label: "About",    render: (r) => this.renderAbout(r) },
+      // Discoverable exit — gamepad users get a visible "Back" entry
+      // they can land on with left/right and press confirm. Click from
+      // mouse/touch works too.
+      { id: "back",     label: "← Back",   render: (r) => this.renderBackTab(r) },
     ];
     for (const tab of this.tabs) {
       const btn = document.createElement("button");
@@ -158,6 +157,10 @@ export class SettingsScreen {
       btn.setAttribute("aria-selected", selected ? "true" : "false");
     }
     this.rerender();
+    // Land focus on the first interactive control of the new tab so
+    // gamepad confirm/adjust targets something sensible right away.
+    const first = this.getFocusables()[0];
+    first?.focus({ preventScroll: true });
   }
 
   handleNavAction(action: NavAction): boolean {
@@ -165,6 +168,21 @@ export class SettingsScreen {
       case "back":
       case "coin-hold":
         this.close();
+        return true;
+      case "up":
+        this.moveFocus(-1);
+        return true;
+      case "down":
+        this.moveFocus(1);
+        return true;
+      case "left":
+        // Only adjusts a focused slider / select; tab switching goes
+        // through the dedicated bumper actions so a focused range
+        // control can own left/right without conflict.
+        this.adjustFocused(-1);
+        return true;
+      case "right":
+        this.adjustFocused(1);
         return true;
       case "bumper-right": {
         const idx = this.tabs.findIndex((t) => t.id === this.activeTab);
@@ -177,14 +195,115 @@ export class SettingsScreen {
         this.setActiveTab(this.tabs[(idx - 1 + n) % n]!.id);
         return true;
       }
+      case "confirm":
+        this.activateFocused();
+        return true;
       default:
         return false;
     }
   }
 
+  // ── Gamepad navigation for controls in the active tab ─────────────
+
+  private getFocusables(): HTMLElement[] {
+    return Array.from(
+      this.tabContent.querySelectorAll<HTMLElement>(
+        "button, input, select, [tabindex]:not([tabindex='-1'])",
+      ),
+    ).filter((el) => !(el as HTMLButtonElement | HTMLInputElement | HTMLSelectElement).disabled);
+  }
+
+  private moveFocus(direction: -1 | 1): void {
+    const controls = this.getFocusables();
+    if (controls.length === 0) return;
+    const current = controls.indexOf(document.activeElement as HTMLElement);
+    const next = current < 0
+      ? (direction > 0 ? 0 : controls.length - 1)
+      : (current + direction + controls.length) % controls.length;
+    controls[next]!.focus({ preventScroll: true });
+    controls[next]!.scrollIntoView({ block: "nearest", behavior: "auto" });
+  }
+
+  private activateFocused(): void {
+    const el = document.activeElement as HTMLElement | null;
+    if (!el || !this.tabContent.contains(el)) {
+      // Nothing focused yet — grab the first control so the next confirm acts.
+      this.moveFocus(1);
+      return;
+    }
+    if (el instanceof HTMLButtonElement) {
+      el.click();
+      return;
+    }
+    if (el instanceof HTMLInputElement) {
+      if (el.type === "checkbox") {
+        el.checked = !el.checked;
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+      } else if (el.type === "range") {
+        // confirm on a slider is a no-op — left/right adjust the value.
+      } else {
+        el.click();
+      }
+      return;
+    }
+    if (el instanceof HTMLSelectElement) {
+      el.selectedIndex = (el.selectedIndex + 1) % el.options.length;
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+  }
+
+  /**
+   * Left / right on a focused slider or select adjusts its value.
+   * Returns `true` when the direction was consumed so the caller can
+   * fall back to tab-switching when it wasn't.
+   */
+  private adjustFocused(direction: -1 | 1): boolean {
+    const el = document.activeElement as HTMLElement | null;
+    if (!el || !this.tabContent.contains(el)) return false;
+    if (el instanceof HTMLInputElement && el.type === "range") {
+      const step = el.step ? Number(el.step) || 1 : 1;
+      const min = el.min ? Number(el.min) : 0;
+      const max = el.max ? Number(el.max) : 100;
+      const current = Number(el.value) || 0;
+      const next = Math.max(min, Math.min(max, current + direction * step));
+      if (next === current) return true;
+      el.value = String(next);
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    }
+    if (el instanceof HTMLSelectElement) {
+      const next = Math.max(0, Math.min(el.options.length - 1, el.selectedIndex + direction));
+      if (next === el.selectedIndex) return true;
+      el.selectedIndex = next;
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    }
+    return false;
+  }
+
   private close(): void {
     this.unmount();
     this.onClose();
+  }
+
+  /**
+   * Renders a single "Back to games" button — the gamepad users'
+   * discoverable exit. Mirrors the old header Back button. Clicking
+   * (or gamepad confirm on the focused element) closes the screen.
+   */
+  private renderBackTab(root: HTMLElement): void {
+    const wrap = document.createElement("div");
+    wrap.className = "af-settings-back-pane";
+    wrap.setAttribute("data-testid", "settings-back-pane");
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "af-settings-btn";
+    btn.setAttribute("data-testid", "settings-back");
+    btn.textContent = "← Back to games";
+    btn.addEventListener("click", () => this.close());
+    wrap.appendChild(btn);
+    root.appendChild(wrap);
   }
 
   private rerender(): void {
@@ -292,7 +411,60 @@ export class SettingsScreen {
     resetBtn.addEventListener("click", () => this.controls!.onReset());
     wrap.appendChild(resetBtn);
 
+    this.appendAutofireSection(wrap);
+
     root.appendChild(wrap);
+  }
+
+  /**
+   * Autofire toggle per play button. Writes to the same localStorage
+   * key (`cps1-autofire-p1`) that @sprixe/engine's InputManager reads
+   * at construction, so changes apply on the next game launch.
+   */
+  private appendAutofireSection(wrap: HTMLElement): void {
+    const section = document.createElement("div");
+    section.className = "af-settings-autofire";
+    section.setAttribute("data-testid", "settings-autofire");
+
+    const title = document.createElement("h3");
+    title.className = "af-settings-autofire-title";
+    title.textContent = "Autofire (P1)";
+    section.appendChild(title);
+
+    const hint = document.createElement("p");
+    hint.className = "af-settings-hint";
+    hint.textContent = "Held button fires at ~30 Hz. Applies on next game launch.";
+    section.appendChild(hint);
+
+    const labels: Record<AutofireButton, string> = {
+      button1: "Btn 1 (LP)",
+      button2: "Btn 2 (MP)",
+      button3: "Btn 3 (HP)",
+      button4: "Btn 4 (LK)",
+      button5: "Btn 5 (MK)",
+      button6: "Btn 6 (HK)",
+    };
+    const current = loadAutofire();
+    for (const key of AUTOFIRE_BUTTONS) {
+      const row = document.createElement("label");
+      row.className = "af-settings-row af-settings-autofire-row";
+      const span = document.createElement("span");
+      span.className = "af-settings-label";
+      span.textContent = labels[key];
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.className = "af-settings-toggle";
+      cb.setAttribute("data-testid", `autofire-${key}`);
+      cb.checked = current.has(key);
+      cb.addEventListener("change", () => {
+        toggleAutofire(key, cb.checked);
+      });
+      row.appendChild(span);
+      row.appendChild(cb);
+      section.appendChild(row);
+    }
+
+    wrap.appendChild(section);
   }
 
   // ── Network tab ────────────────────────────────────────────────
@@ -322,6 +494,25 @@ export class SettingsScreen {
       row.appendChild(v);
       wrap.appendChild(row);
     }
+
+    // QR that matches the one shown on the empty state, so the user
+    // can reopen their phone page after the catalogue is populated.
+    const qrWrap = document.createElement("div");
+    qrWrap.className = "af-settings-qr";
+    qrWrap.setAttribute("data-testid", "settings-network-qr");
+    const qr = new QrCode(qrWrap, { size: 200, baseUrl: resolvePhoneBaseUrl() });
+    qr.setRoomId(this.network.getRoomId()).catch(() => {
+      // qrcode uses canvas 2D, which jsdom does not implement — tests
+      // mount SettingsScreen without hitting the network tab's render
+      // path, so swallow the rejection instead of surfacing it.
+    });
+    wrap.appendChild(qrWrap);
+
+    const hint = document.createElement("p");
+    hint.className = "af-settings-hint";
+    hint.textContent = "Scan with your phone to upload ROMs or open the remote.";
+    wrap.appendChild(hint);
+
     const regen = document.createElement("button");
     regen.type = "button";
     regen.className = "af-settings-btn af-settings-btn--danger";

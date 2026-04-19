@@ -50,6 +50,7 @@ export class RomPipeline {
     const record: RomRecord = {
       id,
       system: identification.system,
+      kind: identification.kind,
       zipData: payload.data,
       addedAt: Date.now(),
       lastPlayedAt: 0,
