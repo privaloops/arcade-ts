@@ -72,7 +72,11 @@ export default defineConfig({
         viewport: { width: 1920, height: 1080 },
         launchOptions: {
           args: [
-            '--kiosk',
+            // `--kiosk` conflicts with Playwright's viewport control
+            // (hangs navigation / hides DOM), keep the other kiosk
+            // flags so the doctrinal check (COOP/COEP + SAB +
+            // autoplay policy) still runs. A real RPi kiosk adds
+            // `--kiosk` back on top of these via cage's launcher.
             '--noerrdialogs',
             '--disable-translate',
             '--enable-features=SharedArrayBuffer',
