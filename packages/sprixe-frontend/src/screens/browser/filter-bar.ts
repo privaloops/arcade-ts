@@ -5,7 +5,7 @@
  * computed from the current games collection. RB/LB cycle through filters
  * via `next()` / `previous()`.
  *
- * Selection preservation is the responsibility of downstream GameList,
+ * Selection preservation is the responsibility of downstream WheelList,
  * which tracks selection by id — as long as the currently-selected game
  * still matches the new filter's predicate, it stays selected.
  */

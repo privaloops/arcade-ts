@@ -1,16 +1,16 @@
 /**
- * VideoPreview — right-hand panel of the game browser (§2.4 + Phase 4b.2).
+ * VideoPreview — media pane: screenshot upgraded to MP4 after a brief
+ * hover delay. Marquee + caption live in BrowserScreen now.
  *
  * With a PreviewLoader injected, selecting a new game:
- *   1. Immediately shows the GameEntry.screenshotUrl placeholder (fast).
- *   2. Async-fetches a CDN screenshot via loader.loadScreenshot(); when
- *      it resolves, upgrades the <img> src to the blob URL.
- *   3. After `crossfadeMs` (default 1000 ms) on the same game, mounts
- *      a <video> that streams the MP4 clip from the CDN if one exists
- *      (hasVideo HEAD probe). If hasVideo fails, the screenshot stays.
+ *   1. Starts a <img> cascade through PreviewLoader.screenshotCandidates.
+ *      Falls back to GameEntry.screenshotUrl if every remote URL 404s.
+ *   2. After `crossfadeMs` (default 1000 ms) on the same game, mounts
+ *      a <video> that streams the MP4 clip from the cascade if one
+ *      exists. On repeated errors the screenshot stays visible.
  *
- * Without a loader — backwards-compatible — the component behaves
- * exactly like Phase 1 (GameEntry.screenshotUrl → <img> src, no video).
+ * Without a loader — backwards-compatible test path — the component
+ * just drops GameEntry.screenshotUrl into the <img>.
  */
 
 import type { GameEntry } from "../../data/games";
@@ -29,20 +29,12 @@ export class VideoPreview {
   readonly root: HTMLDivElement;
 
   private readonly imgEl: HTMLImageElement;
-  private readonly marqueeEl: HTMLImageElement;
-  private readonly titleEl: HTMLDivElement;
-  private readonly metaEl: HTMLDivElement;
-  private readonly favoriteEl: HTMLDivElement;
-  private readonly media: HTMLDivElement;
-
   private readonly loader: PreviewLoader | undefined;
   private readonly crossfadeMs: number;
   private readonly setTimer: (cb: () => void, ms: number) => number;
   private readonly clearTimer: (id: number) => void;
 
   private currentId: string | null = null;
-  /** Data URL returned by the generator — must be revoked on change. */
-  private currentMarqueeBlobUrl: string | null = null;
   private currentVideoEl: HTMLVideoElement | null = null;
   private fadeTimerId: number | null = null;
   private pendingFetchToken = 0;
@@ -57,36 +49,11 @@ export class VideoPreview {
     this.root.className = "af-video-preview";
     this.root.setAttribute("data-testid", "video-preview");
 
-    // Marquee banner sits on top of the media block — gives each
-    // game a "cabinet header" feel. Resolved via PreviewLoader's
-    // CDN → libretro title → canvas-generated cascade.
-    this.marqueeEl = document.createElement("img");
-    this.marqueeEl.className = "af-video-preview-marquee";
-    this.marqueeEl.setAttribute("data-testid", "video-preview-marquee");
-    this.marqueeEl.alt = "";
-    this.root.appendChild(this.marqueeEl);
-
-    this.media = document.createElement("div");
-    this.media.className = "af-video-preview-media";
     this.imgEl = document.createElement("img");
     this.imgEl.className = "af-video-preview-image";
     this.imgEl.setAttribute("data-testid", "video-preview-image");
     this.imgEl.alt = "";
-    this.media.appendChild(this.imgEl);
-    this.root.appendChild(this.media);
-
-    const caption = document.createElement("div");
-    caption.className = "af-video-preview-caption";
-    this.titleEl = document.createElement("div");
-    this.titleEl.className = "af-video-preview-title";
-    caption.appendChild(this.titleEl);
-    this.metaEl = document.createElement("div");
-    this.metaEl.className = "af-video-preview-meta";
-    caption.appendChild(this.metaEl);
-    this.favoriteEl = document.createElement("div");
-    this.favoriteEl.className = "af-video-preview-favorite";
-    caption.appendChild(this.favoriteEl);
-    this.root.appendChild(caption);
+    this.root.appendChild(this.imgEl);
 
     container.appendChild(this.root);
   }
@@ -101,12 +68,6 @@ export class VideoPreview {
       this.detachVideo();
       this.imgEl.removeAttribute("src");
       this.imgEl.onerror = null;
-      this.marqueeEl.removeAttribute("src");
-      this.marqueeEl.onerror = null;
-      this.revokeMarqueeBlobUrl();
-      this.titleEl.textContent = "";
-      this.metaEl.textContent = "";
-      this.favoriteEl.textContent = "";
       this.currentId = null;
       return;
     }
@@ -115,52 +76,23 @@ export class VideoPreview {
     if (this.currentId === game.id) return;
     this.currentId = game.id;
 
-    // Reset visuals + kill anything pending from the previous game.
     this.detachVideo();
-    this.marqueeEl.removeAttribute("src");
-    this.marqueeEl.onerror = null;
-    this.revokeMarqueeBlobUrl();
-    this.titleEl.textContent = game.title;
-    const systemLabel = game.system === "cps1" ? "CPS-1" : "Neo-Geo";
-    this.metaEl.textContent = `${game.publisher} · ${game.year} · ${systemLabel}`;
-    this.favoriteEl.textContent = game.favorite ? "★ Favorite" : "";
 
     if (this.loader) {
       const token = this.pendingFetchToken;
-
-      // Screenshot: try each candidate URL in order; set the GameEntry
-      // placeholder as the absolute last resort. Uses native <img>
-      // onerror cascade — no fetch() so CORS-less hosts like ArcadeDB
-      // serve us straight to the DOM.
+      // Start the image cascade and the video probe together, but hide
+      // the image while the video has a chance to load — avoids the
+      // ugly flash where a 16:9 screenshot sits behind a 4:3 <video>
+      // during the couple of frames before `loadeddata` fires.
+      this.root.classList.add("probing-video");
       this.tryImageCascade(
         this.imgEl,
         this.loader.screenshotCandidates(game.id, game.system),
         game.screenshotUrl,
         `${game.title} screenshot`,
       );
-
-      // Marquee: same cascade, plus a generated-canvas fallback when
-      // every remote URL 404s so the banner is never empty.
-      this.tryImageCascade(
-        this.marqueeEl,
-        this.loader.marqueeCandidates(game.id, game.system),
-        null,
-        `${game.title} marquee`,
-        async () => {
-          if (token !== this.pendingFetchToken) return null;
-          const url = await this.loader!.generateMarqueeUrl(game.id, game.title);
-          if (!url) return null;
-          this.currentMarqueeBlobUrl = url;
-          return url;
-        },
-      );
-
-      this.fadeTimerId = this.setTimer(() => {
-        if (token !== this.pendingFetchToken) return;
-        this.tryMountVideo(game);
-      }, this.crossfadeMs);
+      this.tryMountVideo(game, token);
     } else {
-      // No loader → honour the GameEntry placeholder like Phase 1.
       this.imgEl.onerror = null;
       if (game.screenshotUrl) this.imgEl.src = game.screenshotUrl;
       else this.imgEl.removeAttribute("src");
@@ -173,10 +105,30 @@ export class VideoPreview {
     return this.currentVideoEl;
   }
 
-  private tryMountVideo(game: GameEntry): void {
-    if (!this.loader) return;
+  /** Freeze preview playback — called when the kiosk hands off to the
+   * playing screen so the ArcadeDB clip isn't competing for audio or
+   * CPU with the live emulator. */
+  pauseVideo(): void {
+    if (this.currentVideoEl) {
+      try { this.currentVideoEl.pause(); } catch { /* ignore */ }
+    }
+  }
+
+  /** Re-arm preview playback after a return to the browser. Muted if
+   * autoplay blocks it — same retry shape as the initial mount. */
+  resumeVideo(): void {
+    const v = this.currentVideoEl;
+    if (!v) return;
+    void v.play().catch(() => {
+      v.muted = true;
+      void v.play().catch(() => { /* still blocked */ });
+    });
+  }
+
+  private tryMountVideo(game: GameEntry, token: number): void {
+    if (!this.loader) { this.revealImage(); return; }
     const candidates = this.loader.videoCandidates(game.id, game.system);
-    if (candidates.length === 0) return;
+    if (candidates.length === 0) { this.revealImage(); return; }
 
     const video = document.createElement("video");
     video.className = "af-video-preview-video";
@@ -190,14 +142,23 @@ export class VideoPreview {
 
     let idx = 0;
     const tryNext = (): void => {
+      if (token !== this.pendingFetchToken) { video.remove(); return; }
       if (game.id !== this.currentId) { video.remove(); return; }
-      if (idx >= candidates.length) { video.remove(); return; }
+      if (idx >= candidates.length) {
+        // Cascade exhausted → reveal the screenshot and drop the video.
+        video.remove();
+        this.revealImage();
+        return;
+      }
       video.src = candidates[idx++]!;
     };
     video.addEventListener("error", () => tryNext());
     video.addEventListener("loadeddata", () => {
+      if (token !== this.pendingFetchToken) return;
       if (game.id !== this.currentId) return;
       this.currentVideoEl = video;
+      this.root.classList.remove("probing-video");
+      this.root.classList.add("has-video");
       void video.play().catch(() => {
         // Autoplay blocked — re-arm muted and retry.
         video.muted = true;
@@ -205,23 +166,19 @@ export class VideoPreview {
       });
     });
 
-    this.media.appendChild(video);
+    this.root.appendChild(video);
     tryNext();
   }
 
-  /**
-   * Walk a list of URL candidates setting them on `img.src` one after
-   * the other. On each onerror, move to the next candidate. When all
-   * remote URLs fail, fall back to `staticFallback` (e.g. GameEntry
-   * placeholder) or run `generator` — useful for marquees where the
-   * last step paints a canvas.
-   */
+  private revealImage(): void {
+    this.root.classList.remove("probing-video");
+  }
+
   private tryImageCascade(
     img: HTMLImageElement,
     urls: string[],
     staticFallback: string | null,
     alt: string,
-    generator?: () => Promise<string | null>,
   ): void {
     img.alt = alt;
     let idx = 0;
@@ -229,14 +186,6 @@ export class VideoPreview {
       if (staticFallback) {
         img.onerror = null;
         img.src = staticFallback;
-        return;
-      }
-      if (generator) {
-        void generator().then((url) => {
-          if (!url) { img.removeAttribute("src"); return; }
-          img.onerror = null;
-          img.src = url;
-        });
         return;
       }
       img.removeAttribute("src");
@@ -255,13 +204,8 @@ export class VideoPreview {
       this.currentVideoEl.remove();
       this.currentVideoEl = null;
     }
-  }
-
-  private revokeMarqueeBlobUrl(): void {
-    if (this.currentMarqueeBlobUrl) {
-      URL.revokeObjectURL(this.currentMarqueeBlobUrl);
-      this.currentMarqueeBlobUrl = null;
-    }
+    this.root.classList.remove("has-video");
+    this.root.classList.remove("probing-video");
   }
 
   private cancelFade(): void {

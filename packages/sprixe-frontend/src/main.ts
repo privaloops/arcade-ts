@@ -34,6 +34,7 @@ import { MediaCache } from "./media/media-cache";
 import { SaveStateDB } from "./state/save-state-db";
 import { SaveStateController } from "./state/save-state-controller";
 import { crtFilterCss } from "./render/scaling";
+import { bootstrapDevRoms } from "./data/dev-roms";
 
 declare const __APP_VERSION__: string;
 
@@ -170,6 +171,8 @@ function startBrowser(
     playing?.stop();
     playing = null;
     browser.root.hidden = false;
+    // Restart the preview clip we paused on launch.
+    browser.getPreview().resumeVideo();
     hints.root.hidden = false;
     hints.setContext("browser");
     router.setMode("menu");
@@ -180,7 +183,7 @@ function startBrowser(
 
   function openContextMenuForSelection(): void {
     if (playing || overlay || settingsScreen || missingBios || contextMenu) return;
-    const game = browser.getList().getSelectedGame();
+    const game = browser.getWheel().getSelectedGame();
     if (!game) return;
     void db.get(game.id).then((rec) => {
       if (!rec) return;
@@ -190,7 +193,7 @@ function startBrowser(
         isFavorite: Boolean(rec.favorite),
         onLaunch: () => {
           contextMenu = null;
-          browser.getList().confirm();
+          browser.getWheel().confirm();
         },
         onToggleFavorite: () => {
           void db.setFavorite(game.id, !rec.favorite).then(() => {
@@ -227,7 +230,7 @@ function startBrowser(
     stateSync.setState({ screen: "playing", paused: false });
   }
 
-  browser.getList().onSelect((game) => {
+  browser.getWheel().onSelect((game) => {
     if (launching || playing || missingBios) return;
     launching = true;
     void (async () => {
@@ -244,6 +247,9 @@ function startBrowser(
         });
         await db.markPlayed(game.id);
         browser.root.hidden = true;
+        // Stop the ArcadeDB preview so it doesn't keep decoding frames
+        // or playing audio behind the live emulator.
+        browser.getPreview().pauseVideo();
         // Chrome-free playing surface — the in-game hints bar is hidden
         // so the canvas fills the viewport. Pause overlay brings its
         // own hints strip back when opened.
@@ -507,7 +513,20 @@ async function bootKiosk(): Promise<void> {
   const host = new PeerHost({ roomId: pickRoomId() });
   host.start().catch((e) => console.warn("[arcade] PeerHost start failed:", e));
 
-  const { games, source } = await loadCatalogue(db);
+  let { games, source } = await loadCatalogue(db);
+
+  // Dev-only: auto-import the sibling sprixe-edit ROM catalogue on
+  // first boot so the browser has something to display without the
+  // phone-upload dance. The vite middleware serves the manifest only
+  // in dev; in production the fetch 404s and this becomes a no-op.
+  const isDev = (import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV === true;
+  if (source === "empty" && isDev) {
+    const imported = await bootstrapDevRoms(new RomPipeline({ db }), toast);
+    if (imported.length > 0) {
+      games = imported.map(romRecordToGameEntry);
+      source = "idb";
+    }
+  }
 
   if (source === "empty") {
     const empty = new EmptyState(app!);

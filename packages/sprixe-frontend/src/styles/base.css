@@ -22,35 +22,162 @@ html, body {
   height: 100%;
 }
 
-/* --- Browser screen layout --- */
+/* --- Browser screen layout (HyperSpin-style) --- */
 
 .af-browser-screen {
+  position: relative;
+  width: 100%;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--af-bg-deep);
+}
+
+/* Background: two stacked layers crossfade between screenshots. */
+.af-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+}
+
+.af-bg-layer {
+  position: absolute;
+  /* Negative inset compensates blur clipping at the viewport edges. */
+  inset: -60px;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  filter: blur(28px) saturate(1.15);
+  opacity: 0;
+  transform: scale(1.08);
+  transition: opacity 700ms var(--af-ease-out);
+}
+
+.af-bg-layer.is-visible {
+  opacity: 0.55;
+}
+
+.af-bg-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse at 50% 100%, rgba(0, 212, 255, 0.10), transparent 55%),
+    radial-gradient(ellipse at 50% 0%, rgba(255, 107, 46, 0.05), transparent 55%),
+    linear-gradient(to bottom, rgba(5, 5, 8, 0.55) 0%, rgba(5, 5, 8, 0.75) 60%, rgba(5, 5, 8, 0.92) 100%);
+}
+
+.af-bg-overlay::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    repeating-linear-gradient(0deg,
+      rgba(255, 255, 255, 0.025) 0,
+      rgba(255, 255, 255, 0.025) 1px,
+      transparent 1px,
+      transparent 3px);
+  mix-blend-mode: overlay;
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+.af-browser-foreground {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  width: 100%;
+  height: 100%;
+  /* Bottom padding clears the fixed hints-bar (≈48px). */
+  padding: 28px 32px 72px;
+  gap: 20px;
+}
+
+/* Top bar shares the same column grid as the middle row so that the
+   title sits above the media pane (left) and the filter pills above
+   the wheel (right). */
+.af-browser-topbar {
+  display: grid;
+  grid-template-columns: 1fr minmax(360px, 460px);
+  gap: 36px;
+  align-items: center;
+}
+
+/* The marquee is no longer shown, but it still has to load so the
+   colour extractor can read its pixels and set --af-dynamic-glow.
+   Parking it offscreen (not display:none) lets the browser fetch the
+   image normally. */
+.af-browser-marquee-probe {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* Title + meta + favorite stacked next to the marquee. */
+.af-browser-titleblock {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  padding: 24px;
-  height: 100vh;
-  background: var(--af-bg-primary);
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
 }
 
-.af-browser-filter-pane {
-  flex: 0 0 auto;
+.af-browser-caption-title {
+  font-family: var(--af-font-display);
+  font-size: clamp(1.8rem, 2.8vw, 2.6rem);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--af-text-primary);
+  text-shadow: 0 0 26px color-mix(in srgb, var(--af-dynamic-glow, rgb(0, 212, 255)) 60%, transparent);
+  line-height: 1.15;
 }
 
-.af-browser-body {
-  flex: 1;
+.af-browser-caption-meta {
+  color: var(--af-text-secondary);
+  font-size: var(--af-size-metadata);
+  letter-spacing: 0.02em;
+}
+
+.af-browser-caption-favorite {
+  color: var(--af-accent-gold);
+  font-size: 0.95rem;
+}
+
+.af-browser-caption-favorite:empty {
+  display: none;
+}
+
+/* Middle: media pane on the left, wheel column on the right. */
+.af-browser-middle {
   display: grid;
-  grid-template-columns: minmax(360px, 1fr) minmax(360px, 1fr);
-  gap: 24px;
+  grid-template-columns: 1fr minmax(360px, 460px);
+  gap: 36px;
   min-height: 0;
 }
 
-.af-browser-list-pane,
-.af-browser-preview-pane {
+/* Borderless media pane — no own background, the video/screenshot
+   sits directly on the blurred page background behind it. */
+.af-browser-media-pane {
   position: relative;
+  min-height: 0;
+  min-width: 0;
   overflow: hidden;
-  background: var(--af-bg-card);
-  border-radius: 8px;
+}
+
+/* Wheel pane: just the cylinder now, filters moved to the topbar. */
+.af-browser-wheel-pane {
+  position: relative;
+  min-height: 0;
+  overflow: visible;
+}
+
+.af-browser-filter-pane {
+  justify-self: start;
 }
 
 /* --- Filter bar --- */
@@ -81,9 +208,8 @@ html, body {
 }
 
 .af-filter-pill.active {
-  background: var(--af-accent-glow);
+  background: color-mix(in srgb, var(--af-dynamic-glow, rgb(0, 212, 255)) 30%, transparent);
   color: var(--af-text-primary);
-  box-shadow: 0 0 0 1px var(--af-accent-glow), 0 0 24px var(--af-accent-glow);
 }
 
 .af-filter-count {
@@ -97,52 +223,83 @@ html, body {
   font-size: 0.8rem;
 }
 
-/* --- Game list --- */
+/* --- Wheel (CSS 3D cylinder) --- */
 
-.af-game-list {
-  position: relative;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-}
-
-.af-game-list-viewport {
-  position: relative;
-  width: 100%;
-  height: 100%;
-}
-
-.af-game-list-spacer { width: 100%; }
-
-.af-game-list-item {
+.af-wheel {
   position: absolute;
-  left: 0;
-  right: 0;
-  height: 56px;
-  padding: 0 20px;
+  inset: 0;
+  perspective: 1400px;
+  perspective-origin: 50% 50%;
+  overflow: visible;
+}
+
+.af-wheel-stage {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+}
+
+/* Borderless plates — just the marquee image itself floating on the
+   cylinder, with a glow under the selected one. */
+.af-wheel-item {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 100%;
+  max-width: 360px;
+  height: 100px;
+  margin: 0;
+  padding: 0;
   display: flex;
   align-items: center;
-  gap: 12px;
-  color: var(--af-text-secondary);
-  transition: background calc(var(--af-dur-selection) * var(--af-motion)) var(--af-ease-out),
-              color calc(var(--af-dur-selection) * var(--af-motion)) var(--af-ease-out);
+  justify-content: center;
+  backface-visibility: hidden;
+  will-change: transform, opacity;
+  transition:
+    transform 280ms var(--af-ease-out),
+    opacity 220ms var(--af-ease-out),
+    filter 320ms var(--af-ease-out);
+  pointer-events: none;
 }
 
-.af-game-list-item.selected {
-  background: var(--af-bg-card-hover);
-  color: var(--af-text-primary);
-  box-shadow: inset 3px 0 0 var(--af-accent), 0 0 32px var(--af-accent-glow);
+.af-wheel-item.selected {
+  filter: drop-shadow(0 0 28px color-mix(in srgb, var(--af-dynamic-glow, rgb(0, 212, 255)) 80%, transparent));
 }
 
-.af-game-list-favorite {
-  color: var(--af-accent-gold);
+.af-wheel-item-logo {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  display: none;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.6));
 }
 
-.af-game-list-title {
-  flex: 1;
+.af-wheel-item.has-logo .af-wheel-item-logo {
+  display: block;
+}
+
+.af-wheel-item-title {
   font-family: var(--af-font-display);
-  font-size: var(--af-size-game-title);
-  font-weight: 500;
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--af-text-primary);
+  text-align: center;
+  padding: 4px 12px;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.af-wheel-item.has-logo .af-wheel-item-title {
+  display: none;
+}
+
+.af-wheel-item.selected .af-wheel-item-title {
+  color: color-mix(in srgb, var(--af-dynamic-glow, rgb(0, 212, 255)) 100%, transparent);
+  text-shadow: 0 0 16px color-mix(in srgb, var(--af-dynamic-glow, rgb(0, 212, 255)) 60%, transparent);
 }
 
 /* --- System badges --- */
@@ -161,76 +318,43 @@ html, body {
 .af-badge--cps1   { background: var(--af-badge-cps1); }
 .af-badge--neogeo { background: var(--af-badge-neogeo); }
 
-/* --- Video preview pane --- */
+/* --- Video preview (media pane fill) --- */
 
 .af-video-preview {
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-  height: 100%;
-  padding: 24px;
-  gap: 12px;
-}
-
-.af-video-preview-marquee {
-  width: 100%;
-  max-height: 15%;
-  min-height: 60px;
-  object-fit: contain;
-  border-radius: 6px;
-  background: var(--af-bg-card);
-  border: 1px solid var(--af-accent-glow);
-  box-shadow: 0 0 24px rgba(0, 212, 255, 0.25);
-}
-
-.af-video-preview-marquee:not([src]) {
-  visibility: hidden;
-}
-
-.af-video-preview-media {
-  flex: 1;
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--af-bg-deep);
-  border-radius: 6px;
+  position: absolute;
+  inset: 0;
   overflow: hidden;
 }
 
+/* Both media elements absolutely fill the pane. `object-fit: contain`
+   keeps the game's aspect ratio; `max-*: 100%` stops a naturally-large
+   screenshot from sneaking past the pane edges in flex contexts.
+   `object-position: left` pins the 4:3 content to the left edge so it
+   doesn't float awkwardly in the middle of a 16:9 pane. */
 .af-video-preview-image,
-.af-video-preview-video {
-  /* Fill the media box; `contain` preserves the 4:3 / pixel-art
-     aspect ratio. Without `width: 100%` the natural 384×224 size
-     leaves a tiny thumbnail floating in a big empty pane. */
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  image-rendering: pixelated;
-}
-
 .af-video-preview-video {
   position: absolute;
   inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  object-position: left center;
+  image-rendering: pixelated;
 }
 
-.af-video-preview-title {
-  margin-top: 16px;
-  font-family: var(--af-font-display);
-  font-size: var(--af-size-section);
-  font-weight: 600;
+.af-video-preview-image:not([src]) {
+  visibility: hidden;
 }
 
-.af-video-preview-meta {
-  color: var(--af-text-secondary);
-  margin-top: 4px;
-  font-size: var(--af-size-metadata);
-}
-
-.af-video-preview-favorite {
-  margin-top: 8px;
-  color: var(--af-accent-gold);
-  font-size: 0.9rem;
+/* Once the <video> reports loadeddata we hide the still so the pane
+   reads as a single element instead of two stacked frames. Same for
+   the probing window: we hide the screenshot while the video cascade
+   is deciding, and only reveal it if every candidate fails. */
+.af-video-preview.has-video .af-video-preview-image,
+.af-video-preview.probing-video .af-video-preview-image {
+  visibility: hidden;
 }
 
 /* --- Hints bar --- */
@@ -259,7 +383,8 @@ html, body {
 }
 
 .af-hint-button {
-  color: var(--af-accent);
+  /* Mostly white for readability, subtly tinted by the dynamic glow. */
+  color: color-mix(in srgb, var(--af-dynamic-glow, rgb(0, 212, 255)) 35%, white);
   font-family: var(--af-font-display);
   font-weight: 600;
   letter-spacing: 0.08em;

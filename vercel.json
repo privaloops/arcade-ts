@@ -19,5 +19,8 @@
         { "key": "Cross-Origin-Embedder-Policy", "value": "credentialless" }
       ]
     }
+  ],
+  "rewrites": [
+    { "source": "/arcadedb/:path*", "destination": "https://adb.arcadeitalia.net/:path*" }
   ]
 }

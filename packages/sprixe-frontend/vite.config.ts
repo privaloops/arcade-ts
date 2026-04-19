@@ -1,6 +1,6 @@
 import { defineConfig } from "vite";
 import { resolve } from "path";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import os from "node:os";
 
 const pkg = JSON.parse(
@@ -36,6 +36,18 @@ export default defineConfig(({ command }) => ({
     host: true,
     fs: {
       allow: [resolve(__dirname, "../..")],
+    },
+    // Same-origin proxy to ArcadeDB so the colour extractor can read
+    // marquee pixels without tripping CORS (ArcadeDB doesn't send
+    // Access-Control-Allow-Origin). Mirrored by the Vercel rewrite in
+    // production. Regular marquee display still hits ArcadeDB direct
+    // so this proxy only sees the extractor's requests.
+    proxy: {
+      "/arcadedb": {
+        target: "https://adb.arcadeitalia.net",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/arcadedb/, ""),
+      },
     },
   },
   build: {
@@ -96,6 +108,60 @@ export default defineConfig(({ command }) => ({
             return;
           }
           next();
+        });
+      },
+    },
+    {
+      // Dev-only: expose the sibling sprixe-edit ROM folders so the
+      // frontend can bootstrap an empty IndexedDB with a real catalogue
+      // at boot. No-op in production builds since this plugin only runs
+      // in `configureServer`.
+      name: "dev-roms-serve",
+      configureServer(server) {
+        const romsRoot = resolve(__dirname, "../sprixe-edit/public/roms");
+        const SYSTEMS = ["cps-1", "neogeo", "ko"];
+
+        function listZips(): Array<{ system: string; file: string; path: string; size: number }> {
+          const result: Array<{ system: string; file: string; path: string; size: number }> = [];
+          for (const sys of SYSTEMS) {
+            const dir = resolve(romsRoot, sys);
+            if (!existsSync(dir)) continue;
+            for (const file of readdirSync(dir)) {
+              if (!file.toLowerCase().endsWith(".zip")) continue;
+              const filePath = resolve(dir, file);
+              result.push({
+                system: sys,
+                file,
+                path: `/__dev-roms/${sys}/${file}`,
+                size: statSync(filePath).size,
+              });
+            }
+          }
+          return result;
+        }
+
+        server.middlewares.use((req, res, next) => {
+          const url = req.url?.split("?")[0] ?? "";
+          if (!url.startsWith("/__dev-roms/")) return next();
+
+          if (url === "/__dev-roms/manifest.json") {
+            const manifest = listZips();
+            res.setHeader("content-type", "application/json");
+            res.end(JSON.stringify(manifest));
+            return;
+          }
+
+          const match = /^\/__dev-roms\/([a-z0-9-]+)\/([a-z0-9]+\.zip)$/i.exec(url);
+          if (!match) { res.statusCode = 404; res.end(); return; }
+          const [, system, file] = match;
+          if (!SYSTEMS.includes(system!)) { res.statusCode = 404; res.end(); return; }
+          const filePath = resolve(romsRoot, system!, file!);
+          if (!filePath.startsWith(romsRoot)) { res.statusCode = 403; res.end(); return; }
+          if (!existsSync(filePath)) { res.statusCode = 404; res.end(); return; }
+          const data = readFileSync(filePath);
+          res.setHeader("content-type", "application/zip");
+          res.setHeader("content-length", String(data.length));
+          res.end(data);
         });
       },
     },
