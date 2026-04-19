@@ -14,7 +14,9 @@
  * old payload, migrate, and rewrite under v2 without losing mappings.
  */
 
-export const STORAGE_KEY = "sprixe.input.mapping.v1";
+export const STORAGE_KEY = "sprixe.input.mapping.v2";
+/** Legacy key kept for one-shot silent migration on first v2 boot. */
+const STORAGE_KEY_V1 = "sprixe.input.mapping.v1";
 
 export type MappingRole =
   | "coin"
@@ -74,21 +76,52 @@ export type InputBinding =
   | { kind: "axis"; index: number; dir: -1 | 1 }
   | { kind: "key"; code: string };
 
+/**
+ * `type` only describes how P1 was captured at first boot (drives the
+ * derivation from arcade buttons to menu nav bindings). Each player
+ * slot is independent — a v2 mapping can have P1 on gamepad and P2 on
+ * keyboard or vice-versa. Unfilled slots stay absent.
+ */
+export type PlayerIndex = 0 | 1;
+export type PlayerSlot = Partial<Record<MappingRole, InputBinding>>;
+
 export interface InputMapping {
-  version: 1;
+  version: 2;
   type: "gamepad" | "keyboard";
-  p1: Partial<Record<MappingRole, InputBinding>>;
+  p1: PlayerSlot;
+  p2?: PlayerSlot;
+}
+
+function migrateV1(raw: unknown): InputMapping | null {
+  const v1 = raw as { version?: number; type?: unknown; p1?: unknown } | null;
+  if (!v1 || v1.version !== 1) return null;
+  if (v1.type !== "gamepad" && v1.type !== "keyboard") return null;
+  const p1 = v1.p1 && typeof v1.p1 === "object" ? (v1.p1 as PlayerSlot) : {};
+  return { version: 2, type: v1.type, p1 };
 }
 
 export function loadMapping(): InputMapping | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as InputMapping;
-    if (parsed?.version !== 1 || (parsed.type !== "gamepad" && parsed.type !== "keyboard")) {
-      return null;
+    if (raw) {
+      const parsed = JSON.parse(raw) as InputMapping;
+      if (parsed?.version === 2 && (parsed.type === "gamepad" || parsed.type === "keyboard")) {
+        return parsed;
+      }
     }
-    return parsed;
+    // Migrate v1 → v2 once, write back under the new key so the old one
+    // can age out (we keep reading it below in case migration re-runs
+    // before the write lands).
+    const legacyRaw = localStorage.getItem(STORAGE_KEY_V1);
+    if (legacyRaw) {
+      const legacy = JSON.parse(legacyRaw) as unknown;
+      const migrated = migrateV1(legacy);
+      if (migrated) {
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated)); } catch { /* quota */ }
+        return migrated;
+      }
+    }
+    return null;
   } catch {
     return null;
   }
@@ -98,8 +131,42 @@ export function saveMapping(mapping: InputMapping): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(mapping));
 }
 
+/**
+ * Merge a freshly-captured slot into the stored mapping without touching
+ * the other slot. `type` is only bumped when P1 is being rebound —
+ * P1's capture drives menu nav derivation, P2 doesn't.
+ */
+export function upsertPlayerSlot(
+  base: InputMapping | null,
+  player: PlayerIndex,
+  slot: PlayerSlot,
+  slotType: "gamepad" | "keyboard",
+): InputMapping {
+  const current: InputMapping = base ?? { version: 2, type: slotType, p1: {} };
+  if (player === 0) {
+    const next: InputMapping = { version: 2, type: slotType, p1: slot };
+    if (current.p2) next.p2 = current.p2;
+    return next;
+  }
+  return { version: 2, type: current.type, p1: current.p1, p2: slot };
+}
+
 export function clearMapping(): void {
   localStorage.removeItem(STORAGE_KEY);
+  localStorage.removeItem(STORAGE_KEY_V1);
+}
+
+/** Clear only one player's slot. Used by per-player Reset in Settings. */
+export function clearPlayerSlot(player: PlayerIndex): void {
+  const current = loadMapping();
+  if (!current) return;
+  if (player === 0) {
+    // P1 drives menu derivation — wiping it means we start fresh.
+    clearMapping();
+    return;
+  }
+  const next: InputMapping = { version: 2, type: current.type, p1: current.p1 };
+  saveMapping(next);
 }
 
 export function bindingsEqual(a: InputBinding, b: InputBinding): boolean {
@@ -146,8 +213,8 @@ export interface GamepadNavBindingsPatch {
   coin?: NavBinding | null;
 }
 
-function navFromRole(mapping: InputMapping, role: MappingRole): NavBinding | undefined {
-  const b = mapping.p1[role];
+function navFromRole(slot: PlayerSlot, role: MappingRole): NavBinding | undefined {
+  const b = slot[role];
   if (!b) return undefined;
   if (b.kind === "button") return { kind: "button", index: b.index };
   if (b.kind === "axis") return { kind: "axis", index: b.index, dir: b.dir };
@@ -174,18 +241,19 @@ export function mappingToGamepadNavBindings(
   mapping: InputMapping | null,
 ): GamepadNavBindingsPatch {
   if (!mapping || mapping.type !== "gamepad") return {};
+  const slot = mapping.p1;
   const patch: GamepadNavBindingsPatch = {
-    up: navFromRole(mapping, "up") ?? null,
-    down: navFromRole(mapping, "down") ?? null,
-    left: navFromRole(mapping, "left") ?? null,
-    right: navFromRole(mapping, "right") ?? null,
-    confirm: navFromRole(mapping, "button1") ?? null,
-    back: navFromRole(mapping, "button2") ?? null,
-    contextMenu: navFromRole(mapping, "button3") ?? null,
-    bumperLeft: navFromRole(mapping, "button5") ?? null,
-    bumperRight: navFromRole(mapping, "button6") ?? null,
-    start: navFromRole(mapping, "start") ?? null,
-    coin: navFromRole(mapping, "coin") ?? null,
+    up: navFromRole(slot, "up") ?? null,
+    down: navFromRole(slot, "down") ?? null,
+    left: navFromRole(slot, "left") ?? null,
+    right: navFromRole(slot, "right") ?? null,
+    confirm: navFromRole(slot, "button1") ?? null,
+    back: navFromRole(slot, "button2") ?? null,
+    contextMenu: navFromRole(slot, "button3") ?? null,
+    bumperLeft: navFromRole(slot, "button5") ?? null,
+    bumperRight: navFromRole(slot, "button6") ?? null,
+    start: navFromRole(slot, "start") ?? null,
+    coin: navFromRole(slot, "coin") ?? null,
   };
   return patch;
 }
@@ -214,14 +282,72 @@ export interface EngineGamepadMappingPatch {
   coin?: number;
 }
 
+function slotFor(mapping: InputMapping | null, player: PlayerIndex): PlayerSlot | null {
+  if (!mapping) return null;
+  return player === 0 ? mapping.p1 : mapping.p2 ?? null;
+}
+
+/**
+ * Translate a player's captured slot into the engine's GamepadMapping
+ * patch. Only `button` bindings forward — axes are read directly from
+ * `pad.axes` by the engine regardless of mapping.
+ */
 export function mappingToEngineGamepadMapping(
   mapping: InputMapping | null,
+  player: PlayerIndex = 0,
 ): EngineGamepadMappingPatch {
-  if (!mapping || mapping.type !== "gamepad") return {};
+  const slot = slotFor(mapping, player);
+  if (!slot) return {};
   const patch: EngineGamepadMappingPatch = {};
   const pick = (role: MappingRole, key: keyof EngineGamepadMappingPatch): void => {
-    const b = mapping.p1[role];
+    const b = slot[role];
     if (b?.kind === "button") patch[key] = b.index;
+  };
+  pick("up", "up");
+  pick("down", "down");
+  pick("left", "left");
+  pick("right", "right");
+  pick("button1", "button1");
+  pick("button2", "button2");
+  pick("button3", "button3");
+  pick("button4", "button4");
+  pick("button5", "button5");
+  pick("button6", "button6");
+  pick("start", "start");
+  pick("coin", "coin");
+  return patch;
+}
+
+/**
+ * Translate a player's captured slot into the engine's KeyMapping patch.
+ * Only `key` bindings forward. Unfilled roles are omitted — the caller
+ * merges onto the engine's default P1/P2 key set.
+ */
+export interface EngineKeyMappingPatch {
+  up?: string;
+  down?: string;
+  left?: string;
+  right?: string;
+  button1?: string;
+  button2?: string;
+  button3?: string;
+  button4?: string;
+  button5?: string;
+  button6?: string;
+  start?: string;
+  coin?: string;
+}
+
+export function mappingToEngineKeyMapping(
+  mapping: InputMapping | null,
+  player: PlayerIndex = 0,
+): EngineKeyMappingPatch {
+  const slot = slotFor(mapping, player);
+  if (!slot) return {};
+  const patch: EngineKeyMappingPatch = {};
+  const pick = (role: MappingRole, key: keyof EngineKeyMappingPatch): void => {
+    const b = slot[role];
+    if (b?.kind === "key") patch[key] = b.code;
   };
   pick("up", "up");
   pick("down", "down");

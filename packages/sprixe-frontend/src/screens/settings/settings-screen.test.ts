@@ -132,7 +132,7 @@ describe("SettingsScreen", () => {
         onClose: onClose as unknown as () => void,
         controls: {
           getMapping: () => ({
-            version: 1,
+            version: 2,
             type: "keyboard",
             p1: { coin: { kind: "key", code: "Space" }, start: { kind: "key", code: "Enter" } },
           }),

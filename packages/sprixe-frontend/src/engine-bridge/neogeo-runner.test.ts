@@ -23,6 +23,12 @@ vi.mock("@sprixe/engine/neogeo-emulator", () => ({
     resume = vi.fn();
     isPaused = vi.fn(() => false);
     isRunning = vi.fn(() => true);
+    getInputManager = vi.fn(() => ({
+      getGamepadMapping: () => ({}),
+      setGamepadMapping: vi.fn(),
+      getKeyMapping: () => ({}),
+      setKeyMapping: vi.fn(),
+    }));
   },
 }));
 

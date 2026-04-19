@@ -6,13 +6,14 @@
 
 import { Emulator } from "@sprixe/engine/emulator";
 import type { EmulatorRunner } from "./emulator-runner";
-import type { EngineGamepadMappingPatch } from "../input/mapping-store";
+import type { InputMapping } from "../input/mapping-store";
+import { applyUserMapping } from "./apply-mapping";
 
 export interface Cps1RunnerOptions {
   canvas: HTMLCanvasElement;
   romBuffer: ArrayBuffer;
-  /** Partial CPS1 gamepad mapping to merge onto the engine's defaults. */
-  gamepadMapping?: EngineGamepadMappingPatch;
+  /** User-captured mapping (P1 + optional P2). */
+  mapping?: InputMapping | null;
 }
 
 export async function createCps1Runner(opts: Cps1RunnerOptions): Promise<EmulatorRunner> {
@@ -21,7 +22,7 @@ export async function createCps1Runner(opts: Cps1RunnerOptions): Promise<Emulato
   // initAudio() tolerates missing AudioContext user-gesture — it just
   // logs + leaves the emulator silent rather than throwing.
   await emu.initAudio();
-  applyGamepadMappingPatch(emu.getInputManager(), opts.gamepadMapping);
+  applyUserMapping(emu.getInputManager(), opts.mapping ?? null);
 
   return {
     start: () => emu.start(),
@@ -41,18 +42,4 @@ export async function createCps1Runner(opts: Cps1RunnerOptions): Promise<Emulato
     loadState: (buf: ArrayBuffer) => emu.importStateFromBuffer(buf),
     destroy: () => emu.destroy(),
   };
-}
-
-type InputManagerLike = {
-  getGamepadMapping(player: number): Record<string, number>;
-  setGamepadMapping(player: number, mapping: Record<string, number>): void;
-};
-
-function applyGamepadMappingPatch(
-  input: InputManagerLike | unknown,
-  patch?: EngineGamepadMappingPatch,
-): void {
-  if (!patch || Object.keys(patch).length === 0) return;
-  const im = input as InputManagerLike;
-  im.setGamepadMapping(0, { ...im.getGamepadMapping(0), ...patch });
 }
