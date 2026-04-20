@@ -5,6 +5,7 @@ import {
   CHUNK_SIZE,
   BACKPRESSURE_HIGH,
   BACKPRESSURE_LOW,
+  defaultWaitForLow,
   type ConnectionLike,
   type PeerSendPeerLike,
 } from "./peer-send";
@@ -271,6 +272,110 @@ describe("PeerSend", () => {
     it("exports the canonical high/low constants", () => {
       expect(BACKPRESSURE_HIGH).toBe(1024 * 1024);
       expect(BACKPRESSURE_LOW).toBe(256 * 1024);
+    });
+  });
+
+  describe("connect timeout", () => {
+    it("connect() rejects with TransferError if the peer never emits 'open'", async () => {
+      const peer = new MockPeer();
+      const send = new PeerSend({
+        roomId: "abc",
+        peerFactory: () => peer as unknown as PeerSendPeerLike,
+        connectTimeoutMs: 20,
+      });
+      await expect(send.connect()).rejects.toBeInstanceOf(TransferError);
+    });
+
+    it("connect() rejects with TransferError if the data channel never opens", async () => {
+      const peer = new MockPeer();
+      const send = new PeerSend({
+        roomId: "abc",
+        peerFactory: () => peer as unknown as PeerSendPeerLike,
+        connectTimeoutMs: 20,
+      });
+      // Override connect() to return a stalled DataConnection that
+      // never emits 'open'.
+      peer.connect = () => new MockConnection() as unknown as ConnectionLike;
+      const p = send.connect();
+      queueMicrotask(() => peer.emit("open", "phone-id"));
+      await expect(p).rejects.toBeInstanceOf(TransferError);
+    });
+  });
+
+  describe("drain after file-end", () => {
+    it("waits for bufferedAmount to reach 0 before resolving", async () => {
+      const { peer, send } = makeSend();
+      const conn = await openAndConnect(send, peer);
+      // Simulate a buffered send: after file-end the send loop polls
+      // bufferedAmount until it hits 0. We schedule the drain to
+      // happen after a couple of ticks.
+      conn.bufferedAmount = 1000;
+      const drainer = setTimeout(() => { conn.bufferedAmount = 0; }, 80);
+      try {
+        await send.sendFile("x.zip", new Uint8Array(CHUNK_SIZE).buffer);
+      } finally {
+        clearTimeout(drainer);
+      }
+      expect(conn.bufferedAmount).toBe(0);
+    });
+
+    it("throws TransferError('stalled') when bufferedAmount never drains", async () => {
+      const peer = new MockPeer();
+      const send = new PeerSend({
+        roomId: "abc",
+        peerFactory: () => peer as unknown as PeerSendPeerLike,
+        waitForLow: async (conn) => { (conn as MockConnection).bufferedAmount = 0; },
+        drainTimeoutMs: 40,
+      });
+      const conn = await openAndConnect(send, peer);
+      conn.bufferedAmount = 999;
+      await expect(send.sendFile("x.zip", new Uint8Array(CHUNK_SIZE).buffer))
+        .rejects.toBeInstanceOf(TransferError);
+    });
+  });
+
+  describe("bufferedamountlow listener cleanup", () => {
+    it("defaultWaitForLow detaches its handler after the drain event", async () => {
+      let attached = 0;
+      let detached = 0;
+      let savedHandler: ((...args: unknown[]) => void) | null = null;
+      const conn: ConnectionLike = {
+        send: () => {},
+        close: () => {},
+        bufferedAmount: 0,
+        bufferedAmountLowThreshold: 0,
+        on: (event, cb) => {
+          if (event === "bufferedamountlow") {
+            attached += 1;
+            savedHandler = cb;
+          }
+        },
+        off: (event, cb) => {
+          if (event === "bufferedamountlow" && cb === savedHandler) {
+            detached += 1;
+          }
+        },
+      };
+
+      const waiting = defaultWaitForLow(conn, 1000);
+      expect(attached).toBe(1);
+      expect(detached).toBe(0);
+      // Fire the drain event — handler should resolve and unhook itself.
+      savedHandler!();
+      await waiting;
+      expect(detached).toBe(1);
+    });
+
+    it("defaultWaitForLow rejects with TransferError when no drain event fires", async () => {
+      const conn: ConnectionLike = {
+        send: () => {},
+        close: () => {},
+        bufferedAmount: 0,
+        bufferedAmountLowThreshold: 0,
+        on: () => {},
+        off: () => {},
+      };
+      await expect(defaultWaitForLow(conn, 20)).rejects.toBeInstanceOf(TransferError);
     });
   });
 });

@@ -22,6 +22,10 @@ export class EmptyState {
   readonly root: HTMLDivElement;
 
   private readonly qr: QrCode;
+  private readonly qrWrap: HTMLDivElement;
+  private readonly prompt: HTMLParagraphElement;
+  private readonly wifi: HTMLParagraphElement;
+  private serverDownEl: HTMLDivElement | null = null;
 
   constructor(container: HTMLElement, options: EmptyStateOptions = {}) {
     this.root = document.createElement("div");
@@ -38,23 +42,23 @@ export class EmptyState {
     headline.textContent = "Welcome to your arcade.";
     this.root.appendChild(headline);
 
-    const qrWrap = document.createElement("div");
-    qrWrap.className = "af-empty-qr";
-    this.qr = new QrCode(qrWrap, {
+    this.qrWrap = document.createElement("div");
+    this.qrWrap.className = "af-empty-qr";
+    this.qr = new QrCode(this.qrWrap, {
       size: 200,
       baseUrl: options.baseUrl ?? resolvePhoneBaseUrl(),
     });
-    this.root.appendChild(qrWrap);
+    this.root.appendChild(this.qrWrap);
 
-    const prompt = document.createElement("p");
-    prompt.className = "af-empty-prompt";
-    prompt.textContent = "Scan with your phone to add games";
-    this.root.appendChild(prompt);
+    this.prompt = document.createElement("p");
+    this.prompt.className = "af-empty-prompt";
+    this.prompt.textContent = "Scan with your phone to add games";
+    this.root.appendChild(this.prompt);
 
-    const wifi = document.createElement("p");
-    wifi.className = "af-empty-wifi";
-    wifi.textContent = "(same WiFi network)";
-    this.root.appendChild(wifi);
+    this.wifi = document.createElement("p");
+    this.wifi.className = "af-empty-wifi";
+    this.wifi.textContent = "(same WiFi network)";
+    this.root.appendChild(this.wifi);
 
     const systems = document.createElement("p");
     systems.className = "af-empty-systems";
@@ -71,6 +75,52 @@ export class EmptyState {
 
   async setRoomId(roomId: string): Promise<void> {
     await this.qr.setRoomId(roomId);
+  }
+
+  /** Swap the QR for a "server unreachable" banner when the kiosk
+   * can't bind to a PeerJS room (signaling down, rate-limited, etc.).
+   * The user at least sees *why* their phone can't connect. */
+  setServerDown(message: string, onRetry?: () => void): void {
+    if (this.serverDownEl) return;
+    this.qrWrap.hidden = true;
+    this.prompt.hidden = true;
+    this.wifi.hidden = true;
+
+    const panel = document.createElement("div");
+    panel.className = "af-empty-server-down";
+    panel.setAttribute("data-testid", "empty-state-server-down");
+
+    const title = document.createElement("p");
+    title.className = "af-empty-server-down-title";
+    title.textContent = "Phone pairing unavailable";
+    panel.appendChild(title);
+
+    const detail = document.createElement("p");
+    detail.className = "af-empty-server-down-detail";
+    detail.textContent = message;
+    panel.appendChild(detail);
+
+    if (onRetry) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "af-empty-server-down-retry";
+      btn.textContent = "Retry";
+      btn.addEventListener("click", () => onRetry());
+      panel.appendChild(btn);
+    }
+
+    this.root.insertBefore(panel, this.qrWrap);
+    this.serverDownEl = panel;
+  }
+
+  /** Restore the QR flow after a successful retry. */
+  clearServerDown(): void {
+    if (!this.serverDownEl) return;
+    this.serverDownEl.remove();
+    this.serverDownEl = null;
+    this.qrWrap.hidden = false;
+    this.prompt.hidden = false;
+    this.wifi.hidden = false;
   }
 
   unmount(): void {

@@ -303,4 +303,60 @@ describe("PeerHost", () => {
       expect(cb.mock.calls[0]![0]).toBeInstanceOf(Error);
     });
   });
+
+  describe("incomplete transfer guard", () => {
+    async function spinUp() {
+      const { factory, instances } = makePeerFactory();
+      const host = new PeerHost({ roomId: "abc", peerFactory: factory });
+      const p = host.start();
+      instances[0]!.emit("open", "abc");
+      await p;
+      return { host, peer: instances[0]! };
+    }
+
+    it("rejects and signals error when receivedBytes < declared size", async () => {
+      const { host, peer } = await spinUp();
+      const fileCb = vi.fn();
+      const errCb = vi.fn();
+      host.onFile(fileCb);
+      host.onError(errCb);
+
+      const conn = new MockConnection();
+      peer.emit("connection", conn as unknown as DataConnection);
+
+      conn.emit("data", { type: "file-start", name: "broken.zip", size: 1000 });
+      conn.emit("data", { type: "chunk", idx: 0, data: new Uint8Array(500).buffer });
+      conn.emit("data", { type: "file-end", name: "broken.zip" });
+
+      expect(fileCb).not.toHaveBeenCalled();
+      expect(errCb).toHaveBeenCalledTimes(1);
+      const err = errCb.mock.calls[0]![0] as Error;
+      expect(err.message).toContain("incomplete transfer");
+      // The phone receives an error message back.
+      const errMsg = conn.sent.find(
+        (m) => (m as { type: string }).type === "error"
+      ) as { type: "error"; name: string; error: string } | undefined;
+      expect(errMsg).toBeDefined();
+      expect(errMsg!.name).toBe("broken.zip");
+    });
+
+    it("rejects when a chunk index is missing (hole in sequence)", async () => {
+      const { host, peer } = await spinUp();
+      const fileCb = vi.fn();
+      const errCb = vi.fn();
+      host.onFile(fileCb);
+      host.onError(errCb);
+
+      const conn = new MockConnection();
+      peer.emit("connection", conn as unknown as DataConnection);
+
+      // size 2 * 16KB = 32768, idx 0 OK, idx 1 missing.
+      conn.emit("data", { type: "file-start", name: "holey.zip", size: 32768 });
+      conn.emit("data", { type: "chunk", idx: 0, data: new Uint8Array(16384).buffer });
+      conn.emit("data", { type: "file-end", name: "holey.zip" });
+
+      expect(fileCb).not.toHaveBeenCalled();
+      expect(errCb).toHaveBeenCalledTimes(1);
+    });
+  });
 });

@@ -9,19 +9,30 @@
  */
 
 import { PeerSend, TransferError } from "../../p2p/peer-send";
+import { sendFileWithReconnect, type ResumableSender } from "../../p2p/reconnect";
 import { UploadTab, type QueueEntry } from "../../phone/upload-tab";
 import { RemoteTab, type KioskState, type Command } from "../../phone/remote-tab";
 import type { KioskToPhoneMessage } from "../../p2p/protocol";
 
 export interface PhonePageOptions {
   roomId: string;
-  /** Injected for tests that don't want a real PeerSend. */
+  /** Injected for tests that don't want a real PeerSend. Controls the
+   * persistent state-sync channel. */
   sendFactory?: () => TransferClient;
+  /** Optional factory used to build ephemeral senders for retry
+   * attempts. Defaults to `new PeerSend(...)`. Keeping this separate
+   * from `sendFactory` lets the state-sync connection stay alive even
+   * when an upload attempt fails. */
+  uploadSendFactory?: () => ResumableSender;
 }
 
 export interface TransferClient {
   connect(): Promise<void>;
-  sendFile(name: string, data: ArrayBuffer, options?: { onProgress?: (sent: number, total: number) => void }): Promise<void>;
+  sendFile(
+    name: string,
+    data: ArrayBuffer,
+    options?: { onProgress?: (sent: number, total: number) => void; startByte?: number }
+  ): Promise<void>;
   close(): void;
   /** Phase 4b.5 — optional live connection exposure so RemoteTab can ride along. */
   getConnection?(): unknown;
@@ -39,7 +50,9 @@ export class PhonePage {
   private readonly uploadTabBtn: HTMLButtonElement;
   private readonly remoteTabBtn: HTMLButtonElement;
   private readonly statusEl: HTMLDivElement;
+  private readonly retryBtn: HTMLButtonElement;
   private readonly send: TransferClient;
+  private readonly uploadSendFactory: () => ResumableSender;
   private readonly processing = new Set<string>();
   private connectPromise: Promise<void> | null = null;
   private activeTab: Tab = "upload";
@@ -75,6 +88,19 @@ export class PhonePage {
     this.statusEl.textContent = "Idle";
     this.root.appendChild(this.statusEl);
 
+    this.retryBtn = document.createElement("button");
+    this.retryBtn.type = "button";
+    this.retryBtn.className = "af-phone-retry";
+    this.retryBtn.setAttribute("data-testid", "phone-retry");
+    this.retryBtn.textContent = "Retry connection";
+    this.retryBtn.hidden = true;
+    this.retryBtn.addEventListener("click", () => {
+      this.connectPromise = null;
+      this.retryBtn.hidden = true;
+      void this.ensureConnected().catch(() => { /* status + button restored by ensureConnected */ });
+    });
+    this.root.appendChild(this.retryBtn);
+
     this.uploadPane = document.createElement("div");
     this.uploadPane.className = "af-phone-pane";
     this.uploadPane.setAttribute("data-testid", "phone-pane-upload");
@@ -88,6 +114,8 @@ export class PhonePage {
     this.send = options.sendFactory
       ? options.sendFactory()
       : new PeerSend({ roomId: options.roomId });
+    this.uploadSendFactory = options.uploadSendFactory
+      ?? (() => new PeerSend({ roomId: options.roomId }));
 
     this.uploadTab = new UploadTab(this.uploadPane, {
       onAdd: (entries) => this.queueAll(entries),
@@ -146,6 +174,7 @@ export class PhonePage {
   private async ensureConnected(): Promise<void> {
     if (!this.connectPromise) {
       this.setStatus("Connecting…");
+      this.retryBtn.hidden = true;
       this.connectPromise = this.send.connect().then(
         () => {
           this.setStatus("Ready");
@@ -153,6 +182,8 @@ export class PhonePage {
         },
         (err) => {
           this.setStatus(`Connect failed: ${describeError(err)}`);
+          this.retryBtn.hidden = false;
+          this.connectPromise = null;
           throw err;
         }
       );
@@ -212,7 +243,23 @@ export class PhonePage {
     this.setStatus(`Sending ${entry.name}`);
     try {
       const data = await entry.file.arrayBuffer();
-      await this.send.sendFile(entry.name, data, {
+      // First attempt reuses the persistent state-sync connection; if
+      // it drops mid-transfer, subsequent attempts spin up fresh
+      // ephemeral senders so the retry can't cascade into the
+      // state-sync channel.
+      let usePersistent = true;
+      const factory = (): ResumableSender => {
+        if (usePersistent) {
+          usePersistent = false;
+          return {
+            connect: () => this.ensureConnected(),
+            sendFile: (n, d, opts) => this.send.sendFile(n, d, opts),
+            close: () => { /* keep state-sync alive */ },
+          };
+        }
+        return this.uploadSendFactory();
+      };
+      await sendFileWithReconnect(factory, entry.name, data, {
         onProgress: (sent, total) => {
           this.uploadTab.updateEntry(entry.id, { sent, total });
         },

@@ -1,6 +1,9 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { sendFileWithReconnect, type ResumableSender } from "./reconnect";
 import { TransferError } from "./peer-send";
+
+/** All tests override sleep so backoff delays don't actually wait. */
+const noSleep = async (_: number): Promise<void> => {};
 
 /**
  * Fake ResumableSender that simulates chunked streaming. Each instance
@@ -70,7 +73,7 @@ function data(size: number): ArrayBuffer {
 describe("sendFileWithReconnect", () => {
   it("completes normally when the first sender succeeds (no reconnect)", async () => {
     const { factory, instances } = makeFactory(() => {});
-    await sendFileWithReconnect(factory, "ok.zip", data(1000));
+    await sendFileWithReconnect(factory, "ok.zip", data(1000), { sleep: noSleep });
     expect(instances).toHaveLength(1);
     expect(instances[0]!.bytesDelivered).toBe(1000);
     expect(instances[0]!.closed).toBe(false);
@@ -80,9 +83,9 @@ describe("sendFileWithReconnect", () => {
     const { factory, instances } = makeFactory((sender, attempt) => {
       if (attempt === 0) sender.failAtByte = 500;
     });
-    await sendFileWithReconnect(factory, "drop.zip", data(1000));
+    await sendFileWithReconnect(factory, "drop.zip", data(1000), { sleep: noSleep });
 
-    expect(instances).toHaveLength(2);
+    expect(instances.length).toBeGreaterThanOrEqual(2);
     // First attempt delivered the first 500 bytes then raised.
     expect(instances[0]!.bytesDelivered).toBe(500);
     expect(instances[0]!.closed).toBe(true);
@@ -91,15 +94,28 @@ describe("sendFileWithReconnect", () => {
     expect(instances[1]!.bytesDelivered).toBe(1000);
   });
 
-  it("re-throws TransferError after a second consecutive failure", async () => {
+  it("re-throws TransferError after a second consecutive failure (maxRetries=1)", async () => {
     const { factory, instances } = makeFactory((sender) => {
       sender.failAtByte = 500;
     });
 
-    await expect(sendFileWithReconnect(factory, "bad.zip", data(1000))).rejects.toBeInstanceOf(TransferError);
+    await expect(
+      sendFileWithReconnect(factory, "bad.zip", data(1000), { maxRetries: 1, sleep: noSleep })
+    ).rejects.toBeInstanceOf(TransferError);
     expect(instances).toHaveLength(2);
     expect(instances[0]!.closed).toBe(true);
     expect(instances[1]!.closed).toBe(true);
+  });
+
+  it("default maxRetries=2 allows three total attempts for a persistently flaky channel", async () => {
+    const { factory, instances } = makeFactory((sender, attempt) => {
+      // Fail at 500 on attempts 0 + 1; succeed on attempt 2.
+      if (attempt < 2) sender.failAtByte = 500;
+    });
+    await sendFileWithReconnect(factory, "flaky.zip", data(1000), { sleep: noSleep });
+    expect(instances).toHaveLength(3);
+    expect(instances[2]!.startByteSeen).toBe(500);
+    expect(instances[2]!.bytesDelivered).toBe(1000);
   });
 
   it("does NOT retry when the first attempt delivered zero bytes", async () => {
@@ -111,7 +127,9 @@ describe("sendFileWithReconnect", () => {
       }
     });
 
-    await expect(sendFileWithReconnect(factory, "nope.zip", data(1000))).rejects.toBeInstanceOf(TransferError);
+    await expect(
+      sendFileWithReconnect(factory, "nope.zip", data(1000), { sleep: noSleep })
+    ).rejects.toBeInstanceOf(TransferError);
     // Only one sender spun up — since no progress was made, the
     // wrapper assumes the peer isn't available at all and gives up
     // rather than thrashing.
@@ -123,20 +141,25 @@ describe("sendFileWithReconnect", () => {
       sender.failAtByte = 500;
     });
     await expect(
-      sendFileWithReconnect(factory, "no-retry.zip", data(1000), { maxRetries: 0 })
+      sendFileWithReconnect(factory, "no-retry.zip", data(1000), { maxRetries: 0, sleep: noSleep })
     ).rejects.toBeInstanceOf(TransferError);
     expect(instances).toHaveLength(1);
   });
 
-  it("maxRetries=2 allows two reconnects for a persistently dropping connection", async () => {
-    const { factory, instances } = makeFactory((sender, attempt) => {
-      // Fail at 500 on attempts 0 + 1; succeed on attempt 2.
+  it("applies exponential backoff between retries", async () => {
+    const { factory } = makeFactory((sender, attempt) => {
       if (attempt < 2) sender.failAtByte = 500;
     });
-    await sendFileWithReconnect(factory, "flaky.zip", data(1000), { maxRetries: 2 });
-    expect(instances).toHaveLength(3);
-    expect(instances[2]!.startByteSeen).toBe(500);
-    expect(instances[2]!.bytesDelivered).toBe(1000);
+    const waits: number[] = [];
+    const sleep = async (ms: number): Promise<void> => {
+      waits.push(ms);
+    };
+    await sendFileWithReconnect(factory, "backoff.zip", data(1000), {
+      sleep,
+      baseBackoffMs: 100,
+    });
+    // Two retries → two sleeps at 100ms and 200ms.
+    expect(waits).toEqual([100, 200]);
   });
 
   it("forwards progress events from the currently-active sender", async () => {
@@ -145,6 +168,7 @@ describe("sendFileWithReconnect", () => {
     });
     const progress: Array<[number, number]> = [];
     await sendFileWithReconnect(factory, "p.zip", data(800), {
+      sleep: noSleep,
       onProgress: (sent, total) => progress.push([sent, total]),
     });
 

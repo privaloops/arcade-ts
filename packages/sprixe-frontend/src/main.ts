@@ -94,6 +94,27 @@ function pickRoomId(): string {
   return id;
 }
 
+async function startHostWithRetry(
+  host: PeerHost,
+  onAttemptFailed?: (err: Error, attempt: number, remaining: number) => void
+): Promise<void> {
+  const backoffs = [2000, 4000, 8000];
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= backoffs.length; attempt++) {
+    try {
+      await host.start();
+      return;
+    } catch (err) {
+      lastError = err;
+      const remaining = backoffs.length - attempt;
+      onAttemptFailed?.(err instanceof Error ? err : new Error(String(err)), attempt, remaining);
+      if (remaining <= 0) break;
+      await new Promise<void>((r) => setTimeout(r, backoffs[attempt] ?? 8000));
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
 function startBrowser(
   games: GameEntry[],
   db: RomDB,
@@ -519,7 +540,16 @@ async function bootKiosk(): Promise<void> {
   const settings = new SettingsStore();
   const toast = new Toast(app!);
   const host = new PeerHost({ roomId: pickRoomId() });
-  host.start().catch((e) => console.warn("[arcade] PeerHost start failed:", e));
+  // Retry host.start() with exponential backoff. PeerJS Cloud rate-
+  // limits and transient signaling failures would otherwise leave the
+  // kiosk unable to accept any phone connection with zero UI feedback.
+  const hostReady = startHostWithRetry(host, (err, attempt, remaining) => {
+    console.warn(`[arcade] PeerHost start failed (attempt ${attempt + 1}, ${remaining} left):`, err);
+  });
+  hostReady.catch((err) => {
+    console.error("[arcade] PeerHost start exhausted retries:", err);
+    toast.show("error", "Phone pairing server unreachable — try again later");
+  });
 
   let { games, source } = await loadCatalogue(db);
 
@@ -539,6 +569,17 @@ async function bootKiosk(): Promise<void> {
   if (source === "empty") {
     const empty = new EmptyState(app!);
     await empty.setRoomId(host.roomId);
+    // If start() exhausted its retries, replace the QR with a "server
+    // unreachable" panel so the user knows the scan won't work until
+    // they press Retry.
+    const showServerDown = (err: unknown): void => {
+      const message = err instanceof Error ? err.message : String(err);
+      empty.setServerDown(message, () => {
+        empty.clearServerDown();
+        void startHostWithRetry(host).catch(showServerDown);
+      });
+    };
+    hostReady.catch(showServerDown);
     // When a ROM lands, swap the empty state for the real browser.
     const pipeline = new RomPipeline({ db });
     host.onFile(async (file, conn) => {

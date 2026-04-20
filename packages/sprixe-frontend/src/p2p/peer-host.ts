@@ -15,6 +15,8 @@
  */
 
 import { Peer } from "./peer-deps";
+import { DEFAULT_ICE_SERVERS } from "./ice-config";
+import { CHUNK_SIZE } from "./peer-send";
 import type { DataConnection } from "./peer-deps";
 import type { PhoneToKioskMessage, KioskToPhoneMessage } from "./protocol";
 
@@ -57,7 +59,8 @@ interface ReassemblyState {
   receivedBytes: number;
 }
 
-const defaultFactory: PeerFactory = (id) => new Peer(id) as unknown as PeerLike;
+const defaultFactory: PeerFactory = (id) =>
+  new Peer(id, { config: { iceServers: DEFAULT_ICE_SERVERS } }) as unknown as PeerLike;
 
 export class PeerHost {
   readonly roomId: string;
@@ -81,9 +84,15 @@ export class PeerHost {
 
   /**
    * Open the PeerJS connection. Resolves when PeerJS emits 'open'.
+   * Idempotent while the peer is live; on failure, the internal peer
+   * is torn down so callers can retry with a fresh attempt.
    */
   start(): Promise<void> {
-    if (this.peer) return Promise.resolve();
+    if (this.peer && this.opened) return Promise.resolve();
+    if (this.peer) {
+      try { this.peer.destroy(); } catch { /* ignore */ }
+      this.peer = null;
+    }
     const peer = this.peerFactory(this.roomId);
     this.peer = peer;
 
@@ -94,7 +103,11 @@ export class PeerHost {
       });
       peer.on("error", (err) => {
         for (const l of this.errorListeners) l(err);
-        if (!this.opened) reject(err);
+        if (!this.opened) {
+          try { peer.destroy(); } catch { /* ignore */ }
+          if (this.peer === peer) this.peer = null;
+          reject(err);
+        }
       });
       peer.on("close", () => {
         this.opened = false;
@@ -220,6 +233,24 @@ export class PeerHost {
         const state = this.reassemblyByConn.get(conn);
         if (!state) return;
         this.reassemblyByConn.delete(conn);
+
+        // Integrity check — if the connection died mid-transfer
+        // concatChunks would zero-pad and hand a corrupted ZIP to the pipeline.
+        const expectedChunks = Math.ceil(state.size / CHUNK_SIZE) || 0;
+        const missing = findMissingChunks(state.chunks, expectedChunks);
+        if (state.receivedBytes !== state.size || missing.length > 0) {
+          const errMsg = `incomplete transfer (got ${state.receivedBytes}/${state.size} bytes${
+            missing.length > 0 ? `, missing chunks ${missing.slice(0, 5).join(",")}` : ""
+          })`;
+          try {
+            (conn as unknown as { send: (m: KioskToPhoneMessage) => void }).send({
+              type: "error", name: state.name, error: errMsg,
+            });
+          } catch { /* phone may already be gone */ }
+          for (const l of this.errorListeners) l(new Error(errMsg));
+          return;
+        }
+
         const data = concatChunks(state.chunks, state.receivedBytes);
         const file: ReceivedFile = { name: state.name, size: data.byteLength, data };
         for (const l of this.fileListeners) void l(file, conn);
@@ -238,11 +269,19 @@ export class PeerHost {
   }
 }
 
+function findMissingChunks(chunks: ArrayBuffer[], expected: number): number[] {
+  const missing: number[] = [];
+  for (let i = 0; i < expected; i++) {
+    if (!chunks[i]) missing.push(i);
+  }
+  return missing;
+}
+
 function concatChunks(chunks: ArrayBuffer[], totalBytes: number): ArrayBuffer {
   const out = new Uint8Array(totalBytes);
   let offset = 0;
   for (const chunk of chunks) {
-    if (!chunk) continue; // hole in the sequence — leave zero-filled
+    if (!chunk) continue;
     out.set(new Uint8Array(chunk), offset);
     offset += chunk.byteLength;
   }

@@ -35,9 +35,19 @@ export interface ResumableSender {
 
 export interface SendWithReconnectOptions {
   onProgress?: (sent: number, total: number) => void;
-  /** Max reconnect attempts after the first drop. Default 1. */
+  /** Max reconnect attempts after the first drop. Default 2 (so up to
+   * 3 total attempts). */
   maxRetries?: number;
+  /** Base delay for exponential backoff between retries (ms). The n-th
+   * retry waits `baseBackoffMs * 2^(n-1)` so attempts land at 1s, 2s,
+   * 4s by default. */
+  baseBackoffMs?: number;
+  /** Test hook to skip real timers. */
+  sleep?: (ms: number) => Promise<void>;
 }
+
+const defaultSleep = (ms: number): Promise<void> =>
+  new Promise((r) => setTimeout(r, ms));
 
 export async function sendFileWithReconnect(
   senderFactory: () => ResumableSender,
@@ -45,7 +55,9 @@ export async function sendFileWithReconnect(
   data: ArrayBuffer,
   options: SendWithReconnectOptions = {}
 ): Promise<void> {
-  const maxRetries = options.maxRetries ?? 1;
+  const maxRetries = options.maxRetries ?? 2;
+  const baseBackoffMs = options.baseBackoffMs ?? 1000;
+  const sleep = options.sleep ?? defaultSleep;
   let attempt = 0;
   let resumeFromByte = 0;
   let lastError: unknown = null;
@@ -72,6 +84,7 @@ export async function sendFileWithReconnect(
         break;
       }
       attempt += 1;
+      await sleep(baseBackoffMs * Math.pow(2, attempt - 1));
     }
   }
 
