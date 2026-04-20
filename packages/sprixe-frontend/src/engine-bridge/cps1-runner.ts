@@ -14,10 +14,14 @@ export interface Cps1RunnerOptions {
   romBuffer: ArrayBuffer;
   /** User-captured mapping (P1 + optional P2). */
   mapping?: InputMapping | null;
+  /** Maps Settings > Audio > Latency to the AudioContext latencyHint. */
+  latencyHint?: AudioContextLatencyCategory;
 }
 
 export async function createCps1Runner(opts: Cps1RunnerOptions): Promise<EmulatorRunner> {
-  const emu = new Emulator(opts.canvas);
+  const emu = new Emulator(opts.canvas, {
+    ...(opts.latencyHint ? { latencyHint: opts.latencyHint } : {}),
+  });
   await emu.loadRomFromBuffer(opts.romBuffer);
   // initAudio() tolerates missing AudioContext user-gesture — it just
   // logs + leaves the emulator silent rather than throwing.

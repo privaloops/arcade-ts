@@ -114,7 +114,10 @@ export class Emulator {
   private gameName: string = '';
   private romStore: RomStore | null = null;
 
-  constructor(canvas: HTMLCanvasElement) {
+  constructor(
+    canvas: HTMLCanvasElement,
+    options: { latencyHint?: AudioContextLatencyCategory } = {}
+  ) {
     this.bus = new Bus();
     this.z80Bus = new Z80Bus();
     this.m68000 = new M68000(this.bus);
@@ -129,8 +132,11 @@ export class Emulator {
     this.input = new InputManager();
     this.framebuffer = new Uint8Array(FRAMEBUFFER_SIZE);
 
-    // Audio output
-    this.audioOutput = new AudioOutput();
+    // Audio output — latency hint forwarded so the AudioContext matches
+    // the user's Settings > Audio > Latency preference.
+    this.audioOutput = new AudioOutput({
+      ...(options.latencyHint ? { latencyHint: options.latencyHint } : {}),
+    });
 
     // Pre-allocate audio scratch buffers for one frame
     this.ymBufferL = new Float32Array(1024);

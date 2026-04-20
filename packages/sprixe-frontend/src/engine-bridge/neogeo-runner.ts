@@ -27,6 +27,8 @@ export interface NeoGeoRunnerOptions {
   romDb: RomDB;
   /** User-captured mapping (P1 + optional P2). */
   mapping?: InputMapping | null;
+  /** Maps Settings > Audio > Latency to the AudioContext latencyHint. */
+  latencyHint?: AudioContextLatencyCategory;
 }
 
 const BIOS_ID = "neogeo";
@@ -43,7 +45,9 @@ export async function createNeoGeoRunner(opts: NeoGeoRunnerOptions): Promise<Emu
   } catch {
     renderer = new Renderer(opts.canvas);
   }
-  const emu = new NeoGeoEmulator(opts.canvas, renderer);
+  const emu = new NeoGeoEmulator(opts.canvas, renderer, {
+    ...(opts.latencyHint ? { latencyHint: opts.latencyHint } : {}),
+  });
   // initAudio() MUST run before loadRomFromBuffer() — NeoGeoEmulator's
   // loadRom() calls initAudioWorker() internally, which early-returns
   // silently if the SharedArrayBuffer hasn't been created yet. Reversing

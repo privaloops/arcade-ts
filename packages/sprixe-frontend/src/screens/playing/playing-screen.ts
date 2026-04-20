@@ -21,6 +21,8 @@ export interface PlayingScreenOptions {
   game: GameEntry;
   romBuffer: ArrayBuffer;
   romDb: RomDB;
+  /** Maps Settings > Audio > Latency to the AudioContext latencyHint. */
+  latencyHint?: AudioContextLatencyCategory;
 }
 
 export class PlayingScreen {
@@ -96,6 +98,7 @@ export class PlayingScreen {
       // keyboard + gamepad) so the engine binds to the buttons the
       // user actually picked instead of the hardcoded defaults.
       mapping: loadMapping(),
+      ...(options.latencyHint ? { latencyHint: options.latencyHint } : {}),
     });
     return new PlayingScreen(container, options.game, canvas, runner);
   }

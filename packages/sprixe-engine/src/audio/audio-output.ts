@@ -276,8 +276,11 @@ export class AudioOutput {
   private _volume = 1.0;
   private _initialized = false;
   private _initPromise: Promise<void> | null = null;
+  private _latencyHint: AudioContextLatencyCategory = 'interactive';
 
-  constructor() {}
+  constructor(options: { latencyHint?: AudioContextLatencyCategory } = {}) {
+    if (options.latencyHint) this._latencyHint = options.latencyHint;
+  }
 
   // -------------------------------------------------------------------------
   // Public API
@@ -298,7 +301,7 @@ export class AudioOutput {
   private async _doInit(): Promise<void> {
     // Create AudioContext synchronously (must be in user gesture call stack)
     if (!this.context) {
-      this.context = new AudioContext({ latencyHint: 'interactive' });
+      this.context = new AudioContext({ latencyHint: this._latencyHint });
     }
 
     const rate = this.context.sampleRate;

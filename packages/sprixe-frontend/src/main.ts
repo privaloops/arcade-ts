@@ -23,7 +23,7 @@ import { MissingBiosError } from "./engine-bridge/errors";
 import { PhonePage } from "./screens/phone/phone-page";
 import { EmptyState } from "./screens/empty/empty-state";
 import { SettingsScreen } from "./screens/settings/settings-screen";
-import { SettingsStore } from "./screens/settings/settings-store";
+import { SettingsStore, type AudioLatency } from "./screens/settings/settings-store";
 import { ContextMenu } from "./screens/context-menu/context-menu";
 import { Toast } from "./ui/toast";
 import { classifyTransferError } from "./p2p/error-handling";
@@ -81,6 +81,16 @@ function showMappingFlow(player: 0 | 1 = 0): Promise<void> {
       },
     });
   });
+}
+
+/** Map Settings > Audio > Latency → AudioContext latencyHint.
+ *  'medium' stays as the browser default ('interactive' on most)
+ *  so existing behaviour doesn't regress for users who never touched
+ *  the setting. */
+function audioLatencyToHint(level: AudioLatency): AudioContextLatencyCategory {
+  if (level === "low") return "interactive";
+  if (level === "high") return "playback";
+  return "balanced";
 }
 
 function pickRoomId(): string {
@@ -278,6 +288,7 @@ function startBrowser(
           game,
           romBuffer: rec.zipData,
           romDb: db,
+          latencyHint: audioLatencyToHint(settings.get().audio.latency),
         });
         await db.markPlayed(game.id);
         browser.root.hidden = true;

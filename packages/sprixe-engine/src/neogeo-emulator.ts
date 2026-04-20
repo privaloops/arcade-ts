@@ -103,7 +103,11 @@ export class NeoGeoEmulator {
   // Callbacks
   private _vblankCallback: (() => void) | null = null;
 
-  constructor(canvas: HTMLCanvasElement, renderer: RendererInterface) {
+  constructor(
+    canvas: HTMLCanvasElement,
+    renderer: RendererInterface,
+    options: { latencyHint?: AudioContextLatencyCategory } = {}
+  ) {
     this.bus = new NeoGeoBus();
     this.z80Bus = new NeoGeoZ80Bus();
     this.m68000 = new M68000(this.bus);
@@ -111,7 +115,9 @@ export class NeoGeoEmulator {
     this.video = new NeoGeoVideo();
     this.canvas = canvas;
     this.renderer = renderer;
-    this.audioOutput = new AudioOutput();
+    this.audioOutput = new AudioOutput({
+      ...(options.latencyHint ? { latencyHint: options.latencyHint } : {}),
+    });
     this.input = new InputManager();
     this.framebuffer = new Uint8Array(NGO_FRAMEBUFFER_SIZE);
 

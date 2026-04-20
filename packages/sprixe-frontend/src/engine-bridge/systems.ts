@@ -19,6 +19,8 @@ export interface CreateRunnerOptions {
   /** User-captured mapping (P1 + optional P2). Runners merge it on top
    *  of the engine's defaults for both gamepad and keyboard. */
   mapping?: InputMapping | null;
+  /** Maps Settings > Audio > Latency to the AudioContext latencyHint. */
+  latencyHint?: AudioContextLatencyCategory;
 }
 
 export interface SystemSpec {
@@ -29,8 +31,13 @@ export interface SystemSpec {
 
 const SYSTEMS: Record<System, SystemSpec> = {
   cps1: {
-    createRunner: ({ canvas, romBuffer, mapping }) =>
-      createCps1Runner(mapping ? { canvas, romBuffer, mapping } : { canvas, romBuffer }),
+    createRunner: ({ canvas, romBuffer, mapping, latencyHint }) =>
+      createCps1Runner({
+        canvas,
+        romBuffer,
+        ...(mapping ? { mapping } : {}),
+        ...(latencyHint ? { latencyHint } : {}),
+      }),
   },
   neogeo: {
     requiredBios: "neogeo",
