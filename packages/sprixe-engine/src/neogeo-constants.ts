@@ -26,7 +26,7 @@ export const NGO_FIX_TILE_SIZE = 8;                 // 8x8 fix layer tile
 export const NGO_FIX_TILE_BYTES = 32;               // 4bpp = 32 bytes per 8x8 tile
 
 // VRAM
-export const NGO_MAX_SPRITES = 381;                 // slots 1-381 (0 = padding)
+export const NGO_MAX_SPRITES = 381;                 // slots 0-380 (MAME/FBNeo convention)
 export const NGO_SPRITES_PER_LINE = 96;
 export const NGO_MAX_TILE_HEIGHT = 32;              // tiles per sprite column
 export const NGO_SCB1_BASE = 0x0000;                // slow VRAM — tile codes + attributes
