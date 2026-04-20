@@ -57,6 +57,11 @@ export async function createNeoGeoRunner(opts: NeoGeoRunnerOptions): Promise<Emu
   await emu.loadRomFromBuffer(opts.romBuffer, biosRec.zipData);
   applyUserMapping(emu.getInputManager(), opts.mapping ?? null);
 
+  // Expose emulator on window in dev mode for console inspection (matches sprixe-edit)
+  if (import.meta.env.DEV) {
+    (window as unknown as Record<string, unknown>).__ngoEmu = emu;
+  }
+
   return {
     start: () => emu.start(),
     stop: () => emu.stop(),

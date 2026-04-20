@@ -155,18 +155,22 @@ export function assembleSpritesRom(
     const data = fileMap.get(entry.name.toLowerCase());
     if (data === undefined) continue;
 
+    // ROM_CONTINUE: read source file from sourceOffset (default 0).
+    const srcOff = entry.sourceOffset ?? 0;
+    const available = Math.max(0, data.length - srcOff);
+
     if (entry.loadFlag === 'load16_byte') {
       // Byte interleaving: odd ROM at even offsets, even ROM at odd offsets
       const byteOffset = entry.offset & 1; // 0 for odd ROM, 1 for even ROM
       const baseOffset = entry.offset & ~1;
-      const len = Math.min(data.length, entry.size);
+      const len = Math.min(available, entry.size);
       for (let i = 0; i < len; i++) {
-        result[baseOffset + i * 2 + byteOffset] = data[i]!;
+        result[baseOffset + i * 2 + byteOffset] = data[srcOff + i]!;
       }
     } else {
       // Linear copy fallback
-      const len = Math.min(data.length, entry.size);
-      result.set(data.subarray(0, len), entry.offset);
+      const len = Math.min(available, entry.size);
+      result.set(data.subarray(srcOff, srcOff + len), entry.offset);
     }
   }
 

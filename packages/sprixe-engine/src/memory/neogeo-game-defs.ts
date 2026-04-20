@@ -12,6 +12,10 @@ export interface NeoGeoRomEntry {
   size: number;
   crc?: string;
   loadFlag?: string;
+  /** MAME ROM_CONTINUE: start reading source file at this byte offset (default 0).
+   *  Used when a single physical ROM chip is split across non-contiguous dest offsets
+   *  (e.g. AoF's TC5316200 chips: first 1MB at offset 0x0, last 1MB at 0x400000). */
+  sourceOffset?: number;
 }
 
 export interface NeoGeoGameDef {
@@ -999,11 +1003,17 @@ export const NEOGEO_GAME_DEFS: NeoGeoGameDef[] = [
     program: [
       { name: '044-p1.p1', offset: 0x0, size: 0x80000, crc: 'ca9f7a6d', loadFlag: 'load16_word_swap' },
     ],
+    // TC5316200 chips (16 Mbit = 2MB each) split via ROM_CONTINUE:
+    // first 1MB at low offset, second 1MB at +0x400000 (matches MAME neogeo.cpp aof ROM_START).
     sprites: [
-      { name: '044-c1.c1', offset: 0x0, size: 0x100000, crc: 'ddab98a7', loadFlag: 'load16_byte' },
-      { name: '044-c2.c2', offset: 0x1, size: 0x100000, crc: 'd8ccd575', loadFlag: 'load16_byte' },
+      { name: '044-c1.c1', offset: 0x000000, size: 0x100000, crc: 'ddab98a7', loadFlag: 'load16_byte' },
+      { name: '044-c1.c1', offset: 0x400000, size: 0x100000, loadFlag: 'load16_byte', sourceOffset: 0x100000 },
+      { name: '044-c2.c2', offset: 0x000001, size: 0x100000, crc: 'd8ccd575', loadFlag: 'load16_byte' },
+      { name: '044-c2.c2', offset: 0x400001, size: 0x100000, loadFlag: 'load16_byte', sourceOffset: 0x100000 },
       { name: '044-c3.c3', offset: 0x200000, size: 0x100000, crc: '403e898a', loadFlag: 'load16_byte' },
+      { name: '044-c3.c3', offset: 0x600000, size: 0x100000, loadFlag: 'load16_byte', sourceOffset: 0x100000 },
       { name: '044-c4.c4', offset: 0x200001, size: 0x100000, crc: '6235fbaa', loadFlag: 'load16_byte' },
+      { name: '044-c4.c4', offset: 0x600001, size: 0x100000, loadFlag: 'load16_byte', sourceOffset: 0x100000 },
     ],
     audio: [
       { name: '044-m1.m1', offset: 0x0, size: 0x20000, crc: '0987e4bb' },

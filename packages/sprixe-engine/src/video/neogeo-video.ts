@@ -302,7 +302,7 @@ export class NeoGeoVideo {
     let groupX = 0;
     let groupY = 0;
 
-    for (let i = 1; i <= NGO_MAX_SPRITES; i++) {
+    for (let i = 0; i < NGO_MAX_SPRITES; i++) {
       const entry = this.readSpriteEntry(i);
 
       if (!entry.sticky || currentGroup.length === 0) {
@@ -351,11 +351,11 @@ export class NeoGeoVideo {
    *   3. Render fix layer on top
    */
   // Per-sprite state computed in the forward pass each frame
-  private readonly sprX = new Int16Array(NGO_MAX_SPRITES + 1);
-  private readonly sprYRaw = new Uint16Array(NGO_MAX_SPRITES + 1);  // Y in 512-line space
-  private readonly sprSize = new Uint8Array(NGO_MAX_SPRITES + 1);   // raw size (0-63)
-  private readonly sprYZoom = new Uint8Array(NGO_MAX_SPRITES + 1);  // vertical shrink (0-255)
-  private readonly sprXZoom = new Uint8Array(NGO_MAX_SPRITES + 1);  // horizontal zoom (0-15)
+  private readonly sprX = new Int16Array(NGO_MAX_SPRITES);
+  private readonly sprYRaw = new Uint16Array(NGO_MAX_SPRITES);  // Y in 512-line space
+  private readonly sprSize = new Uint8Array(NGO_MAX_SPRITES);   // raw size (0-63)
+  private readonly sprYZoom = new Uint8Array(NGO_MAX_SPRITES);  // vertical shrink (0-255)
+  private readonly sprXZoom = new Uint8Array(NGO_MAX_SPRITES);  // horizontal zoom (0-15)
 
   /** Prepare framebuffer for a new frame (clear + palette). Call once before renderSlice().
    *  Backdrop color on Neo-Geo = palette[0xFFF] of the active bank (MAME neogeo_v.cpp:71,
@@ -380,7 +380,7 @@ export class NeoGeoVideo {
     // Forward pass: hardware maintains running X/Y/size registers across sticky chains
     let chainX = 0, chainYRaw = 0, chainSize = 0, chainYZoom = 0;
     let xZoom = 0;
-    for (let i = 1; i <= NGO_MAX_SPRITES; i++) {
+    for (let i = 0; i < NGO_MAX_SPRITES; i++) {
       const scb2 = this.readVramWord(NGO_SCB2_BASE + i);
       const scb3 = this.readVramWord(NGO_SCB3_BASE + i);
       const sticky = (scb3 >> 6) & 1;
@@ -404,7 +404,7 @@ export class NeoGeoVideo {
       this.sprXZoom[i] = xZoom;
     }
 
-    for (let i = 1; i <= NGO_MAX_SPRITES; i++) {
+    for (let i = 0; i < NGO_MAX_SPRITES; i++) {
       this.renderSprite(i, animCounter, y0, y1);
     }
 
@@ -655,7 +655,7 @@ export class NeoGeoVideo {
     let cur: ChainInfo | null = null;
     let active = 0;
 
-    for (let i = 1; i <= NGO_MAX_SPRITES; i++) {
+    for (let i = 0; i < NGO_MAX_SPRITES; i++) {
       const scb2 = this.readVramWord(NGO_SCB2_BASE + i);
       const scb3 = this.readVramWord(NGO_SCB3_BASE + i);
       const scb4 = this.readVramWord(NGO_SCB4_BASE + i);
@@ -721,7 +721,7 @@ export class NeoGeoVideo {
   /** Get a sprite entry for the editor */
   inspectSpriteAt(screenX: number, screenY: number): NeoGeoSpriteEntry | null {
     // Check sprites front-to-back (low index = in front)
-    for (let i = 1; i <= NGO_MAX_SPRITES; i++) {
+    for (let i = 0; i < NGO_MAX_SPRITES; i++) {
       const entry = this.readSpriteEntry(i);
       if (entry.height === 0) continue;
 

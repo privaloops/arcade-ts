@@ -114,6 +114,36 @@ describe('Neo-Geo ROM Loader', () => {
       expect(result[0x100000]).toBe(0xCC);
       expect(result[0x100001]).toBe(0x33);
     });
+
+    it('handles sourceOffset (MAME ROM_CONTINUE)', () => {
+      // One physical ROM chip (4 bytes) split across two dest offsets
+      // via ROM_CONTINUE — first half at 0, second half at 0x10
+      const entries: NeoGeoRomEntry[] = [
+        { name: 'c1.c1', offset: 0, size: 2, loadFlag: 'load16_byte' },
+        { name: 'c1.c1', offset: 0x10, size: 2, loadFlag: 'load16_byte', sourceOffset: 2 },
+      ];
+      const fileMap = new Map<string, Uint8Array>();
+      fileMap.set('c1.c1', new Uint8Array([0xAA, 0xBB, 0xCC, 0xDD]));
+
+      const result = assembleSpritesRom(entries, fileMap);
+
+      // First 2 bytes (0xAA, 0xBB) interleaved at offsets 0, 2
+      expect(result[0]).toBe(0xAA);
+      expect(result[2]).toBe(0xBB);
+      // Last 2 bytes (0xCC, 0xDD) interleaved at offsets 0x10, 0x12
+      expect(result[0x10]).toBe(0xCC);
+      expect(result[0x12]).toBe(0xDD);
+    });
+
+    it('handles sourceOffset past end of file without crashing', () => {
+      const entries: NeoGeoRomEntry[] = [
+        { name: 'c1.c1', offset: 0, size: 2, loadFlag: 'load16_byte', sourceOffset: 100 },
+      ];
+      const fileMap = new Map<string, Uint8Array>();
+      fileMap.set('c1.c1', new Uint8Array([0xAA, 0xBB]));
+
+      expect(() => assembleSpritesRom(entries, fileMap)).not.toThrow();
+    });
   });
 
   describe('V-ROM assembly', () => {
