@@ -346,7 +346,7 @@ export class NeoGeoVideo {
   /**
    * Render a complete frame into the framebuffer.
    * Pipeline:
-   *   1. Clear framebuffer with backdrop color (palette 0, color 0)
+   *   1. Clear framebuffer with backdrop color (palette[0xFFF] of active bank)
    *   2. Render all sprites (back to front: high index = behind, low index = in front)
    *   3. Render fix layer on top
    */
@@ -357,10 +357,13 @@ export class NeoGeoVideo {
   private readonly sprYZoom = new Uint8Array(NGO_MAX_SPRITES + 1);  // vertical shrink (0-255)
   private readonly sprXZoom = new Uint8Array(NGO_MAX_SPRITES + 1);  // horizontal zoom (0-15)
 
-  /** Prepare framebuffer for a new frame (clear + palette). Call once before renderSlice(). */
+  /** Prepare framebuffer for a new frame (clear + palette). Call once before renderSlice().
+   *  Backdrop color on Neo-Geo = palette[0xFFF] of the active bank (MAME neogeo_v.cpp:71,
+   *  FBNeo neogeo.cpp). Using palette[0] was a bug that showed BIOS RAM test residue
+   *  (0xAAAA pattern → greenish) instead of the game's background color. */
   beginFrame(): void {
     if (this.paletteDirty) this.rebuildPaletteCache();
-    this.fb32.fill(this.paletteCache[0]!);
+    this.fb32.fill(this.paletteCache[0xFFF]!);
   }
 
   /**

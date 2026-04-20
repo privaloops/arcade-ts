@@ -177,6 +177,30 @@ describe('NeoGeoVideo', () => {
       // Non-zero means something was rendered
       expect(pixel).not.toBe(0);
     });
+
+    it('uses palette[0xFFF] as backdrop, not palette[0]', () => {
+      // Regression test: Neo-Geo backdrop color is the LAST palette entry
+      // (palette[0xFFF]), not palette[0]. MAME neogeo_v.cpp:71, FBNeo neogeo.cpp.
+      const video = new NeoGeoVideo();
+      video.setRoms(new Uint8Array(0x100000), new Uint8Array(0x20000), new Uint8Array(0x20000));
+
+      const palRam = video.getPaletteRam();
+      // palette[0] = bright red (decoy — this is what the buggy code would use)
+      palRam[0] = 0x4F;       // high byte: R4-R1 = 0xF, R0 = 1, dark = 0
+      palRam[1] = 0x00;       // low byte
+      // palette[0xFFF] = pure blue (the correct backdrop)
+      palRam[0xFFF * 2] = 0x10;
+      palRam[0xFFF * 2 + 1] = 0x1E;  // B4-B1 = 0xF, B0 = 1
+      video.markPaletteDirty();
+
+      const framebuffer = new Uint8Array(320 * 224 * 4);
+      video.renderFrame(framebuffer);
+
+      // Pixel (0,0) should be blue (palette[0xFFF]), not red (palette[0]).
+      // RGBA byte order: [R, G, B, A].
+      expect(framebuffer[0]).toBe(0);          // R = 0 (not red)
+      expect(framebuffer[2]).toBeGreaterThan(200); // B is strong (blue backdrop)
+    });
   });
 });
 

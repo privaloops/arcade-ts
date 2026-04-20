@@ -326,9 +326,10 @@ export class NeoGeoEmulator {
     this.bus.assertIrq(3);
 
 
-    // Watchdog reset: full soft reset when watchdog expires
+    // Watchdog reset: full soft reset when watchdog expires.
+    // Some carts (kof99+, mslug2+) intentionally expire the watchdog as
+    // anti-piracy — MAME neogeo.cpp:500-520, FBNeo neo_run.cpp:46-54.
     this.bus.setWatchdogResetCallback(() => {
-      console.log('[Neo-Geo] Watchdog reset triggered');
       this.bus.resetBus();
       this.m68000.reset();
       this.z80.reset();
