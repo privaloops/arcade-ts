@@ -60,20 +60,9 @@ describe('StateExtractor', () => {
     expect(state.timer).toBe(42);
   });
 
-  it('treats positive Y byte as airborne and jumping', () => {
+  it('exposes y=0 and non-airborne until we locate the true jump-height address', () => {
     const ram = makeRam();
-    writeU8(ram, SF2HF_MEMORY_MAP.p1_y.offset, 48); // jump height 48px
-
-    const state = new StateExtractor().extract(ram, 0);
-
-    expect(state.p1.y).toBe(48);
-    expect(state.p1.isAirborne).toBe(true);
-    expect(state.p1.isJumping).toBe(true);
-  });
-
-  it('Y=0 means grounded', () => {
-    const ram = makeRam();
-    writeU8(ram, SF2HF_MEMORY_MAP.p1_y.offset, 0);
+    writeU8(ram, SF2HF_MEMORY_MAP.p1_y.offset, 48); // anim byte, not height
 
     const state = new StateExtractor().extract(ram, 0);
 

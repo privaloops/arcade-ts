@@ -1,3 +1,5 @@
+import { EventDetector } from './detector/event-detector';
+import type { CoachEvent } from './detector/events';
 import { StateExtractor } from './extractor/state-extractor';
 import { StateHistory } from './extractor/state-history';
 import { P1_BASE, P2_BASE } from './extractor/sf2hf-memory-map';
@@ -25,15 +27,46 @@ export interface CoachOptions {
 
 const SUPPORTED_GAMES = new Set(['sf2hf', 'sf2hfj', 'sf2hfu']);
 
+function formatEvent(ev: CoachEvent): string {
+  const head = `f=${ev.frameIdx} ${ev.type} (imp=${ev.importance.toFixed(2)})`;
+  switch (ev.type) {
+    case 'hp_hit':
+      return `${head} ${ev.attacker}→ dmg=${ev.damage} victim_hp=${ev.victimHpAfter} (${Math.round(ev.victimHpPercent * 100)}%)`;
+    case 'combo_connect':
+      return `${head} ${ev.attacker} ${ev.hits}-hit combo`;
+    case 'knockdown':
+      return `${head} ${ev.victim} down`;
+    case 'near_death':
+      return `${head} ${ev.victim} at ${Math.round(ev.hpPercent * 100)}%`;
+    case 'low_hp_warning':
+      return `${head} ${ev.victim} low (${Math.round(ev.hpPercent * 100)}%)`;
+    case 'round_start':
+      return `${head} round=${ev.roundNumber}`;
+    case 'round_end':
+      return `${head} winner=${ev.winner}`;
+    case 'special_startup':
+      return `${head} ${ev.player} ${ev.character} attack=${ev.attackId}`;
+    case 'corner_trap':
+      return `${head} ${ev.victim} ${ev.side}`;
+    case 'macro_state_change':
+      return `${head} P2 ${ev.from} → ${ev.to} [${ev.triggers.join(', ')}]`;
+    case 'pattern_prediction':
+      return `${head} predict=${ev.predictedAction} in ${ev.preNoticeMs}ms (conf=${ev.confidence.toFixed(2)}) — ${ev.reason}`;
+  }
+}
+
 export class CoachController {
   private readonly extractor = new StateExtractor();
   private readonly history = new StateHistory(5);
+  private readonly detector = new EventDetector();
   private readonly host: CoachHost;
   private readonly gameId: string;
   private readonly logEvery: number;
   private readonly now: () => number;
   private tickCount = 0;
   private stopped = false;
+  private recentEvents: CoachEvent[] = [];
+  private readonly RECENT_EVENT_CAP = 32;
 
   constructor(host: CoachHost, opts: CoachOptions) {
     this.host = host;
@@ -55,10 +88,15 @@ export class CoachController {
     if (this.stopped) return;
     this.stopped = true;
     this.host.setVblankCallback?.(null);
+    this.detector.reset();
   }
 
   latest(): GameState | null {
     return this.history.latest();
+  }
+
+  events(): readonly CoachEvent[] {
+    return this.recentEvents;
   }
 
   /**
@@ -128,6 +166,12 @@ export class CoachController {
   private markedAddr: number | null = null;
   private markedSnapshot: Uint8Array | null = null;
 
+  /** Print the last N recorded events, most recent first. */
+  eventsTail(n = 10): void {
+    const tail = this.recentEvents.slice(-n).reverse();
+    console.log(tail.map(formatEvent).join('\n'));
+  }
+
   private onVblank(): void {
     if (this.stopped) return;
     const ram = this.host.getWorkRam?.();
@@ -135,6 +179,17 @@ export class CoachController {
 
     const state = this.extractor.extract(ram, this.now());
     this.history.push(state);
+
+    const events = this.detector.detect(state, this.history);
+    for (const ev of events) {
+      this.recentEvents.push(ev);
+      if (this.recentEvents.length > this.RECENT_EVENT_CAP) {
+        this.recentEvents.shift();
+      }
+      if (ev.importance >= 0.6) {
+        console.log(`[coach:event] ${formatEvent(ev)}`);
+      }
+    }
 
     if (this.tickCount % this.logEvery === 0) {
       const derived = this.history.derive();

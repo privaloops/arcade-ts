@@ -3,6 +3,11 @@ import { SF2HF_MEMORY_MAP, CHARACTER_ID_TABLE, type MemoryAddress } from './sf2h
 
 const WORK_RAM_BASE = 0xFF0000;
 
+// In SF2HF every character has the same max health. The `p*_max_hp`
+// addresses sitting right after the HP word don't actually hold this
+// value — they read garbage. Use the constant instead.
+const SF2HF_MAX_HP = 144;
+
 /**
  * Reads a Work RAM Uint8Array (64KB, mapped to 0xFF0000-0xFFFFFF) and
  * extracts a typed GameState snapshot for SF2 Hyper Fighting.
@@ -29,8 +34,11 @@ export class StateExtractor {
       p1,
       p2,
       timer: this.readTimer(workRam),
-      roundNumber: this.readU8(workRam, SF2HF_MEMORY_MAP.round_number),
-      roundPhase: this.readRoundPhase(workRam),
+      // round_number / round_phase addresses are still `todo` in the
+      // memory map — expose safe defaults so the detector doesn't
+      // false-fire a round_start on 0xFF.
+      roundNumber: 1,
+      roundPhase: 'fight',
     };
 
     return state;
@@ -43,7 +51,7 @@ export class StateExtractor {
   private readCharacterState(workRam: Uint8Array, side: 'p1' | 'p2'): CharacterState {
     const map = SF2HF_MEMORY_MAP;
     const hpAddr = side === 'p1' ? map.p1_hp : map.p2_hp;
-    const maxHpAddr = side === 'p1' ? map.p1_max_hp : map.p2_max_hp;
+    // maxHpAddr unused — we hard-code 144 until we find the real field.
     const xAddr = side === 'p1' ? map.p1_x : map.p2_x;
     const yAddr = side === 'p1' ? map.p1_y : map.p2_y;
     const charAddr = side === 'p1' ? map.p1_char_id : map.p2_char_id;
@@ -52,12 +60,16 @@ export class StateExtractor {
     const comboAddr = side === 'p1' ? map.p1_combo : map.p2_combo;
     const attackAddr = side === 'p1' ? map.p1_attack_id : map.p2_attack_id;
 
-    const y = this.readU8(workRam, yAddr);
-    const animState = this.readU8(workRam, animAddr);
+    // The byte at player_base+0xA turns out to be an animation index, not
+    // a pure jump-height counter (it reads non-zero during ground actions
+    // too). Keep it exposed as `animState`, but expose `y` as 0 until we
+    // locate the real vertical-position address.
+    const y = 0;
+    const animState = this.readU8(workRam, yAddr) || this.readU8(workRam, animAddr);
     const attackId = this.readU8(workRam, attackAddr);
 
     const hpRaw = this.readU16(workRam, hpAddr);
-    const maxHp = this.readU16(workRam, maxHpAddr) || 176;
+    const maxHp = SF2HF_MAX_HP;
     const hp = hpRaw > maxHp ? 0 : hpRaw;
 
     return {
@@ -70,9 +82,9 @@ export class StateExtractor {
       stunCounter: this.readU16(workRam, stunAddr),
       comboCount: this.readU8(workRam, comboAddr),
       isBlocking: false,
-      isJumping: y > 0,
+      isJumping: false,
       isCrouching: false,
-      isAirborne: y > 0,
+      isAirborne: false,
       currentAttackId: attackId === 0 ? null : attackId,
       attackPhase: attackId === 0 ? null : this.guessAttackPhase(animState),
     };
