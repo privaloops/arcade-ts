@@ -36,6 +36,18 @@ export interface EmulatorRunner {
   /** Async to accommodate engines that gather state from a Web Worker. */
   saveState?(): Promise<ArrayBuffer | null>;
   loadState?(data: ArrayBuffer): boolean;
+  /**
+   * Read-only view of the 68K Work RAM (64KB). Used by the coach to
+   * extract game state each frame without touching the bus API. Only
+   * implemented by CPS-1 for now.
+   */
+  getWorkRam?(): Uint8Array;
+  /**
+   * Register a callback fired at each VBlank (~60Hz). The coach uses
+   * this to tick its extractor in lockstep with the emulator instead
+   * of polling on rAF.
+   */
+  setVblankCallback?(cb: (() => void) | null): void;
   /** Release resources — called on quit to menu. */
   destroy(): void;
 }

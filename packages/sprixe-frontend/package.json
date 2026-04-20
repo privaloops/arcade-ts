@@ -13,6 +13,7 @@
   "dependencies": {
     "@fontsource/inter": "^5.2.8",
     "@fontsource/rajdhani": "^5.2.7",
+    "@sprixe/coach": "*",
     "@sprixe/engine": "*",
     "peerjs": "^1.5.4",
     "qrcode": "^1.5.4"

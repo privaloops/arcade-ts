@@ -18,7 +18,8 @@
     "skipLibCheck": true,
     "sourceMap": true,
     "paths": {
-      "@sprixe/engine/*": ["./packages/sprixe-engine/src/*"]
+      "@sprixe/engine/*": ["./packages/sprixe-engine/src/*"],
+      "@sprixe/coach/*": ["./packages/sprixe-coach/src/*"]
     }
   }
 }

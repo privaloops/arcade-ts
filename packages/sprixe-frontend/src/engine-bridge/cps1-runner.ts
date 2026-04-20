@@ -40,6 +40,8 @@ export async function createCps1Runner(opts: Cps1RunnerOptions): Promise<Emulato
     setVolume: (level: number) => emu.setVolume(level),
     saveState: () => emu.exportStateAsBuffer(),
     loadState: (buf: ArrayBuffer) => emu.importStateFromBuffer(buf),
+    getWorkRam: () => emu.getWorkRam(),
+    setVblankCallback: (cb) => emu.setVblankCallback(cb),
     destroy: () => emu.destroy(),
   };
 }

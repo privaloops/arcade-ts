@@ -10,6 +10,7 @@
  * typed errors (e.g. MissingBiosError) before the screen is mounted.
  */
 
+import { CoachController } from "@sprixe/coach/coach-controller";
 import type { GameEntry } from "../../data/games";
 import type { EmulatorRunner } from "../../engine-bridge/emulator-runner";
 import { identifyRom } from "../../engine-bridge/identify";
@@ -30,6 +31,7 @@ export class PlayingScreen {
   private readonly canvas: HTMLCanvasElement;
   private readonly fpsEl: HTMLDivElement;
   private readonly runner: EmulatorRunner;
+  private coach: CoachController | null = null;
   private rafId: number | null = null;
   private lastFpsUpdate = performance.now();
   private lastFpsFrames = 0;
@@ -104,9 +106,17 @@ export class PlayingScreen {
     this.runner.start();
     this.startFpsLoop();
     this.attachAudioGestureBootstrap();
+    this.coach = new CoachController(this.runner, { gameId: this.game.id });
+    if (!this.coach.start()) {
+      this.coach = null;
+    } else if (typeof window !== 'undefined') {
+      (window as unknown as { __coach?: CoachController }).__coach = this.coach;
+    }
   }
 
   stop(): void {
+    this.coach?.stop();
+    this.coach = null;
     this.stopFpsLoop();
     this.gestureCleanup?.();
     this.gestureCleanup = null;
