@@ -375,7 +375,7 @@ export class AudioPanel {
     const exportBtn = el("button", "ctrl-btn") as HTMLButtonElement;
     exportBtn.textContent = "Export Set";
     exportBtn.style.cssText = "font-size:0.6rem;padding:3px 8px;";
-    exportBtn.addEventListener("click", () => this.exportSamples());
+    exportBtn.addEventListener("click", () => { void this.exportSamples(); });
     const fmtHint = el("span", "smp-fmt-hint");
     const isNeoGeo = !!this.emulator.getVoiceRom;
     fmtHint.textContent = isNeoGeo ? "WAV mono 18519 Hz" : "WAV mono 7575 Hz";
@@ -391,7 +391,7 @@ export class AudioPanel {
       th.textContent = label;
       if (key) {
         th.style.cursor = "pointer";
-        th.addEventListener("click", () => this.sortSamples(key as "id" | "duration" | "size"));
+        th.addEventListener("click", () => this.sortSamples(key));
       }
       hRow.appendChild(th);
     }
@@ -507,15 +507,15 @@ export class AudioPanel {
       dropZone.addEventListener("dragleave", () => dropZone.classList.remove("drag-over"));
       dropZone.addEventListener("drop", (e) => {
         e.preventDefault(); dropZone.classList.remove("drag-over");
-        const file = (e as DragEvent).dataTransfer?.files[0];
-        if (file) this.replaceWithFile(phrase.id, file, dropZone);
+        const file = (e).dataTransfer?.files[0];
+        if (file) void this.replaceWithFile(phrase.id, file, dropZone);
       });
       dropZone.addEventListener("click", () => {
         const input = document.createElement("input");
         input.type = "file"; input.accept = ".wav,audio/*";
         input.addEventListener("change", () => {
           const file = input.files?.[0];
-          if (file) this.replaceWithFile(phrase.id, file, dropZone);
+          if (file) void this.replaceWithFile(phrase.id, file, dropZone);
         });
         input.click();
       });
@@ -524,7 +524,7 @@ export class AudioPanel {
       const micBtn = el("button", "smp-mic-btn") as HTMLButtonElement;
       micBtn.textContent = "\uD83C\uDFA4";
       micBtn.title = "Record from microphone";
-      micBtn.addEventListener("click", () => this.toggleMicRecord(phrase.id, micBtn));
+      micBtn.addEventListener("click", () => { void this.toggleMicRecord(phrase.id, micBtn); });
       tdReplace.appendChild(micBtn);
 
       tr.append(tdId, tdDur, tdSize, tdPlay, tdReplace);
@@ -691,14 +691,16 @@ export class AudioPanel {
   private importSamples(): void {
     const input = document.createElement("input");
     input.type = "file"; input.accept = ".zip,.wav,audio/*"; input.multiple = true;
-    input.addEventListener("change", async () => {
-      const files = input.files;
-      if (!files || files.length === 0) return;
-      if (files.length === 1 && files[0]!.name.endsWith(".zip")) {
-        await this.importFromZip(files[0]!);
-      } else {
-        await this.importFromFiles(Array.from(files));
-      }
+    input.addEventListener("change", () => {
+      void (async () => {
+        const files = input.files;
+        if (!files || files.length === 0) return;
+        if (files.length === 1 && files[0]!.name.endsWith(".zip")) {
+          await this.importFromZip(files[0]!);
+        } else {
+          await this.importFromFiles(Array.from(files));
+        }
+      })();
     });
     input.click();
   }
@@ -803,39 +805,41 @@ export class AudioPanel {
       if (e.data.size > 0) this.micChunks.push(e.data);
     });
 
-    this.micRecorder.addEventListener("stop", async () => {
-      // Release mic
-      if (this.micTimeout) { clearTimeout(this.micTimeout); this.micTimeout = null; }
-      this.micStream?.getTracks().forEach(t => t.stop());
-      this.micStream = null;
-      btn.classList.remove("recording");
-      btn.textContent = "\uD83C\uDFA4";
+    this.micRecorder.addEventListener("stop", () => {
+      void (async () => {
+        // Release mic
+        if (this.micTimeout) { clearTimeout(this.micTimeout); this.micTimeout = null; }
+        this.micStream?.getTracks().forEach(t => t.stop());
+        this.micStream = null;
+        btn.classList.remove("recording");
+        btn.textContent = "\uD83C\uDFA4";
 
-      if (this.micChunks.length === 0) return;
-      const blob = new Blob(this.micChunks, { type: this.micChunks[0]!.type });
-      try {
-        const ctx = this.getAudioCtx();
-        const arrayBuf = await blob.arrayBuffer();
-        const audioBuf = await ctx.decodeAudioData(arrayBuf);
-        const pcm = audioBuf.getChannelData(0);
-        const rom = this.emulator.getOkiRom?.();
-        if (!rom) return;
-        const adpcm = encodeSample(pcm, audioBuf.sampleRate, true);
-        const result = replaceSampleInRom(rom, this.micPhraseId, adpcm);
-        if (result.success) {
-          this.emulator.updateOkiRom?.(rom);
-          this.emulator.getRomStore?.()?.onModified?.();
-          if (result.truncated) {
-            this.showToast(`Sample #${this.micPhraseId} recorded (truncated: ${result.keptMs}ms / ${result.originalMs}ms)`, true);
-          } else {
-            this.showToast(`Sample #${this.micPhraseId} recorded`, true);
+        if (this.micChunks.length === 0) return;
+        const blob = new Blob(this.micChunks, { type: this.micChunks[0]!.type });
+        try {
+          const ctx = this.getAudioCtx();
+          const arrayBuf = await blob.arrayBuffer();
+          const audioBuf = await ctx.decodeAudioData(arrayBuf);
+          const pcm = audioBuf.getChannelData(0);
+          const rom = this.emulator.getOkiRom?.();
+          if (!rom) return;
+          const adpcm = encodeSample(pcm, audioBuf.sampleRate, true);
+          const result = replaceSampleInRom(rom, this.micPhraseId, adpcm);
+          if (result.success) {
+            this.emulator.updateOkiRom?.(rom);
+            this.emulator.getRomStore?.()?.onModified?.();
+            if (result.truncated) {
+              this.showToast(`Sample #${this.micPhraseId} recorded (truncated: ${result.keptMs}ms / ${result.originalMs}ms)`, true);
+            } else {
+              this.showToast(`Sample #${this.micPhraseId} recorded`, true);
+            }
+            setTimeout(() => this.refreshSampleTable(), 1000);
           }
-          setTimeout(() => this.refreshSampleTable(), 1000);
+        } catch (err) {
+          this.showToast("Recording encode error", false);
+          console.error("Mic encode error:", err);
         }
-      } catch (err) {
-        this.showToast("Recording encode error", false);
-        console.error("Mic encode error:", err);
-      }
+      })();
     });
 
     this.micRecorder.start();
@@ -848,7 +852,7 @@ export class AudioPanel {
   }
 
   private extractPhraseId(filename: string): number {
-    const match = filename.match(/(\d{1,3})\.wav$/i) ?? filename.match(/sample_(\d{1,3})/i) ?? filename.match(/^(\d{1,3})[_.\-]/);
+    const match = filename.match(/(\d{1,3})\.wav$/i) ?? filename.match(/sample_(\d{1,3})/i) ?? filename.match(/^(\d{1,3})[_.-]/);
     if (!match) return -1;
     const id = parseInt(match[1]!, 10);
     return (id >= 0 && id < 128) ? id : -1;

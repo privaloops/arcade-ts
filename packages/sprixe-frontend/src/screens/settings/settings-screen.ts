@@ -670,7 +670,7 @@ export class SettingsScreen {
     } catch {
       quotaRow.textContent = "Usage: unavailable";
     }
-    let roms: RomRecord[] = [];
+    let roms: RomRecord[];
     try {
       roms = await this.storage.listRoms();
     } catch {
@@ -697,13 +697,15 @@ export class SettingsScreen {
       del.className = "af-settings-btn af-settings-btn--danger";
       del.setAttribute("data-testid", `settings-storage-delete-${rom.id}`);
       del.textContent = "Delete";
-      del.addEventListener("click", async () => {
-        try {
-          await this.storage!.deleteRom(rom.id);
-          row.remove();
-        } catch {
-          info.textContent += " · delete failed";
-        }
+      del.addEventListener("click", () => {
+        void (async () => {
+          try {
+            await this.storage!.deleteRom(rom.id);
+            row.remove();
+          } catch {
+            info.textContent += " · delete failed";
+          }
+        })();
       });
       row.appendChild(del);
 

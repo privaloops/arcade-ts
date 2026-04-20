@@ -53,6 +53,7 @@ export default defineConfig(({ command }) => ({
   build: {
     target: "es2022",
     outDir: "dist",
+    sourcemap: false,
     rollupOptions: {
       input: {
         main: resolve(__dirname, "index.html"),

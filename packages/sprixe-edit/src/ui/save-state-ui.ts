@@ -85,7 +85,7 @@ function renderSsModal(): void {
     div.appendChild(num);
     div.appendChild(infoEl);
 
-    div.addEventListener("click", () => confirmSlot(i));
+    div.addEventListener("click", () => { void confirmSlot(i); });
 
     ssSlots.appendChild(div);
   }
@@ -148,7 +148,7 @@ export function initSaveStateUI(deps: SaveStateUIDeps): void {
     } else if (e.key === "ArrowDown") {
       highlightSlot((ssSelectedSlot + 1) % numSlots);
     } else if (e.key === "Enter") {
-      confirmSlot(ssSelectedSlot);
+      void confirmSlot(ssSelectedSlot);
     } else if (e.key === "Escape") {
       closeSsModal();
     }

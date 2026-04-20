@@ -36,7 +36,7 @@ export class WebGLRenderer implements RendererInterface {
       -1,  1,  0, 0,
        1,  1,  1, 0,
     ]);
-    const vbo = gl.createBuffer()!;
+    const vbo = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
     gl.bufferData(gl.ARRAY_BUFFER, verts, gl.STATIC_DRAW);
 
@@ -61,7 +61,7 @@ export class WebGLRenderer implements RendererInterface {
       }
     `);
 
-    const prog = gl.createProgram()!;
+    const prog = gl.createProgram();
     gl.attachShader(prog, vs);
     gl.attachShader(prog, fs);
     gl.linkProgram(prog);
@@ -71,7 +71,7 @@ export class WebGLRenderer implements RendererInterface {
     this.program = prog;
 
     // VAO
-    const vao = gl.createVertexArray()!;
+    const vao = gl.createVertexArray();
     gl.bindVertexArray(vao);
     gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
     gl.enableVertexAttribArray(0);
@@ -80,7 +80,7 @@ export class WebGLRenderer implements RendererInterface {
     gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 16, 8);
 
     // Texture
-    const tex = gl.createTexture()!;
+    const tex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);

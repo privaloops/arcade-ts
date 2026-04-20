@@ -35,9 +35,9 @@ let ymResamplerR: LinearResampler | null = null;
 let okiResampler: LinearResampler | null = null;
 
 // Scratch buffers
-let ymBufferL = new Float32Array(1024);
-let ymBufferR = new Float32Array(1024);
-let okiBuffer = new Float32Array(256);
+const ymBufferL = new Float32Array(1024);
+const ymBufferR = new Float32Array(1024);
+const okiBuffer = new Float32Array(256);
 let ymResampledL = new Float32Array(12288);
 let ymResampledR = new Float32Array(12288);
 let okiResampledM = new Float32Array(12288);
@@ -116,7 +116,7 @@ function updateYmShadow(register: number, data: number): void {
     const ch = data & 7;
     const opMask = (data >> 3) & 0xF;
     ymKon[ch] = opMask !== 0 ? 1 : 0;
-    vizWriter.updateFmKon(ch, ymKon[ch]!);
+    vizWriter.updateFmKon(ch, ymKon[ch]);
     // Also update TL for this channel (carrier may have changed)
     vizWriter.updateFmTl(ch, getCarrierTl(ch));
   } else if (register >= 0x28 && register <= 0x2F) {
@@ -126,7 +126,7 @@ function updateYmShadow(register: number, data: number): void {
   } else if (register >= 0x30 && register <= 0x37) {
     const ch = register & 7;
     ymKf[ch] = data >> 2; // KF is bits 7-2
-    vizWriter.updateFmKf(ch, ymKf[ch]!);
+    vizWriter.updateFmKf(ch, ymKf[ch]);
   } else if (register >= 0x60 && register <= 0x7F) {
     // TL: operator index = register & 0x1F
     const opIdx = register & 0x1F;
@@ -140,9 +140,9 @@ function updateYmShadow(register: number, data: number): void {
     ymConnect[ch] = data & 7;
     ymRlFull[ch] = data;
     ymRlValid[ch] = 1;
-    vizWriter.updateFmRl(ch, ymRl[ch]!);
+    vizWriter.updateFmRl(ch, ymRl[ch]);
     // Store full FB/ALG byte (6 bits, without RL) for voice detection
-    vizWriter.updateFmConnect(ch, ymRlFull[ch]! & 0x3F);
+    vizWriter.updateFmConnect(ch, ymRlFull[ch] & 0x3F);
   }
 }
 

@@ -98,7 +98,7 @@ export function decodeSample(rom: Uint8Array, phrase: PhraseInfo): Float32Array 
  *  Resamples to 7575 Hz if needed. Returns packed ADPCM (high nibble first). */
 export function encodeSample(pcm: Float32Array, srcRate: number, boost = false): Uint8Array {
   // Resample to OKI rate
-  let resampled = srcRate === OKI_SAMPLE_RATE ? pcm : resampleLinear(pcm, srcRate, OKI_SAMPLE_RATE);
+  const resampled = srcRate === OKI_SAMPLE_RATE ? pcm : resampleLinear(pcm, srcRate, OKI_SAMPLE_RATE);
 
   // Lo-fi processing: match OKI hardware character
   // 1. Low-pass at ~3kHz (single-pole) to kill harsh highs before ADPCM quantization

@@ -213,9 +213,9 @@ function verifyCPU(cpu: Z80, bus: TestBus, test: TestVector): string[] {
 
   // RAM
   for (const [addr, expectedVal] of expected.ram) {
-    const got = bus.readByte(addr!);
+    const got = bus.readByte(addr);
     if (got !== expectedVal) {
-      errors.push(`RAM[0x${addr!.toString(16)}]: got 0x${got.toString(16)} expected 0x${expectedVal!.toString(16)}`);
+      errors.push(`RAM[0x${addr.toString(16)}]: got 0x${got.toString(16)} expected 0x${expectedVal.toString(16)}`);
     }
   }
 
@@ -250,7 +250,7 @@ for (const file of testFiles) {
 
   describe(`Z80 ${instrName}`, () => {
     const filePath = join(TEST_DIR, file);
-    let vectors: TestVector[] = [];
+    let vectors: TestVector[];
 
     try {
       vectors = JSON.parse(readFileSync(filePath, 'utf8')) as TestVector[];

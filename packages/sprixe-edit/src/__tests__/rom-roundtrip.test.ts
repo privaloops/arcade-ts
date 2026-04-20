@@ -24,11 +24,11 @@ const LOCAL_PATH = resolve(__dirname, '../../public/roms/ffight.zip');
 async function getRomBuffer(): Promise<ArrayBuffer> {
   // Prefer local ROM if available
   if (existsSync(LOCAL_PATH)) {
-    return readFileSync(LOCAL_PATH).buffer as ArrayBuffer;
+    return readFileSync(LOCAL_PATH).buffer;
   }
   // Use cached download
   if (existsSync(CACHE_PATH)) {
-    return readFileSync(CACHE_PATH).buffer as ArrayBuffer;
+    return readFileSync(CACHE_PATH).buffer;
   }
   // Download and cache
   const res = await fetch(ROM_URL);

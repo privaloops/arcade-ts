@@ -43,34 +43,34 @@ describe('Kof98Protection', () => {
   it('returns default ROM words in initial state', () => {
     const prot = new Kof98Protection();
     prot.setDefaultRom(0x1234, 0x5678);
-    expect(prot.read16!(0x000100)).toBe(0x1234);
-    expect(prot.read16!(0x000102)).toBe(0x5678);
+    expect(prot.read16(0x000100)).toBe(0x1234);
+    expect(prot.read16(0x000102)).toBe(0x5678);
   });
 
   it('returns overlay values in state 1 (0x0090)', () => {
     const prot = new Kof98Protection();
     prot.setDefaultRom(0x1234, 0x5678);
-    prot.write16!(0x20AAAA, 0x0090);
-    expect(prot.read16!(0x000100)).toBe(0x00C2);
-    expect(prot.read16!(0x000102)).toBe(0x00FD);
+    prot.write16(0x20AAAA, 0x0090);
+    expect(prot.read16(0x000100)).toBe(0x00C2);
+    expect(prot.read16(0x000102)).toBe(0x00FD);
   });
 
   it('returns overlay values in state 2 (0x00F0)', () => {
     const prot = new Kof98Protection();
-    prot.write16!(0x20AAAA, 0x00F0);
-    expect(prot.read16!(0x000100)).toBe(0x4E45);
-    expect(prot.read16!(0x000102)).toBe(0x4F2D);
+    prot.write16(0x20AAAA, 0x00F0);
+    expect(prot.read16(0x000100)).toBe(0x4E45);
+    expect(prot.read16(0x000102)).toBe(0x4F2D);
   });
 
   it('does not handle reads outside 0x100-0x103', () => {
     const prot = new Kof98Protection();
-    expect(prot.read16!(0x000104)).toBeUndefined();
-    expect(prot.read16!(0x200000)).toBeUndefined();
+    expect(prot.read16(0x000104)).toBeUndefined();
+    expect(prot.read16(0x200000)).toBeUndefined();
   });
 
   it('does not handle writes outside 0x20AAAA', () => {
     const prot = new Kof98Protection();
-    expect(prot.write16!(0x200000, 0x0090)).toBe(false);
+    expect(prot.write16(0x200000, 0x0090)).toBe(false);
   });
 });
 
@@ -111,35 +111,35 @@ describe('MslugxProtection', () => {
     const prot = new MslugxProtection(busRead);
 
     // Init (offset 5 = 0x2FFFEA)
-    prot.write16!(0x2FFFEA, 0);
+    prot.write16(0x2FFFEA, 0);
     // Set command 0x0001 (offset 1 = 0x2FFFE2)
-    prot.write16!(0x2FFFE2, 0x0001);
+    prot.write16(0x2FFFE2, 0x0001);
 
     // Read should return sequential bits from ROM
-    const bit0 = prot.read16!(0x2FFFE0);
+    const bit0 = prot.read16(0x2FFFE0);
     expect(bit0).toBeDefined();
     expect(bit0! === 0 || bit0! === 1).toBe(true);
   });
 
   it('does not handle addresses outside protection range', () => {
     const prot = new MslugxProtection(() => 0);
-    expect(prot.read16!(0x000000)).toBeUndefined();
-    expect(prot.write16!(0x000000, 0)).toBe(false);
+    expect(prot.read16(0x000000)).toBeUndefined();
+    expect(prot.write16(0x000000, 0)).toBe(false);
   });
 });
 
 describe('SmaProtection', () => {
   it('returns magic value 0x9A37 for protected range', () => {
     const prot = new SmaProtection('kof99', () => {});
-    expect(prot.read16!(0x2FE400)).toBe(0x9A37);
-    expect(prot.read16!(0x2FE500)).toBe(0x9A37);
-    expect(prot.read16!(0x2FE7FF)).toBe(0x9A37);
+    expect(prot.read16(0x2FE400)).toBe(0x9A37);
+    expect(prot.read16(0x2FE500)).toBe(0x9A37);
+    expect(prot.read16(0x2FE7FF)).toBe(0x9A37);
   });
 
   it('does not handle reads outside protected ranges', () => {
     const prot = new SmaProtection('kof99', () => {});
-    expect(prot.read16!(0x000000)).toBeUndefined();
-    expect(prot.read16!(0x100000)).toBeUndefined();
+    expect(prot.read16(0x000000)).toBeUndefined();
+    expect(prot.read16(0x100000)).toBeUndefined();
   });
 
   it('triggers bankswitch on write to game-specific address', () => {
@@ -147,15 +147,15 @@ describe('SmaProtection', () => {
     const prot = new SmaProtection('kof99', (offset) => { bankOffset = offset; });
 
     // KOF99 bankswitch address is 0x2FFFF0
-    prot.write16!(0x2FFFF0, 0);
+    prot.write16(0x2FFFF0, 0);
     expect(bankOffset).toBeGreaterThanOrEqual(0x100000);
   });
 
   it('generates deterministic RNG sequence', () => {
     const prot = new SmaProtection('kof99', () => {});
     // KOF99 RNG addresses: 0x2FFFF8, 0x2FFFFA
-    const r1 = prot.read16!(0x2FFFF8);
-    const r2 = prot.read16!(0x2FFFF8);
+    const r1 = prot.read16(0x2FFFF8);
+    const r2 = prot.read16(0x2FFFF8);
     // RNG returns previous state, so first call returns seed (0x2345)
     expect(r1).toBe(0x2345);
     // Second call returns next LFSR value (different from seed)

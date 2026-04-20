@@ -43,8 +43,8 @@ let resamplerR: LinearResampler | null = null;
 // Scratch buffers
 let ymBufferL = new Float32Array(2048);
 let ymBufferR = new Float32Array(2048);
-let resampledL = new Float32Array(12288);
-let resampledR = new Float32Array(12288);
+const resampledL = new Float32Array(12288);
+const resampledR = new Float32Array(12288);
 
 let suspended = false;
 let intervalId: ReturnType<typeof setInterval> | null = null;
@@ -270,12 +270,12 @@ function shadowFmChannel(reg: number, value: number, isPort1: boolean): void {
     fmFnum[fmCh] = (fmFnum[fmCh]! & 0xFF) | ((value & 0x07) << 8);
   } else if (reg >= 0xA0 && reg <= 0xA2) {
     fmFnum[fmCh] = (fmFnum[fmCh]! & 0x700) | value;
-    fmKc[fmCh] = fnumToKc(fmFnum[fmCh]!, fmBlock[fmCh]!);
-    vizWriter?.updateFmKc(fmCh, fmKc[fmCh]!);
+    fmKc[fmCh] = fnumToKc(fmFnum[fmCh], fmBlock[fmCh]!);
+    vizWriter?.updateFmKc(fmCh, fmKc[fmCh]);
   } else if (reg >= 0xB0 && reg <= 0xB2) {
     fmRl[fmCh] = (value >> 6) & 3;
     fmConnect[fmCh] = value & 7;
-    vizWriter?.updateFmRl(fmCh, fmRl[fmCh]!);
+    vizWriter?.updateFmRl(fmCh, fmRl[fmCh]);
     vizWriter?.updateFmConnect(fmCh, value & 0x3F);
   }
 }
@@ -293,7 +293,7 @@ function updateYm2610Shadow(port: number, value: number): void {
       const ch = reg >> 1;
       if (reg & 1) ssgPeriod[ch] = (ssgPeriod[ch]! & 0xFF) | ((value & 0x0F) << 8);
       else ssgPeriod[ch] = (ssgPeriod[ch]! & 0xF00) | value;
-      vizWriter?.updateFmKc(FM_CHANNELS + ch, ssgPeriodToKc(ssgPeriod[ch]!, SSG_CLOCK));
+      vizWriter?.updateFmKc(FM_CHANNELS + ch, ssgPeriodToKc(ssgPeriod[ch], SSG_CLOCK));
     }
     // SSG mixer
     if (reg === 0x07) {
@@ -307,9 +307,9 @@ function updateYm2610Shadow(port: number, value: number): void {
     if (reg >= 0x08 && reg <= 0x0A) {
       const ch = reg - 0x08;
       ssgVolume[ch] = (value & 0x10) ? 15 : (value & 0x0F);
-      ssgKon[ch] = ssgToneEn[ch]! && ssgVolume[ch]! > 0 ? 1 : 0;
-      vizWriter?.updateFmTl(FM_CHANNELS + ch, 127 - ((ssgVolume[ch]! * 127 / 15) | 0));
-      vizWriter?.updateFmKon(FM_CHANNELS + ch, ssgKon[ch]!);
+      ssgKon[ch] = ssgToneEn[ch]! && ssgVolume[ch] > 0 ? 1 : 0;
+      vizWriter?.updateFmTl(FM_CHANNELS + ch, 127 - ((ssgVolume[ch] * 127 / 15) | 0));
+      vizWriter?.updateFmKon(FM_CHANNELS + ch, ssgKon[ch]);
     }
     // ADPCM-B address registers
     if (reg === 0x12) adpcmBStartL = value;
@@ -343,7 +343,7 @@ function updateYm2610Shadow(port: number, value: number): void {
       const fmCh = slotToFmCh((value & 4) !== 0, value & 3);
       if (fmCh >= 0) {
         fmKon[fmCh] = ((value >> 4) & 0x0F) !== 0 ? 1 : 0;
-        vizWriter?.updateFmKon(fmCh, fmKon[fmCh]!);
+        vizWriter?.updateFmKon(fmCh, fmKon[fmCh]);
         vizWriter?.updateFmTl(fmCh, getCarrierTl(fmCh));
       }
     }
@@ -541,7 +541,7 @@ self.onmessage = async (e: MessageEvent) => {
         // Load V-ROM into WASM (with ADPCM-A/B split point)
         if (msg.voiceRom) {
           workerAdpcmASize = msg.adpcmASize ?? 0;
-          ym2610!.loadVRom(new Uint8Array(msg.voiceRom), workerAdpcmASize);
+          ym2610.loadVRom(new Uint8Array(msg.voiceRom), workerAdpcmASize);
         }
 
         // Set up ring buffer

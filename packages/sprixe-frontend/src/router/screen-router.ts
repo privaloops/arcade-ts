@@ -133,7 +133,7 @@ export class ScreenRouter {
     }
     set.add(cb);
     return () => {
-      set!.delete(cb);
+      set.delete(cb);
     };
   }
 

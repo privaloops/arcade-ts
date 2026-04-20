@@ -149,7 +149,6 @@ export function openColorPicker(
     // Rebuild palette swatches, then re-attach dialog
     container.querySelector('.edit-color-dialog')?.remove();
     container.appendChild(dialog);
-    transCb.checked = transCb.checked; // preserve state
   });
 
   satSlider.addEventListener('input', () => {

@@ -44,7 +44,7 @@ export interface PeerHostOptions {
   peerFactory?: PeerFactory;
 }
 
-type FileListener = (file: ReceivedFile, conn: DataConnection) => void;
+type FileListener = (file: ReceivedFile, conn: DataConnection) => void | Promise<void>;
 type ConnectionListener = (conn: DataConnection) => void;
 type ErrorListener = (err: Error) => void;
 export type PhoneCommand = Extract<PhoneToKioskMessage, { type: "cmd" }>;
@@ -222,7 +222,7 @@ export class PeerHost {
         this.reassemblyByConn.delete(conn);
         const data = concatChunks(state.chunks, state.receivedBytes);
         const file: ReceivedFile = { name: state.name, size: data.byteLength, data };
-        for (const l of this.fileListeners) l(file, conn);
+        for (const l of this.fileListeners) void l(file, conn);
         return;
       }
       case "cmd":

@@ -442,7 +442,11 @@ export class InputManager {
     } else {
       this.savedGamepadIds[idx] = null;
     }
-    try { localStorage.setItem("cps1-gamepad-devices", JSON.stringify(this.savedGamepadIds)); } catch {}
+    try {
+      localStorage.setItem("cps1-gamepad-devices", JSON.stringify(this.savedGamepadIds));
+    } catch {
+      // localStorage may be disabled in private mode; gamepad assignment is non-essential
+    }
   }
 
   /** Get assigned gamepad index for a player (null = keyboard only). */

@@ -270,28 +270,30 @@ export function initDropZone(deps: DropZoneDeps): void {
     loadBtn.disabled = !gameSelect.value;
   });
 
-  loadBtn.addEventListener("click", async () => {
-    const selectedValue = gameSelect.value;
-    if (!selectedValue) return;
+  loadBtn.addEventListener("click", () => {
+    void (async () => {
+      const selectedValue = gameSelect.value;
+      if (!selectedValue) return;
 
-    loadBtn.disabled = true;
-    void emulator.initAudio();
+      loadBtn.disabled = true;
+      void emulator.initAudio();
 
-    // Value is "neogeo/gamename" for Neo-Geo, "gamename" for CPS-1
-    const romPath = selectedValue.includes("/") ? selectedValue : selectedValue;
-    const displayName = selectedValue.includes("/") ? selectedValue.split("/")[1]! : selectedValue;
+      // Value is "neogeo/gamename" for Neo-Geo, "gamename" for CPS-1
+      const romPath = selectedValue.includes("/") ? selectedValue : selectedValue;
+      const displayName = selectedValue.includes("/") ? selectedValue.split("/")[1]! : selectedValue;
 
-    try {
-      setStatus(`Loading ${displayName}...`);
-      const resp = await fetch(`/roms/${romPath}.zip`);
-      if (!resp.ok) throw new Error(`ROM not found: ${romPath}.zip`);
-      const blob = await resp.blob();
-      const file = new File([blob], `${displayName}.zip`, { type: "application/zip" });
-      await handleRomFile(file);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setStatus(`Download failed: ${msg}`);
-      loadBtn.disabled = false;
-    }
+      try {
+        setStatus(`Loading ${displayName}...`);
+        const resp = await fetch(`/roms/${romPath}.zip`);
+        if (!resp.ok) throw new Error(`ROM not found: ${romPath}.zip`);
+        const blob = await resp.blob();
+        const file = new File([blob], `${displayName}.zip`, { type: "application/zip" });
+        await handleRomFile(file);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setStatus(`Download failed: ${msg}`);
+        loadBtn.disabled = false;
+      }
+    })();
   });
 }
