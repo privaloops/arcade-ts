@@ -216,11 +216,24 @@ export class NeoGeoVideo {
   // Palette cache
   // ---------------------------------------------------------------------------
 
+  private shadowMode: boolean = false;
+
   private rebuildPaletteCache(): void {
     const off = this.paletteBankOffset;
+    const shadow = this.shadowMode;
     for (let i = 0; i < 4096; i++) {
       const word = (this.paletteRam[off + i * 2]! << 8) | this.paletteRam[off + i * 2 + 1]!;
-      this.paletteCache[i] = decodeNeoGeoColor(word);
+      const abgr = decodeNeoGeoColor(word);
+      if (shadow) {
+        // Shadow mode halves each channel. MAME: shadow mask 0x7F7F7F7F
+        // preserves alpha and right-shifts RGB by one. Used by the BIOS
+        // eye-catcher flash and by games for drop shadows.
+        const a = abgr & 0xFF000000;
+        const rgb = (abgr & 0x00FEFEFE) >>> 1;
+        this.paletteCache[i] = (a | rgb) >>> 0;
+      } else {
+        this.paletteCache[i] = abgr;
+      }
     }
     this.paletteDirty = false;
   }
@@ -232,6 +245,16 @@ export class NeoGeoVideo {
     const newOffset = bank ? 0x2000 : 0;
     if (newOffset !== this.paletteBankOffset) {
       this.paletteBankOffset = newOffset;
+      this.paletteDirty = true;
+    }
+  }
+
+  /** Toggle LSPC shadow mode (reg 0x3A0001 / 0x3A0011). When on, all
+   *  decoded palette entries are halved — used by the Neo-Geo BIOS
+   *  eye-catcher flash and per-sprite shadows. */
+  setShadowMode(on: boolean): void {
+    if (this.shadowMode !== on) {
+      this.shadowMode = on;
       this.paletteDirty = true;
     }
   }

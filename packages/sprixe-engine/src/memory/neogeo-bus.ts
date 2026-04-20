@@ -635,6 +635,7 @@ export class NeoGeoBus implements BusInterface {
   private _onZ80RomSwitch: ((useBios: boolean) => void) | null = null;
   private _onPaletteBankSwitch: ((bank: number) => void) | null = null;
   private _onPaletteWrite: (() => void) | null = null;
+  private _onShadowMode: ((on: boolean) => void) | null = null;
 
   setFixRomSwitchCallback(cb: (useBios: boolean) => void): void { this._onFixRomSwitch = cb; }
   setZ80RomSwitchCallback(cb: (useBios: boolean) => void): void { this._onZ80RomSwitch = cb; }
@@ -644,6 +645,8 @@ export class NeoGeoBus implements BusInterface {
    *  Without this, IRQ2 handlers that flash the palette mid-frame
    *  (eye-catcher, Metal Slug 2 horizon) rendered with the stale cache. */
   setPaletteWriteCallback(cb: () => void): void { this._onPaletteWrite = cb; }
+  /** Invoked on shadow mode toggles (reg 0x3A0001 / 0x3A0011). */
+  setShadowModeCallback(cb: (on: boolean) => void): void { this._onShadowMode = cb; }
 
   private writeControlReg(address: number, _value: number): void {
     // Control registers per FBNeo WriteIO2 (odd byte addresses)
@@ -652,6 +655,7 @@ export class NeoGeoBus implements BusInterface {
       case 0x00: // Watchdog kick (even byte)
         break;
       case 0x01: // Shadow off (normal palette)
+        this._onShadowMode?.(false);
         break;
       case 0x03: // SWPBIOS — map BIOS vectors to 0x000000
         this.biosMode = true;
@@ -667,6 +671,7 @@ export class NeoGeoBus implements BusInterface {
         this._onPaletteBankSwitch?.(1);
         break;
       case 0x11: // Shadow on (darken palette)
+        this._onShadowMode?.(true);
         break;
       case 0x13: // SWPROM — map GAME vectors to 0x000000
         this.biosMode = false;

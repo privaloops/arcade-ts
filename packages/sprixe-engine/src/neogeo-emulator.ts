@@ -351,6 +351,9 @@ export class NeoGeoEmulator {
     this.bus.setPaletteWriteCallback(() => {
       this.video.markPaletteDirty();
     });
+    this.bus.setShadowModeCallback((on) => {
+      this.video.setShadowMode(on);
+    });
 
     // Initialize YM2610 on main thread for Z80 sound handshake
     try {
