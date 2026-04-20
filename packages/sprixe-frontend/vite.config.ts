@@ -173,6 +173,115 @@ export default defineConfig(({ command }) => ({
       },
     },
     {
+      // Dev-only proxy for ElevenLabs text-to-speech. Browser POSTs a
+      // short line of text, the server reads ELEVENLABS_API_KEY from the
+      // Node env (never shipped to the client) and streams back an MP3
+      // audio/mpeg response. Production will swap for an edge function.
+      name: "coach-tts",
+      configureServer(server) {
+        server.middlewares.use(async (req, res, next) => {
+          const [pathname, rawQuery = ""] = (req.url ?? "").split("?");
+          if (pathname !== "/api/coach/tts") return next();
+
+          const apiKey = process.env.ELEVENLABS_API_KEY ?? process.env.XI_API_KEY;
+          if (!apiKey) {
+            res.statusCode = 500;
+            res.end(JSON.stringify({ error: "ELEVENLABS_API_KEY not set in server env" }));
+            return;
+          }
+
+          // GET variant supports `new Audio('/api/coach/tts?text=...')` so
+          // the browser plays the MP3 progressively as bytes arrive, which
+          // slashes perceived latency vs fetching a full blob then playing.
+          let bodyText = "";
+          let bodyVoiceId: string | undefined;
+          let bodyModelId: string | undefined;
+          if (req.method === "GET") {
+            const params = new URLSearchParams(rawQuery);
+            bodyText = params.get("text") ?? "";
+            bodyVoiceId = params.get("voiceId") ?? undefined;
+            bodyModelId = params.get("modelId") ?? undefined;
+          } else if (req.method === "POST") {
+            try {
+              const chunks: Buffer[] = [];
+              for await (const chunk of req) chunks.push(chunk as Buffer);
+              const parsed = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+              bodyText = parsed.text ?? "";
+              bodyVoiceId = parsed.voiceId;
+              bodyModelId = parsed.modelId;
+            } catch {
+              res.statusCode = 400;
+              res.end(JSON.stringify({ error: "invalid JSON body" }));
+              return;
+            }
+          } else {
+            res.statusCode = 405;
+            res.end();
+            return;
+          }
+
+          const text = bodyText.trim();
+          if (!text) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: "empty text" }));
+            return;
+          }
+
+          const voiceId = bodyVoiceId
+            ?? process.env.ELEVENLABS_VOICE_ID
+            ?? "nPczCjzI2devNBz1zQrb"; // Brian — hype male caster
+          // eleven_flash_v2_5 is the lowest-latency multilingual model,
+          // ~75ms TTFB vs ~300-400ms for eleven_multilingual_v2, good
+          // enough quality for a short hype caster line.
+          const modelId = bodyModelId ?? "eleven_flash_v2_5";
+
+          try {
+            const upstream = await fetch(
+              `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream`,
+              {
+                method: "POST",
+                headers: {
+                  "xi-api-key": apiKey,
+                  "Content-Type": "application/json",
+                  "Accept": "audio/mpeg",
+                },
+                body: JSON.stringify({
+                  text,
+                  model_id: modelId,
+                  voice_settings: {
+                    stability: 0.4,
+                    similarity_boost: 0.75,
+                    style: 0.6,
+                    use_speaker_boost: true,
+                  },
+                }),
+              },
+            );
+
+            if (!upstream.ok || !upstream.body) {
+              res.statusCode = upstream.status || 502;
+              const err = await upstream.text().catch(() => "");
+              res.end(JSON.stringify({ error: `elevenlabs ${upstream.status}: ${err.slice(0, 200)}` }));
+              return;
+            }
+
+            res.setHeader("Content-Type", "audio/mpeg");
+            res.setHeader("Cache-Control", "no-store");
+            const reader = upstream.body.getReader();
+            while (true) {
+              const { value, done } = await reader.read();
+              if (done) break;
+              if (value) res.write(Buffer.from(value));
+            }
+            res.end();
+          } catch (e) {
+            res.statusCode = 500;
+            res.end(JSON.stringify({ error: String(e instanceof Error ? e.message : e) }));
+          }
+        });
+      },
+    },
+    {
       // Dev-only: expose the sibling sprixe-edit ROM folders so the
       // frontend can bootstrap an empty IndexedDB with a real catalogue
       // at boot. No-op in production builds since this plugin only runs

@@ -114,9 +114,17 @@ export class PlayingScreen {
     const params = new URLSearchParams(window.location.search);
     const coachLang = params.get("coachLang");
     const language: "en" | "fr" = coachLang === "fr" ? "fr" : "en";
+    const ttsParam = params.get("tts");
+    const ttsProvider: "eleven" | "local" | "off" =
+      ttsParam === "0" || ttsParam === "off" ? "off"
+      : ttsParam === "local" ? "local"
+      : "eleven";
+    const ttsVoiceId = params.get("coachVoice") ?? undefined;
     this.coach = new CoachController(this.runner, {
       gameId: this.game.id,
       language,
+      ttsProvider,
+      ...(ttsVoiceId ? { ttsVoiceId } : {}),
       onLlmToken: (t) => overlay.appendToken(t),
       onLlmComment: () => overlay.endStream(),
       onLlmError: (err) => {

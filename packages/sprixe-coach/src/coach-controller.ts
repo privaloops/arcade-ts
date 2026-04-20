@@ -4,7 +4,17 @@ import { StateExtractor } from './extractor/state-extractor';
 import { StateHistory } from './extractor/state-history';
 import { P1_BASE, P2_BASE } from './extractor/sf2hf-memory-map';
 import { CommentOrchestrator } from './llm/comment-orchestrator';
+import { TtsPlayer } from './tts/tts-player';
+import { LocalTtsPlayer } from './tts/local-tts-player';
 import type { GameState } from './types';
+
+/** Common interface shared by ElevenLabs and browser-native TTS. */
+interface TtsEngine {
+  speak(text: string): void;
+  destroy(): void;
+}
+
+export type TtsProvider = 'eleven' | 'local' | 'off';
 
 const WORK_RAM_BASE = 0xFF0000;
 
@@ -32,9 +42,37 @@ export interface CoachOptions {
   onLlmError?: (err: string) => void;
   /** Output language for the coach line. Defaults to 'en'. */
   language?: 'en' | 'fr';
+  /**
+   * TTS backend selector.
+   *   'eleven' (default) — ElevenLabs Flash via the dev proxy, high
+   *      quality hype caster voice, ~1.2s latency.
+   *   'local' — browser-native Web Speech API, ~0ms latency but uses
+   *      the OS voices so the quality / hype factor is limited.
+   *   'off' — no voice, subtitles only.
+   */
+  ttsProvider?: TtsProvider;
+  /** Optional voice override forwarded to /api/coach/tts (ElevenLabs). */
+  ttsVoiceId?: string;
 }
 
 const SUPPORTED_GAMES = new Set(['sf2hf', 'sf2hfj', 'sf2hfu']);
+
+function buildTtsEngine(opts: CoachOptions): TtsEngine | null {
+  if (typeof window === 'undefined') return null;
+  const provider = opts.ttsProvider ?? 'eleven';
+  if (provider === 'off') return null;
+  if (provider === 'local') {
+    const lang = opts.language === 'fr' ? 'fr-FR' : 'en-US';
+    return new LocalTtsPlayer({
+      lang,
+      onError: (err) => console.warn('[coach:tts:local]', err),
+    });
+  }
+  return new TtsPlayer({
+    ...(opts.ttsVoiceId ? { voiceId: opts.ttsVoiceId } : {}),
+    onError: (err) => console.warn('[coach:tts:eleven]', err),
+  });
+}
 
 function formatEvent(ev: CoachEvent): string {
   const head = `f=${ev.frameIdx} ${ev.type} (imp=${ev.importance.toFixed(2)})`;
@@ -77,6 +115,7 @@ export class CoachController {
   private readonly logEvery: number;
   private readonly now: () => number;
   private readonly commentator: CommentOrchestrator | null;
+  private readonly ttsPlayer: TtsEngine | null;
   private tickCount = 0;
   private stopped = false;
   private recentEvents: CoachEvent[] = [];
@@ -87,10 +126,15 @@ export class CoachController {
     this.gameId = opts.gameId;
     this.logEvery = opts.logEveryNFrames ?? 60;
     this.now = opts.now ?? (() => performance.now());
+    this.ttsPlayer = buildTtsEngine(opts);
+
     this.commentator = opts.onLlmToken
       ? new CommentOrchestrator({
           onToken: opts.onLlmToken,
-          ...(opts.onLlmComment ? { onCommentDone: opts.onLlmComment } : {}),
+          onCommentDone: (text) => {
+            this.ttsPlayer?.speak(text);
+            opts.onLlmComment?.(text);
+          },
           ...(opts.onLlmError ? { onError: opts.onLlmError } : {}),
           ...(opts.language ? { language: opts.language } : {}),
           now: this.now,
@@ -113,6 +157,7 @@ export class CoachController {
     this.host.setVblankCallback?.(null);
     this.detector.reset();
     this.commentator?.cancel();
+    this.ttsPlayer?.destroy();
   }
 
   /** Expose the orchestrator so callers can cancel mid-stream if needed. */
