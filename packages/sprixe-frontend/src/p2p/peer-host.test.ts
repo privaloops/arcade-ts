@@ -175,7 +175,7 @@ describe("PeerHost", () => {
     it("reassembles a chunked payload into a single ArrayBuffer", async () => {
       const { host, peer } = await spinUp();
       const received: { name: string; data: ArrayBuffer }[] = [];
-      host.onFile((f) => received.push(f));
+      host.onFile((f) => { received.push(f); });
 
       const conn = new MockConnection();
       peer.emit("connection", conn as unknown as DataConnection);
@@ -198,7 +198,7 @@ describe("PeerHost", () => {
     it("keeps separate reassembly state per connection", async () => {
       const { host, peer } = await spinUp();
       const received: { name: string; data: ArrayBuffer }[] = [];
-      host.onFile((f) => received.push(f));
+      host.onFile((f) => { received.push(f); });
 
       const connA = new MockConnection();
       const connB = new MockConnection();
@@ -222,7 +222,7 @@ describe("PeerHost", () => {
     it("ignores chunks that arrive before file-start (protocol violation)", async () => {
       const { host, peer } = await spinUp();
       const received: unknown[] = [];
-      host.onFile((f) => received.push(f));
+      host.onFile((f) => { received.push(f); });
 
       const conn = new MockConnection();
       peer.emit("connection", conn as unknown as DataConnection);
@@ -235,7 +235,7 @@ describe("PeerHost", () => {
     it("supports sequential uploads on the same connection", async () => {
       const { host, peer } = await spinUp();
       const received: { name: string; data: ArrayBuffer }[] = [];
-      host.onFile((f) => received.push(f));
+      host.onFile((f) => { received.push(f); });
 
       const conn = new MockConnection();
       peer.emit("connection", conn as unknown as DataConnection);

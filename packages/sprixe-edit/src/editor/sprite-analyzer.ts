@@ -278,8 +278,8 @@ export function assembleCharacter(
   for (let i = group.tiles.length - 1; i >= 0; i--) {
     const tile = group.tiles[i]!;
     const pal = isMap
-      ? (paletteLookup as Map<number, Array<[number, number, number]>>).get(tile.palette) ?? []
-      : paletteLookup as Array<[number, number, number]>;
+      ? (paletteLookup).get(tile.palette) ?? []
+      : paletteLookup;
     const pixels = readTile(gfxRom, tile.mappedCode, 16, 16, CHAR_SIZE_16);
     blitTile(img, pixels, tile.relX, tile.relY, tile.flipX, tile.flipY, pal);
   }

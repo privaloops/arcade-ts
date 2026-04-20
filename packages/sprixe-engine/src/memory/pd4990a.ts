@@ -55,7 +55,7 @@ export class PD4990A {
   /** Update TP and second counters based on elapsed CPU cycles */
   private update(): void {
     const currentTicks = this.getTicks();
-    let elapsed = (currentTicks - this.lastTicks) >>> 0;
+    const elapsed = (currentTicks - this.lastTicks) >>> 0;
     // Don't estimate cycles — only real cycles from addCycles count.
     // The BIOS tight loop will see the same TP value within one 68K step,
     // but the transition will be visible when crossing step boundaries.

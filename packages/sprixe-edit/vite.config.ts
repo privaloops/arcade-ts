@@ -62,6 +62,7 @@ export default defineConfig({
   build: {
     target: "es2022",
     outDir: "dist",
+    sourcemap: false,
     rollupOptions: {
       input: {
         play: resolve(__dirname, "play/index.html"),

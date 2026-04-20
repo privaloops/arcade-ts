@@ -139,7 +139,7 @@ describe("PeerSend", () => {
       expect(types[0]).toBe("file-start");
       expect(types[types.length - 1]).toBe("file-end");
 
-      const chunks = conn.sent.filter((m) => m.type === "chunk") as Extract<PhoneToKioskMessage, { type: "chunk" }>[];
+      const chunks = conn.sent.filter((m) => m.type === "chunk");
       expect(chunks).toHaveLength(4); // 3 full + 1 remainder
       expect(chunks[0]!.idx).toBe(0);
       expect(chunks[3]!.idx).toBe(3);

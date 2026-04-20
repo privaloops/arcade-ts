@@ -132,27 +132,33 @@ export function initControlsBar(deps: ControlsBarDeps): void {
 
   // Export ROM
   setTooltip(exportBtn, "Export modified ROM as ZIP");
-  exportBtn.addEventListener("click", async () => {
-    const romStore = emulator.getRomStore();
-    if (!romStore) return;
-    setStatus("Exporting ROM...");
-    const blob = await romStore.exportZip();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    const now = new Date();
-    const ts = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}_${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}`;
-    a.download = `${romStore.name}_${ts}.zip`;
-    a.click();
-    URL.revokeObjectURL(url);
-    setStatus("ROM exported");
+  exportBtn.addEventListener("click", () => {
+    void (async () => {
+      const romStore = emulator.getRomStore();
+      if (!romStore) return;
+      setStatus("Exporting ROM...");
+      const blob = await romStore.exportZip();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const now = new Date();
+      const ts = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}_${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}`;
+      a.download = `${romStore.name}_${ts}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setStatus("ROM exported");
+    })();
   });
 
   // CRT toggle (in Config > Display tab)
   setTooltip(crtToggle, "CRT scanline filter");
   crtToggle.addEventListener("change", () => {
     canvasWrapper.classList.toggle("crt", crtToggle.checked);
-    try { localStorage.setItem("cps1-crt", crtToggle.checked ? "1" : "0"); } catch {}
+    try {
+      localStorage.setItem("cps1-crt", crtToggle.checked ? "1" : "0");
+    } catch {
+      // localStorage may be disabled; preference is non-essential
+    }
   });
   if (localStorage.getItem("cps1-crt") === "1") {
     canvasWrapper.classList.add("crt");

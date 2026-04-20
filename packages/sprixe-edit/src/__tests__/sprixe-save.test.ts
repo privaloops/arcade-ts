@@ -41,8 +41,8 @@ const CACHE_PATH = resolve(CACHE_DIR, 'ffight.zip');
 const LOCAL_PATH = resolve(__dirname, '../../public/roms/ffight.zip');
 
 async function getRomBuffer(): Promise<ArrayBuffer> {
-  if (existsSync(LOCAL_PATH)) return readFileSync(LOCAL_PATH).buffer as ArrayBuffer;
-  if (existsSync(CACHE_PATH)) return readFileSync(CACHE_PATH).buffer as ArrayBuffer;
+  if (existsSync(LOCAL_PATH)) return readFileSync(LOCAL_PATH).buffer;
+  if (existsSync(CACHE_PATH)) return readFileSync(CACHE_PATH).buffer;
   const res = await fetch(ROM_URL);
   if (!res.ok) throw new Error(`Failed to download ROM: ${res.status}`);
   const buffer = await res.arrayBuffer();

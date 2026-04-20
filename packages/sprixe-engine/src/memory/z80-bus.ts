@@ -298,16 +298,13 @@ export class Z80Bus implements Z80BusInterface {
     // Unmapped: write ignored
   }
 
-  ioRead(port: number): number {
-    port = port & 0xFF;
+  ioRead(_port: number): number {
     // CPS1 Z80 does not use I/O ports — all I/O is memory-mapped.
     // Return 0xFF for any I/O read.
     return 0xFF;
   }
 
-  ioWrite(port: number, value: number): void {
-    port = port & 0xFF;
-    value = value & 0xFF;
+  ioWrite(_port: number, _value: number): void {
     // CPS1 Z80 does not use I/O ports — all I/O is memory-mapped.
     // Ignore any I/O write.
   }

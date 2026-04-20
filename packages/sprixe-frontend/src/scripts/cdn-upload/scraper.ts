@@ -104,13 +104,13 @@ function pickYear(jeu: unknown): string | null {
   for (const region of preferred) {
     for (const row of rows) {
       if (row.region === region && typeof row.text === "string") {
-        return extractYear(row.text as string);
+        return extractYear(row.text);
       }
     }
   }
   // Fall back to the first date of any region.
   for (const row of rows) {
-    if (typeof row.text === "string") return extractYear(row.text as string);
+    if (typeof row.text === "string") return extractYear(row.text);
   }
   return null;
 }

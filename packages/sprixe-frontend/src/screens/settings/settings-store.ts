@@ -133,11 +133,11 @@ function sanitize(input: SettingsV1): SettingsV1 {
   const d = input.display ?? {};
   const a = input.audio ?? {};
 
-  const aspect: AspectRatio = (["4:3", "16:9", "stretch"] as const).includes(d.aspectRatio as AspectRatio)
-    ? (d.aspectRatio as AspectRatio)
+  const aspect: AspectRatio = (["4:3", "16:9", "stretch"] as const).includes(d.aspectRatio)
+    ? (d.aspectRatio)
     : DEFAULT_SETTINGS.display.aspectRatio;
-  const latency: AudioLatency = (["low", "medium", "high"] as const).includes(a.latency as AudioLatency)
-    ? (a.latency as AudioLatency)
+  const latency: AudioLatency = (["low", "medium", "high"] as const).includes(a.latency)
+    ? (a.latency)
     : DEFAULT_SETTINGS.audio.latency;
 
   return {

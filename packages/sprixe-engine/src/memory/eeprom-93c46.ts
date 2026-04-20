@@ -116,7 +116,7 @@ export class EEPROM93C46 {
 
   private _handleCommand(opcode: number, addr: number): void {
     switch (opcode) {
-      case 0b10: // READ
+      case 0b10: { // READ
         this.address = addr;
         this.state = 'read';
         const byteAddr = addr * 2;
@@ -124,6 +124,7 @@ export class EEPROM93C46 {
         this.readBitPos = 0;
         this.do_ = 0; // dummy bit before data
         break;
+      }
 
       case 0b01: // WRITE
         this.address = addr;

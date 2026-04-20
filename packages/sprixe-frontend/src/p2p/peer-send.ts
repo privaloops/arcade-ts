@@ -140,7 +140,7 @@ export class PeerSend {
 
       const end = Math.min(sent + CHUNK_SIZE, total);
       const slice = bytes.slice(sent, end);
-      const chunk = slice.buffer.slice(slice.byteOffset, slice.byteOffset + slice.byteLength) as ArrayBuffer;
+      const chunk = slice.buffer.slice(slice.byteOffset, slice.byteOffset + slice.byteLength);
 
       await this.sendChunkWithRetry({ type: "chunk", idx, data: chunk });
 

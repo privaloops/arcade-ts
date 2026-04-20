@@ -188,7 +188,7 @@ export function getNumSlots(): number {
 export function serializeSaveState(state: SaveState): ArrayBuffer {
   const serializable = { ...state, m68k: serializeCpuState(state.m68k) };
   const json = JSON.stringify(serializable);
-  return new TextEncoder().encode(json).buffer as ArrayBuffer;
+  return new TextEncoder().encode(json).buffer;
 }
 
 export function deserializeSaveState(buf: ArrayBuffer): SaveState | null {

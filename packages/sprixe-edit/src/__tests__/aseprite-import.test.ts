@@ -32,10 +32,10 @@ const SPRITE_ASE_PATH = resolve(__dirname, '../../tests/fixtures/unknown_palette
 
 async function getRomBuffer(): Promise<ArrayBuffer> {
   if (existsSync(LOCAL_PATH)) {
-    return readFileSync(LOCAL_PATH).buffer as ArrayBuffer;
+    return readFileSync(LOCAL_PATH).buffer;
   }
   if (existsSync(CACHE_PATH)) {
-    return readFileSync(CACHE_PATH).buffer as ArrayBuffer;
+    return readFileSync(CACHE_PATH).buffer;
   }
   const res = await fetch(ROM_URL);
   if (!res.ok) throw new Error(`Failed to download ROM: ${res.status}`);
@@ -91,7 +91,7 @@ describe('Aseprite scroll tilemap import', () => {
     const gfxRom = new Uint8Array(originalRomSet.graphicsRom);
 
     const aseBuffer = readFileSync(SCROLL_ASE_PATH);
-    const ase = readAseprite(aseBuffer.buffer as ArrayBuffer);
+    const ase = readAseprite(aseBuffer.buffer);
 
     expect(ase.manifest).not.toBeNull();
     expect(ase.manifest!.type).toBe('scroll_tilemap');
@@ -138,7 +138,7 @@ describe('Aseprite scroll tilemap import', () => {
     const gfxRom = new Uint8Array(originalRomSet.graphicsRom);
 
     const aseBuffer = readFileSync(SCROLL_ASE_PATH);
-    const ase = readAseprite(aseBuffer.buffer as ArrayBuffer);
+    const ase = readAseprite(aseBuffer.buffer);
     const manifest = ase.manifest! as unknown as ScrollManifest;
     const tileset = manifest.tileset;
     const importedCodes = new Set(tileset.map(t => t.tileCode));
@@ -159,7 +159,7 @@ describe('Aseprite scroll tilemap import', () => {
 
   it('manifest grid dimensions match expectations', () => {
     const aseBuffer = readFileSync(SCROLL_ASE_PATH);
-    const ase = readAseprite(aseBuffer.buffer as ArrayBuffer);
+    const ase = readAseprite(aseBuffer.buffer);
     const manifest = ase.manifest! as unknown as ScrollManifest;
 
     expect(manifest.gridCols).toBe(6);
@@ -177,7 +177,7 @@ describe('Aseprite scroll tilemap import', () => {
 describe('Aseprite sprite import', () => {
   it('reads sprite manifest with 3 poses', () => {
     const aseBuffer = readFileSync(SPRITE_ASE_PATH);
-    const ase = readAseprite(aseBuffer.buffer as ArrayBuffer);
+    const ase = readAseprite(aseBuffer.buffer);
 
     expect(ase.manifest).not.toBeNull();
     const manifest = ase.manifest! as unknown as SpriteManifest;
@@ -193,7 +193,7 @@ describe('Aseprite sprite import', () => {
 
   it('pose 0 has 40 tiles, pose 1 has 8, pose 2 has 16', () => {
     const aseBuffer = readFileSync(SPRITE_ASE_PATH);
-    const ase = readAseprite(aseBuffer.buffer as ArrayBuffer);
+    const ase = readAseprite(aseBuffer.buffer);
     const manifest = ase.manifest! as unknown as SpriteManifest;
 
     expect(manifest.frames[0]!.tiles.length).toBe(40);
@@ -203,7 +203,7 @@ describe('Aseprite sprite import', () => {
 
   it('sprite pixel data has correct dimensions per frame', () => {
     const aseBuffer = readFileSync(SPRITE_ASE_PATH);
-    const ase = readAseprite(aseBuffer.buffer as ArrayBuffer);
+    const ase = readAseprite(aseBuffer.buffer);
 
     expect(ase.width).toBe(80);
     expect(ase.height).toBe(128);
@@ -219,7 +219,7 @@ describe('Aseprite sprite import', () => {
     const gfxRom = new Uint8Array(originalRomSet.graphicsRom);
 
     const aseBuffer = readFileSync(SPRITE_ASE_PATH);
-    const ase = readAseprite(aseBuffer.buffer as ArrayBuffer);
+    const ase = readAseprite(aseBuffer.buffer);
     const manifest = ase.manifest! as unknown as SpriteManifest;
     const frame0 = manifest.frames[0]!;
 

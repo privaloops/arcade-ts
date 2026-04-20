@@ -26,7 +26,7 @@ function createMockEmulator(gfxRom: Uint8Array) {
     }),
     getWorkRam: () => new Uint8Array(0x10000),
     stepFrame: () => {},
-  } as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+  } as any;  
 }
 
 const CHAR_SIZE = 128; // 16x16 tile

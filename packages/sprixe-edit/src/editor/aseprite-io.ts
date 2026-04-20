@@ -345,10 +345,10 @@ export function importScrollTilemap(
   let tilesWritten = 0;
 
   if (ase.tilemap && manifest.grid) {
-    const grid = manifest.grid as number[];
+    const grid = manifest.grid;
     const { widthInTiles, heightInTiles, data: tmData } = ase.tilemap;
-    const gridCols = manifest.gridCols as number;
-    const gridRows = manifest.gridRows as number;
+    const gridCols = manifest.gridCols;
+    const gridRows = manifest.gridRows;
 
     const codeToTileIdx = new Map<number, number>();
     const origTilesetIdx = new Map<number, number>();
@@ -518,7 +518,7 @@ async function importAsepriteBuffer(
         const frame = ase.frames[f];
         if (!frame?.pixels) continue;
 
-        const manifestFrame = manifest.frames?.[f] as SpriteFrameManifest | undefined;
+        const manifestFrame = manifest.frames?.[f];
         if (!manifestFrame?.tiles) continue;
 
         // Apply alignment offset to read pixels at their shifted canvas position
@@ -663,7 +663,7 @@ async function importAsepriteBuffer(
         const bufs = emulator.getBusBuffers();
         if (video && bufs) {
           const palBase = video.getPaletteBase();
-          const palIdx = manifest.palette as number;
+          const palIdx = manifest.palette;
           const origPal = readPalette(bufs.vram, palBase, palIdx);
           let colorsChanged = 0;
           for (let c = 0; c < 16 && c < ase.palette.length; c++) {

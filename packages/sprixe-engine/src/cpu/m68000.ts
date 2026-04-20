@@ -560,12 +560,12 @@ export class M68000 {
 
   private pushWord(val: number): void {
     this.a[7] = (this.a[7]! - 2) | 0;
-    this.bus.write16(this.a[7]! & 0xFFFFFF, val & 0xFFFF);
+    this.bus.write16(this.a[7] & 0xFFFFFF, val & 0xFFFF);
   }
 
   private pushLong(val: number): void {
     this.a[7] = (this.a[7]! - 4) | 0;
-    this.bus.write32(this.a[7]! & 0xFFFFFF, val >>> 0);
+    this.bus.write32(this.a[7] & 0xFFFFFF, val >>> 0);
   }
 
   private popWord(): number {
@@ -606,7 +606,7 @@ export class M68000 {
         let dec = size;
         if (size === 1 && reg === 7) dec = 2;
         this.a[reg] = (this.a[reg]! - dec) | 0;
-        return this.a[reg]!;
+        return this.a[reg];
       }
       case EA_ADDR_DISP: {
         const disp = signExtend16(this.readImm16());
@@ -1087,7 +1087,7 @@ export class M68000 {
     const dataReg = (op >> 9) & 7;
     const addrReg = op & 7;
     const disp = signExtend16(this.readImm16());
-    let addr = ((this.a[addrReg]! + disp) & 0xFFFFFF);
+    const addr = ((this.a[addrReg]! + disp) & 0xFFFFFF);
     const opmode = (op >> 6) & 7;
 
     switch (opmode) {
@@ -1342,14 +1342,14 @@ export class M68000 {
       if (size === 4) {
         // Long: write low word first at An-2
         this.a[dstReg] = (this.a[dstReg]! - 2) | 0;
-        this.writeToAddr(this.a[dstReg]!, 2, val & 0xFFFF);
+        this.writeToAddr(this.a[dstReg], 2, val & 0xFFFF);
         if (this.addressError) return;
         // Then high word at An-4
-        this.a[dstReg] = (this.a[dstReg]! - 2) | 0;
-        this.writeToAddr(this.a[dstReg]!, 2, (val >>> 16) & 0xFFFF);
+        this.a[dstReg] = (this.a[dstReg] - 2) | 0;
+        this.writeToAddr(this.a[dstReg], 2, (val >>> 16) & 0xFFFF);
       } else {
         this.a[dstReg] = (this.a[dstReg]! - dec) | 0;
-        this.writeToAddr(this.a[dstReg]!, size, val);
+        this.writeToAddr(this.a[dstReg], size, val);
       }
     } else if (dstMode === EA_ADDR_INC) {
       // (An)+ destination: write first, then postincrement only if no error
@@ -1735,7 +1735,6 @@ export class M68000 {
   }
 
   private bcdNegate(val: number, x: number): number {
-    let result = 0 - val - x;
     let carry = false;
 
     // Low nibble correction
@@ -1751,7 +1750,7 @@ export class M68000 {
       carry = true;
     }
 
-    result = ((highNibble & 0xF) << 4) | (lowNibble & 0xF);
+    const result = ((highNibble & 0xF) << 4) | (lowNibble & 0xF);
     this._fC = carry;
     this._fX = carry;
     if ((result & 0xFF) !== 0) this._fZ = false;
@@ -1932,7 +1931,7 @@ export class M68000 {
       // LINK A7 special case: A7 is decremented first, then the
       // decremented value is written to the stack (68000 quirk)
       this.a[7] = (this.a[7]! - 4) | 0;
-      this.bus.write32(this.a[7]! & 0xFFFFFF, this.a[7]! >>> 0);
+      this.bus.write32(this.a[7] & 0xFFFFFF, this.a[7] >>> 0);
     } else {
       this.pushLong(this.a[reg]!);
       this.a[reg] = this.a[7]!;
@@ -2510,16 +2509,16 @@ export class M68000 {
       const srcDec = (size === 1 && srcReg === 7) ? 2 : size;
       if (size === 4) {
         this.a[srcReg] = (this.a[srcReg]! - 2) | 0;
-        if (this.a[srcReg]! & 1) {
+        if (this.a[srcReg] & 1) {
           this.addressError = true;
-          this.raiseAddressError(this.a[srcReg]!);
+          this.raiseAddressError(this.a[srcReg]);
           return;
         }
-        this.a[srcReg] = (this.a[srcReg]! - 2) | 0;
+        this.a[srcReg] = (this.a[srcReg] - 2) | 0;
       } else {
         this.a[srcReg] = (this.a[srcReg]! - srcDec) | 0;
       }
-      const srcAddr = this.a[srcReg]!;
+      const srcAddr = this.a[srcReg];
       const src = this.readFromAddr(srcAddr, size);
       if (this.addressError) return;
 
@@ -2527,16 +2526,16 @@ export class M68000 {
       const dstDec = (size === 1 && dstReg === 7) ? 2 : size;
       if (size === 4) {
         this.a[dstReg] = (this.a[dstReg]! - 2) | 0;
-        if (this.a[dstReg]! & 1) {
+        if (this.a[dstReg] & 1) {
           this.addressError = true;
-          this.raiseAddressError(this.a[dstReg]!);
+          this.raiseAddressError(this.a[dstReg]);
           return;
         }
-        this.a[dstReg] = (this.a[dstReg]! - 2) | 0;
+        this.a[dstReg] = (this.a[dstReg] - 2) | 0;
       } else {
         this.a[dstReg] = (this.a[dstReg]! - dstDec) | 0;
       }
-      const dstAddr = this.a[dstReg]!;
+      const dstAddr = this.a[dstReg];
       const dst = this.readFromAddr(dstAddr, size);
       if (this.addressError) return;
 
@@ -2872,16 +2871,16 @@ export class M68000 {
       if (size === 4) {
         this.a[srcReg] = (this.a[srcReg]! - 2) | 0;
         // Check if first word access would trigger address error
-        if (this.a[srcReg]! & 1) {
+        if (this.a[srcReg] & 1) {
           this.addressError = true;
-          this.raiseAddressError(this.a[srcReg]!);
+          this.raiseAddressError(this.a[srcReg]);
           return;
         }
-        this.a[srcReg] = (this.a[srcReg]! - 2) | 0;
+        this.a[srcReg] = (this.a[srcReg] - 2) | 0;
       } else {
         this.a[srcReg] = (this.a[srcReg]! - srcDec) | 0;
       }
-      const srcAddr = this.a[srcReg]!;
+      const srcAddr = this.a[srcReg];
       const src = this.readFromAddr(srcAddr, size);
       if (this.addressError) return;
 
@@ -2889,16 +2888,16 @@ export class M68000 {
       const dstDec = (size === 1 && dstReg === 7) ? 2 : size;
       if (size === 4) {
         this.a[dstReg] = (this.a[dstReg]! - 2) | 0;
-        if (this.a[dstReg]! & 1) {
+        if (this.a[dstReg] & 1) {
           this.addressError = true;
-          this.raiseAddressError(this.a[dstReg]!);
+          this.raiseAddressError(this.a[dstReg]);
           return;
         }
-        this.a[dstReg] = (this.a[dstReg]! - 2) | 0;
+        this.a[dstReg] = (this.a[dstReg] - 2) | 0;
       } else {
         this.a[dstReg] = (this.a[dstReg]! - dstDec) | 0;
       }
-      const dstAddr = this.a[dstReg]!;
+      const dstAddr = this.a[dstReg];
       const dst = this.readFromAddr(dstAddr, size);
       if (this.addressError) return;
 

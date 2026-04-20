@@ -269,7 +269,7 @@ export class FmPatchEditor {
     resetBtn.addEventListener('click', () => this.resetPatch());
     const exportBtn = el('button', 'ctrl-btn synth-action-btn') as HTMLButtonElement;
     exportBtn.textContent = 'Export ROM';
-    exportBtn.addEventListener('click', () => this.exportRom());
+    exportBtn.addEventListener('click', () => { void this.exportRom(); });
     actions.append(testBtn, resetBtn, exportBtn);
     c.appendChild(actions);
 
@@ -312,7 +312,7 @@ export class FmPatchEditor {
   }
 
   private showPlaceholder(show: boolean, message?: string): void {
-    const ph = this.container.querySelector('#synth-placeholder') as HTMLElement | null;
+    const ph = this.container.querySelector('#synth-placeholder');
     if (ph) {
       ph.style.display = show ? '' : 'none';
       if (message) ph.textContent = message;

@@ -177,7 +177,7 @@ export class SheetViewer {
 
     this.hideGame();
 
-    const container = document.createElement('div') as HTMLDivElement;
+    const container = document.createElement('div');
     container.className = 'sprite-sheet-viewer';
     this.sheetContainer = container;
     document.body.appendChild(container);
@@ -233,7 +233,7 @@ export class SheetViewer {
 
     this.hideGame();
 
-    const container = document.createElement('div') as HTMLDivElement;
+    const container = document.createElement('div');
     container.className = 'sprite-sheet-viewer';
     this.sheetContainer = container;
     document.body.appendChild(container);

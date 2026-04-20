@@ -29,7 +29,7 @@ type Listener = (entries: readonly QueueEntry[]) => void;
 
 export interface UploadTabOptions {
   /** Called whenever new files join the queue. */
-  onAdd?: (entries: readonly QueueEntry[]) => void;
+  onAdd?: (entries: readonly QueueEntry[]) => void | Promise<void>;
   /** Called when an entry is removed. */
   onRemove?: (entry: QueueEntry) => void;
 }
@@ -44,7 +44,7 @@ export class UploadTab {
   private readonly queueEl: HTMLUListElement;
   private readonly entries: QueueEntry[] = [];
   private readonly listeners = new Set<Listener>();
-  private readonly onAdd: ((entries: readonly QueueEntry[]) => void) | undefined;
+  private readonly onAdd: ((entries: readonly QueueEntry[]) => void | Promise<void>) | undefined;
   private readonly onRemove: ((entry: QueueEntry) => void) | undefined;
 
   constructor(container: HTMLElement, options: UploadTabOptions = {}) {
@@ -123,7 +123,7 @@ export class UploadTab {
       added.push(entry);
     }
     if (added.length > 0) {
-      this.onAdd?.(added);
+      void this.onAdd?.(added);
       this.notify();
     }
   }
