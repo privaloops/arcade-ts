@@ -348,6 +348,9 @@ export class NeoGeoEmulator {
     this.bus.setPaletteBankCallback((bank) => {
       this.video.setPaletteBank(bank);
     });
+    this.bus.setPaletteWriteCallback(() => {
+      this.video.markPaletteDirty();
+    });
 
     // Initialize YM2610 on main thread for Z80 sound handshake
     try {

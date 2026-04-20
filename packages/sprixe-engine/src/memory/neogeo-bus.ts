@@ -476,6 +476,7 @@ export class NeoGeoBus implements BusInterface {
     // Palette RAM: 0x400000-0x401FFF (banked, 2 × 8KB)
     if (address >= 0x400000 && address <= 0x401FFF) {
       this.paletteRam[this.paletteBankOffset + (address - 0x400000)] = value;
+      this._onPaletteWrite?.();
       return;
     }
 
@@ -633,10 +634,16 @@ export class NeoGeoBus implements BusInterface {
   private _onFixRomSwitch: ((useBios: boolean) => void) | null = null;
   private _onZ80RomSwitch: ((useBios: boolean) => void) | null = null;
   private _onPaletteBankSwitch: ((bank: number) => void) | null = null;
+  private _onPaletteWrite: (() => void) | null = null;
 
   setFixRomSwitchCallback(cb: (useBios: boolean) => void): void { this._onFixRomSwitch = cb; }
   setZ80RomSwitchCallback(cb: (useBios: boolean) => void): void { this._onZ80RomSwitch = cb; }
   setPaletteBankCallback(cb: (bank: number) => void): void { this._onPaletteBankSwitch = cb; }
+  /** Invoked on every byte write into palette RAM so the video layer
+   *  can invalidate its decoded cache before the next slice renders.
+   *  Without this, IRQ2 handlers that flash the palette mid-frame
+   *  (eye-catcher, Metal Slug 2 horizon) rendered with the stale cache. */
+  setPaletteWriteCallback(cb: () => void): void { this._onPaletteWrite = cb; }
 
   private writeControlReg(address: number, _value: number): void {
     // Control registers per FBNeo WriteIO2 (odd byte addresses)
