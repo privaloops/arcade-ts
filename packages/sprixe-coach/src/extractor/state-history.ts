@@ -4,8 +4,8 @@ const DEFAULT_WINDOW_SECONDS = 5;
 const FRAME_RATE = 60;
 
 export interface RepeatedMove {
-  /** The raw attack_id read from RAM — semantics vary per character. */
-  attackId: number;
+  /** The 32-bit animation pointer — move signature resolved via moveName(). */
+  animPtr: number;
   /** How many distinct times it was thrown in the window. */
   count: number;
 }
@@ -106,15 +106,16 @@ export class StateHistory {
       if (s.p2.isAirborne) p2AirFrames++;
 
       if (prev) {
-        const p1Attack = s.p1.currentAttackId;
-        if (p1Attack !== null && prev.p1.currentAttackId !== p1Attack) {
+        // Count each attacking:false→true transition as one move launched.
+        // The animPtr at that edge is the move's signature — use it as
+        // the histogram key so "same move spammed 3 times" is visible.
+        if (!prev.p1.attacking && s.p1.attacking) {
           p1Specials++;
-          p1MoveCounts.set(p1Attack, (p1MoveCounts.get(p1Attack) ?? 0) + 1);
+          p1MoveCounts.set(s.p1.animPtr, (p1MoveCounts.get(s.p1.animPtr) ?? 0) + 1);
         }
-        const p2Attack = s.p2.currentAttackId;
-        if (p2Attack !== null && prev.p2.currentAttackId !== p2Attack) {
+        if (!prev.p2.attacking && s.p2.attacking) {
           p2Specials++;
-          p2MoveCounts.set(p2Attack, (p2MoveCounts.get(p2Attack) ?? 0) + 1);
+          p2MoveCounts.set(s.p2.animPtr, (p2MoveCounts.get(s.p2.animPtr) ?? 0) + 1);
         }
         if (s.p2.hp < prev.p2.hp) p1Damage += prev.p2.hp - s.p2.hp;
         if (s.p1.hp < prev.p1.hp) p2Damage += prev.p1.hp - s.p1.hp;
@@ -154,9 +155,9 @@ const REPEAT_THRESHOLD = 3;
 
 function pickMostRepeated(counts: Map<number, number>): RepeatedMove | null {
   let top: RepeatedMove | null = null;
-  for (const [attackId, count] of counts) {
+  for (const [animPtr, count] of counts) {
     if (count < REPEAT_THRESHOLD) continue;
-    if (!top || count > top.count) top = { attackId, count };
+    if (!top || count > top.count) top = { animPtr, count };
   }
   return top;
 }

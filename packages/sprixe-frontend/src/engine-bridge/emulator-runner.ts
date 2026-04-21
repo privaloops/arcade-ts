@@ -43,6 +43,34 @@ export interface EmulatorRunner {
    */
   getWorkRam?(): Uint8Array;
   /**
+   * Read-only view of the mapped I/O port bytes (player inputs, active
+   * LOW). Lets the coach calibration capture which arcade button was
+   * pressed independently of the input source (keyboard, gamepad,
+   * phone remote).
+   */
+  getIoPorts?(): Uint8Array;
+  /**
+   * Read-only view of the CPS-B registers. On CPS-1, kick buttons
+   * (LK/MK/HK) are routed to cpsbRegs[0x36..0x37], not the main IO
+   * port buffer, so the coach needs this to see the full 6-button
+   * input surface.
+   */
+  getCpsbRegisters?(): Uint8Array;
+  /**
+   * Return a persistent virtual input channel that drives P2
+   * programmatically. Calling press()/release() on this object has
+   * the same effect as a 2nd physical pad being pressed. Used by the
+   * AI opponent in 2P vs Human mode.
+   */
+  getVirtualP2Channel?(): import("@sprixe/engine/input/virtual-input-channel").VirtualInputChannel;
+  /**
+   * Attach/detach the virtual P2 channel to the InputManager. While
+   * unarmed (default), P2 reads from keyboard/gamepad as usual; while
+   * armed, the virtual channel REPLACES them. Toggle on when the AI
+   * opponent takes control, off when the user resumes human 2P play.
+   */
+  armVirtualP2?(armed: boolean): void;
+  /**
    * Register a callback fired at each VBlank (~60Hz). The coach uses
    * this to tick its extractor in lockstep with the emulator instead
    * of polling on rAF.

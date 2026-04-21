@@ -16,8 +16,9 @@ function makeChar(overrides: Partial<CharacterState> = {}): CharacterState {
     isJumping: false,
     isCrouching: false,
     isAirborne: false,
-    currentAttackId: null,
-    attackPhase: null,
+    animPtr: 0,
+    stateByte: 0,
+    attacking: false,
     ...overrides,
   };
 }

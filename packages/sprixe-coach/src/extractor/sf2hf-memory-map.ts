@@ -41,7 +41,16 @@ export const SF2HF_MEMORY_MAP = {
   p1_stun_damage: { offset: 0xFF841C, bytes: 2, confidence: 'validated', note: 'Dizzy damage accumulator' } as MemoryAddress,
   p1_ko_state:    { offset: 0xFF841D, bytes: 1, confidence: 'validated', note: 'FBNeo Never Faint PL1' } as MemoryAddress,
   p1_combo:       { offset: 0xFF870A, bytes: 1, confidence: 'probable', note: 'Hits Keep You Close — may double as combo counter' } as MemoryAddress,
-  p1_attack_id:   { offset: 0xFF83DC, bytes: 1, confidence: 'probable', note: 'Shot motion cancel — tracks current projectile' } as MemoryAddress,
+  p1_attack_id:   { offset: 0xFF83DC, bytes: 1, confidence: 'probable', note: 'DEPRECATED — this is the Shot Motion Cancel cooldown (projectile ticker), NOT a general attack id. Kept for back-compat until detector/events are migrated to animPtr.' } as MemoryAddress,
+  // Animation frame pointer (+0x1A from P1_BASE). 32-bit big-endian.
+  // SF2 identifies the current move via this pointer — there is no
+  // single move-id byte. Validated by Jesuszilla/mame-rr-scripts + our
+  // own in-game RAM diff (0xFF83DB bumps on every punch/kick).
+  p1_anim_ptr:    { offset: 0xFF83D8, bytes: 4, confidence: 'validated', note: 'Animation frame pointer (word-32 BE) — canonical move signature' } as MemoryAddress,
+  // State byte (+0x03). 0=neutral, 0x0A/0x0C=kick actions, 0x0E/0x14=hurt/throw.
+  p1_state:       { offset: 0xFF83C1, bytes: 1, confidence: 'validated', note: 'Player FSM state byte' } as MemoryAddress,
+  // Attacking flag (+0x18B). 0x01 while an attack is in progress.
+  p1_attacking:   { offset: 0xFF8549, bytes: 1, confidence: 'validated', note: 'Attacking flag — 0x01 during an attack' } as MemoryAddress,
   p1_rounds_won:  { offset: 0xFF864E, bytes: 1, confidence: 'validated' } as MemoryAddress,
 
   // ── Player 2 (CPU-controlled in arcade 1P mode) ───────────────────────────
@@ -55,7 +64,10 @@ export const SF2HF_MEMORY_MAP = {
   p2_stun_damage: { offset: 0xFF871C, bytes: 2, confidence: 'validated' } as MemoryAddress,
   p2_ko_state:    { offset: 0xFF871D, bytes: 1, confidence: 'validated' } as MemoryAddress,
   p2_combo:       { offset: 0xFF840A, bytes: 1, confidence: 'probable' } as MemoryAddress,
-  p2_attack_id:   { offset: 0xFF86DC, bytes: 1, confidence: 'probable' } as MemoryAddress,
+  p2_attack_id:   { offset: 0xFF86DC, bytes: 1, confidence: 'probable', note: 'DEPRECATED — see p1_attack_id' } as MemoryAddress,
+  p2_anim_ptr:    { offset: 0xFF86D8, bytes: 4, confidence: 'validated' } as MemoryAddress,
+  p2_state:       { offset: 0xFF86C1, bytes: 1, confidence: 'validated' } as MemoryAddress,
+  p2_attacking:   { offset: 0xFF8849, bytes: 1, confidence: 'validated' } as MemoryAddress,
   p2_rounds_won:  { offset: 0xFF894E, bytes: 1, confidence: 'validated' } as MemoryAddress,
 
   // ── CPU AI state (Bison-specific, to reverse) ─────────────────────────────

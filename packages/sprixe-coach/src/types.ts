@@ -41,8 +41,15 @@ export interface CharacterState {
   isJumping: boolean;
   isCrouching: boolean;
   isAirborne: boolean;
-  currentAttackId: number | null;
-  attackPhase: AttackPhase;
+  /** Animation frame pointer (32-bit BE). The canonical "current move"
+   *  signature — changes every time the character transitions to a
+   *  new animation. Calibration maps ptr value → move name. */
+  animPtr: number;
+  /** FSM state byte. 0=neutral, 0x02=walk, 0x04=jump, 0x0A=normal
+   *  attack, 0x0C=special attack, 0x0E=hurt. */
+  stateByte: number;
+  /** True while the attacking flag (+0x18B) is 0x01. */
+  attacking: boolean;
 }
 
 export interface CPUState extends CharacterState {

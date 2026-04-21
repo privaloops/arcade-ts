@@ -80,13 +80,21 @@ describe('StateExtractor', () => {
     expect(extractor.extract(ram, 33).frameIdx).toBe(2);
   });
 
-  it('null-attack when attack_id is zero', () => {
+  it('exposes animPtr, stateByte and attacking flag from the canonical offsets', () => {
     const ram = makeRam();
-    writeU8(ram, SF2HF_MEMORY_MAP.p1_attack_id.offset, 0);
+    // Hadouken jab signature: 0x00060CCE at P1_BASE+0x1A (big-endian word).
+    const ptrOff = SF2HF_MEMORY_MAP.p1_anim_ptr.offset;
+    ram[ptrOff - 0xFF0000] = 0x00;
+    ram[ptrOff - 0xFF0000 + 1] = 0x06;
+    ram[ptrOff - 0xFF0000 + 2] = 0x0C;
+    ram[ptrOff - 0xFF0000 + 3] = 0xCE;
+    writeU8(ram, SF2HF_MEMORY_MAP.p1_state.offset, 0x0C);
+    writeU8(ram, SF2HF_MEMORY_MAP.p1_attacking.offset, 0x01);
 
     const state = new StateExtractor().extract(ram, 0);
 
-    expect(state.p1.currentAttackId).toBeNull();
-    expect(state.p1.attackPhase).toBeNull();
+    expect(state.p1.animPtr).toBe(0x00060CCE);
+    expect(state.p1.stateByte).toBe(0x0C);
+    expect(state.p1.attacking).toBe(true);
   });
 });

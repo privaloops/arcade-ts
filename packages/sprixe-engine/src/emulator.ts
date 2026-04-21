@@ -421,6 +421,10 @@ export class Emulator {
   /** Expose I/O ports for DIP switch configuration. */
   getIoPorts(): Uint8Array { return this.bus.getIoPorts(); }
 
+  /** Expose CPS-B registers — needed by the coach to read P1 kick inputs
+   *  (LK/MK/HK live at cpsbRegs[0x37], not in the main IO port buffer). */
+  getCpsbRegisters(): Uint8Array { return this.bus.getCpsbRegisters(); }
+
   // ── Save State ──────────────────────────────────────────────────────────
 
   /**

@@ -41,13 +41,89 @@ export class EventDetector {
   private lastHitAtMs: number | null = null;
   private stunActive: { p1: boolean; p2: boolean } = { p1: false, p2: false };
 
+  // We only fire round_start once the "Fight!" intro has actually played,
+  // which we detect by watching the in-game timer tick down for the first
+  // time. Before that the HP is valid but the fighters are still frozen
+  // on their intro poses and anything the commentator says is premature.
+  private seenFirstTimerTick = false;
+  private prevTimer: number | null = null;
+  // Timer warning dedup — remember the last second we fired at so we
+  // don't spam one event per frame during the 20→0 countdown. Reset to
+  // null on new match / round so the next countdown can fire again.
+  private timerWarnedAtSec: number | null = null;
+  private timerCriticalAtSec: number | null = null;
+
   detect(current: GameState, history: StateHistory): CoachEvent[] {
     const out: CoachEvent[] = [];
+
+    // Reset per-match state when the CPU character changes — either a
+    // new boss in the arcade ladder or returning to the menu. Without
+    // this, round_start never re-fires (matchHasStarted stays true) and
+    // the briefing is skipped for the next opponent. We keep
+    // briefedOpponents across the session so the SAME boss isn't
+    // re-briefed if you fight them again later.
+    if (this.prev && current.p2.charId !== 'unknown'
+        && this.prev.p2.charId !== 'unknown'
+        && current.p2.charId !== this.prev.p2.charId) {
+      this.matchHasStarted = false;
+      this.seenFirstTimerTick = false;
+      this.prevTimer = null;
+      this.nearDeathFired = { p1: false, p2: false };
+      this.lowHpFired = { p1: false, p2: false };
+      this.cornerActive = { p1: false, p2: false };
+      this.p1Streak = 0;
+      this.p2Streak = 0;
+      this.streakFiredAt = { p1: 0, p2: 0 };
+      this.timerWarnedAtSec = null;
+      this.timerCriticalAtSec = null;
+    }
+
     const prev = this.prev;
     const active = isMatchActive(current);
 
-    // Fire round_start the first time both fighters hold real HP.
-    if (active && !this.matchHasStarted) {
+    // Watch for the first timer decrement — this is our signal that the
+    // "Fight!" intro has ended and the clock is actually running.
+    if (this.prevTimer !== null && current.timer < this.prevTimer && current.timer > 0) {
+      this.seenFirstTimerTick = true;
+    }
+    if (current.timer > 0 && current.timer < 99) {
+      // Started in the middle (rare, e.g. save-state load). Accept it.
+      this.seenFirstTimerTick = true;
+    }
+
+    // Timer warnings — fire once each per round when the countdown crosses
+    // 20s (warning) and 10s (critical). Reset on new round (HP rebound).
+    if (active && current.timer > 0) {
+      if (current.timer <= 20 && current.timer > 10
+          && this.timerWarnedAtSec !== current.timer
+          && (this.timerWarnedAtSec === null || this.timerWarnedAtSec < current.timer)) {
+        out.push({
+          type: 'timer_warning',
+          frameIdx: current.frameIdx,
+          timestampMs: current.timestampMs,
+          importance: IMPORTANCE.moderate,
+          secondsLeft: current.timer,
+        });
+        this.timerWarnedAtSec = current.timer;
+      }
+      if (current.timer <= 10
+          && this.timerCriticalAtSec !== current.timer
+          && (this.timerCriticalAtSec === null || this.timerCriticalAtSec < current.timer)) {
+        out.push({
+          type: 'timer_critical',
+          frameIdx: current.frameIdx,
+          timestampMs: current.timestampMs,
+          importance: IMPORTANCE.important,
+          secondsLeft: current.timer,
+        });
+        this.timerCriticalAtSec = current.timer;
+      }
+    }
+
+    this.prevTimer = current.timer;
+
+    // Fire round_start once HP is valid AND the fight is really underway.
+    if (active && !this.matchHasStarted && this.seenFirstTimerTick) {
       out.push({
         type: 'round_start',
         frameIdx: current.frameIdx,
@@ -92,6 +168,10 @@ export class EventDetector {
     this.streakFiredAt = { p1: 0, p2: 0 };
     this.lastHitAtMs = null;
     this.stunActive = { p1: false, p2: false };
+    this.seenFirstTimerTick = false;
+    this.prevTimer = null;
+    this.timerWarnedAtSec = null;
+    this.timerCriticalAtSec = null;
   }
 
   getLastCpuMacroState(): AIMacroState {
@@ -197,17 +277,24 @@ export class EventDetector {
 
   private detectSpecials(prev: GameState, curr: GameState, out: CoachEvent[]): void {
     for (const side of ['p1', 'p2'] as const) {
-      const wasIdle = prev[side].currentAttackId === null;
-      const nowAttacking = curr[side].currentAttackId !== null;
-      if (wasIdle && nowAttacking) {
+      // Edge-detect the attacking flag (+0x18B = 0x01). Captures the
+      // animPtr at the exact startup frame — that value is the move
+      // signature used by moveName().
+      if (!prev[side].attacking && curr[side].attacking) {
+        const stateByte = curr[side].stateByte;
+        // state=0x0C = special move (Hadouken/Shoryu/Tatsu), state=0x0A
+        // = normal. Specials are narrative beats; normals are background
+        // noise — drop their importance so the commentator doesn't spam.
+        const importance = stateByte === 0x0C ? IMPORTANCE.moderate : IMPORTANCE.minor;
         out.push({
           type: 'special_startup',
           frameIdx: curr.frameIdx,
           timestampMs: curr.timestampMs,
-          importance: IMPORTANCE.moderate,
+          importance,
           player: side,
           character: curr[side].charId,
-          attackId: curr[side].currentAttackId ?? 0,
+          animPtr: curr[side].animPtr,
+          stateByte,
         });
       }
     }
@@ -244,6 +331,9 @@ export class EventDetector {
     if (curr.p1.hp > prev.p1.hp + 50 || curr.p2.hp > prev.p2.hp + 50) {
       this.nearDeathFired = { p1: false, p2: false };
       this.lowHpFired = { p1: false, p2: false };
+      // Let the countdown warnings fire again on the fresh timer.
+      this.timerWarnedAtSec = null;
+      this.timerCriticalAtSec = null;
     }
     // Round ended when one fighter drops to 0 while the other is still alive.
     const p1Ko = prev.p1.hp > 0 && curr.p1.hp === 0;
@@ -353,7 +443,19 @@ function isMatchActive(state: GameState): boolean {
   // transitional phase. Right after HP becomes valid, X briefly reads
   // values under 100 while the sprites warp to their starting spots —
   // that window falsely trips corner_trap because < 180 is "near wall".
-  return state.p1.hp > 0 && state.p2.hp > 0 && state.p1.x > 100 && state.p2.x > 100;
+  // We also require a real CPU character — bonus stages ("Car Crusher",
+  // "Barrel Breaker") leave p2.charId reading as 'unknown' and there's
+  // no opponent to commentate against.
+  //
+  // AND: arcade 1P mode never pairs Ryu with a Ryu mirror, so when both
+  // char bytes read the same value it means the p2 slot hasn't been
+  // populated yet (boot RAM reads 0x00 = ryu on both). Treat as inactive
+  // until they diverge.
+  return state.p1.hp > 0 && state.p2.hp > 0
+      && state.p1.x > 100 && state.p2.x > 100
+      && state.p2.charId !== 'unknown'
+      && state.p1.charId !== 'unknown'
+      && state.p1.charId !== state.p2.charId;
 }
 
 function damageImportance(damage: number, victimHpPct: number): number {

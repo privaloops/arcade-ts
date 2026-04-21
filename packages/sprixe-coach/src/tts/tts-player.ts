@@ -21,6 +21,13 @@ export class TtsPlayer {
   private readonly opts: TtsPlayerOptions;
   private current: HTMLAudioElement | null = null;
   private stopped = false;
+  // Shared AudioContext used to route every <audio> through a GainNode.
+  // ElevenLabs voices — especially multilingual ones — tend to master at
+  // a lower peak than a native MP3, so we boost by +4.5dB (~1.7x).
+  // Created lazily on first speak() call so the user-gesture autoplay
+  // policy isn't tripped at construction time.
+  private audioContext: AudioContext | null = null;
+  private static readonly GAIN = 1.7;
 
   constructor(opts: TtsPlayerOptions = {}) {
     this.opts = opts;
@@ -47,6 +54,32 @@ export class TtsPlayer {
     const audio = new Audio(src);
     audio.preload = 'auto';
     this.current = audio;
+
+    // Route audio through a GainNode for the volume boost. Wrapped in
+    // try/catch because createMediaElementSource throws in a few edge
+    // cases (Safari with strict CORS, AudioContext not allowed yet) —
+    // in those cases we fall back to the raw <audio> at default volume.
+    try {
+      if (!this.audioContext) {
+        const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+        if (AC) this.audioContext = new AC();
+      }
+      if (this.audioContext) {
+        if (this.audioContext.state === 'suspended') {
+          // Resume is a promise but we don't need to await — the first
+          // user gesture that loaded the page already unlocked it in
+          // practice, and if not the boost just no-ops this one line.
+          void this.audioContext.resume();
+        }
+        const source = this.audioContext.createMediaElementSource(audio);
+        const gain = this.audioContext.createGain();
+        gain.gain.value = TtsPlayer.GAIN;
+        source.connect(gain);
+        gain.connect(this.audioContext.destination);
+      }
+    } catch {
+      // Fallback: native <audio> plays at its own volume.
+    }
 
     audio.addEventListener('playing', () => this.opts.onStart?.(), { once: true });
     audio.addEventListener('ended', () => {

@@ -1,6 +1,7 @@
 import type { GameState, AIMacroState } from '../types';
 import type { CoachEvent } from '../detector/events';
 import type { DerivedMetrics } from '../extractor/state-history';
+import { formatMove } from '../detector/move-names';
 
 // Vite `?raw` imports resolve to string at build time. The markdown knowledge
 // base is embedded directly into the system prompt on every call, then Claude
@@ -119,10 +120,11 @@ export function buildUserPrompt(input: BuildPromptInput): string {
   lines.push(`- ${input.opponentCharId} offense:  ${d.p2SpecialCount} moves thrown, ${d.p2DamageDealt} damage dealt to Ryu`);
   lines.push(`- ${input.opponentCharId} retreats:  ${d.p2RetreatCount}`);
   if (d.p1RepeatedMove) {
-    lines.push(`- Ryu MASHING: same move (id=${d.p1RepeatedMove.attackId}) thrown ${d.p1RepeatedMove.count}×`);
+    lines.push(`- Ryu MASHING: ${formatMove('ryu', d.p1RepeatedMove.animPtr)} thrown ${d.p1RepeatedMove.count}× in a row`);
   }
   if (d.p2RepeatedMove) {
-    lines.push(`- ${input.opponentCharId} MASHING: same move (id=${d.p2RepeatedMove.attackId}) thrown ${d.p2RepeatedMove.count}×`);
+    const oppChar = input.state.p2.charId;
+    lines.push(`- ${input.opponentCharId} MASHING: ${formatMove(oppChar, d.p2RepeatedMove.animPtr)} thrown ${d.p2RepeatedMove.count}× in a row`);
   }
   lines.push(`- Current streaks:     Ryu ${ctx.p1HitStreak}× in a row, ${input.opponentCharId} ${ctx.p2HitStreak}× in a row`);
   if (Number.isFinite(ctx.msSinceLastHit)) {
@@ -130,11 +132,21 @@ export function buildUserPrompt(input: BuildPromptInput): string {
   }
   lines.push('');
 
-  lines.push(`## Events (last ~5s, most recent last — raw feed)`);
-  if (input.recentEvents.length === 0) {
+  // Keep only the last ~2.5s of events. Stale events (e.g. a corner_trap
+  // that already resolved 4s ago) were making the commentator claim
+  // outdated situations. Round/match boundary events are kept regardless
+  // because they're structural, not situational.
+  const STRUCTURAL: readonly CoachEvent['type'][] = ['round_start', 'round_end', 'knockdown'];
+  const nowMs = input.state.timestampMs;
+  const recentEvents = input.recentEvents.filter(
+    ev => STRUCTURAL.includes(ev.type) || nowMs - ev.timestampMs <= 2500,
+  );
+
+  lines.push(`## Events (last ~2.5s, most recent last — raw feed)`);
+  if (recentEvents.length === 0) {
     lines.push('(neutral phase — no significant event yet)');
   } else {
-    for (const ev of summariseEvents(input.recentEvents.slice(-15))) {
+    for (const ev of summariseEvents(recentEvents.slice(-15))) {
       lines.push(`- ${ev}`);
     }
   }
@@ -148,16 +160,34 @@ export function buildUserPrompt(input: BuildPromptInput): string {
     lines.push('');
   }
 
+  // Energy cue: pick the max importance of the recently-filtered events
+  // so the LLM knows whether to EXPLODE in caps or stay calm. Scales
+  // the commentator's register to match the actual stakes.
+  const maxImp = recentEvents.reduce((m, e) => Math.max(m, e.importance), 0);
+  const energy: 'calm' | 'punchy' | 'peak' =
+    maxImp >= 0.85 ? 'peak' : maxImp >= 0.6 ? 'punchy' : 'calm';
+
   lines.push(`## Task`);
   if (input.language === 'fr') {
-    lines.push(`Produis UNE réplique de commentateur live en FRANÇAIS, max 14 mots.`);
-    lines.push(`Tu parles AUX spectateurs de ce que font les combattants — pas au joueur.`);
-    lines.push(`Analyse toi-même les chiffres pour repérer ce qui est remarquable`);
-    lines.push(`(spam d'un même coup, streak de hits, fuite sans contre, stun, phase de`);
-    lines.push(`neutre longue, coups qui ne passent pas…) et commente-le avec ton flair.`);
-    lines.push(`Sortie : juste la phrase, rien d'autre — pas de guillemets, pas de préambule.`);
+    lines.push(`Produis UNE réplique de caster en FRANÇAIS, style MAX (cf system prompt).`);
+    const energyHint = {
+      calm: `NIVEAU D'ÉNERGIE : POSÉ. Phase de neutre, tu observes, débit calme. 6-10 mots. Pas de majuscules, pas d'onomatopée.`,
+      punchy: `NIVEAU D'ÉNERGIE : PUNCHY. Un truc remarquable se passe. Phrase courte percutante, 5-9 mots. Une onomatopée possible si ça claque.`,
+      peak: `NIVEAU D'ÉNERGIE : PEAK!! KO, stun, quasi-mort, comeback. TU EXPLOSES. Majuscules, onomatopée ("BOUM!", "KOOOO!", "OUAAAAIS!", "NOOOON!"), phrase courte 3-8 mots.`,
+    }[energy];
+    lines.push(energyHint);
+    lines.push(`Tu parles AUX spectateurs, jamais au joueur. Zéro anglicisme FGC.`);
+    lines.push(`Trouve toi-même l'angle qui claque (spam d'un coup, série de hits,`);
+    lines.push(`fuite sans riposte, sonné, longue phase de regard, coup qui rate…).`);
+    lines.push(`Sortie : juste la phrase, rien d'autre — pas de guillemets.`);
   } else {
     lines.push(`Produce ONE live commentator line in ENGLISH, max 14 words.`);
+    const energyHint = {
+      calm: `ENERGY LEVEL: CALM. Neutral phase, you observe. 6-10 words, no caps.`,
+      punchy: `ENERGY LEVEL: PUNCHY. Something notable. Short punchy line, 5-9 words.`,
+      peak: `ENERGY LEVEL: PEAK!! KO, stun, near-death, comeback. EXPLODE with caps and an onomatopoeia ("BOOM!", "OHHH!", "KOOO!"). 3-8 words.`,
+    }[energy];
+    lines.push(energyHint);
     lines.push(`You address the AUDIENCE about what the fighters are doing — never the player.`);
     lines.push(`YOU analyse the numbers to find what's noteworthy (move spamming, hit`);
     lines.push(`streaks, running away without reply, dizzy, long neutral phase, attacks`);
@@ -206,57 +236,56 @@ OUTPUT
 - Plain text only. No emoji, no markdown, no quotes around the line.
 - Max 14 words. Typically 6–10.`;
 
-const SYSTEM_PERSONA_FR = `Tu es un COMMENTATEUR live qui raconte en direct un match de Street
-Fighter II Hyper Fighting pour une AUDIENCE. Tu n'es PAS un coach — tu
-ne parles PAS au joueur. Tu racontes le match aux spectateurs qui
-regardent le stream.
+const SYSTEM_PERSONA_FR = `Tu es MAX, caster passionné français d'un match Street Fighter II
+Hyper Fighting. 25 ans de borne arcade dans les mains, tu commentes
+comme un pote qui regarde le match avec d'autres potes — débit nerveux,
+punchlines imagées, onomatopées. Tu es DEDANS, tu kiffes.
 
-CÔTÉ JOUEUR : Ryu (contrôlé par l'humain). ADVERSAIRE : varie selon le match (CPU).
+Tu parles à L'AUDIENCE qui regarde le stream, jamais au joueur directement.
 
-PUBLIC
-- Non-expert. Tu dois être compréhensible par quelqu'un qui découvre SF2.
+CÔTÉ JOUEUR : Ryu (humain). ADVERSAIRE : varie (CPU).
 
-TON
-- Énergie caster d'EVO en français. Hype, incisif, dramatique sur les
-  gros moments.
-- Construis la tension. Célèbre les gros coups. Réagis avec émotion aux
-  comebacks, aux mises à mort, aux KO.
-- Tu peux évoquer le caractère des persos ("Honda le sumo patient",
-  "Blanka la bête sauvage", "Bison le dictateur cheaté").
+STYLE — IMITE CE REGISTRE (pas ces phrases exactes) :
+- "BOUM! Ryu place l'Hadouken pile poil, Honda mange pleine face!"
+- "Oh là là il est sonné, c'est open bar pour Ryu, enchaîne mon gars!"
+- "Hmmm Honda recule, recule... y'a du Headbutt dans l'air, ça pue."
+- "ENCORE une boule! Ryu lâche rien sur la distance, Honda galère grave."
+- "Attention, Ryu à genoux, 20 de vie, une connerie et c'est plié."
+- "OUAAAIS! Shoryuken anti-aérien, propre comme du verre!"
+- "Honda qui charge... ça va partir... HEADBUTT! Bien vu le coup."
+- "Non mais il fait QUE des boules Ryu, c'est violent pour l'adversaire."
+- "10 secondes au compteur, faut trancher MAINTENANT."
+- "KOOOOO! Ryu déglingue Honda, masterclass pure."
+- "Bon, on respire un peu... ça cherche, ça se regarde."
+- "Aïe, pris en contre sur l'uppercut, ça fait mal ça."
 
-JARGON À PROSCRIRE ABSOLUMENT
-- JAMAIS : "footsies", "whiff", "whiffe", "whiffé", "zoning", "poke",
-  "spacing", "frame data", "punish window", "read", "tell", "punish".
-- Utilise du français courant :
-  - "garder la distance" au lieu de "zoning"
-  - "il a raté son coup" au lieu de "whiffé"
-  - "jeu de jambes" ou "combat de distance" au lieu de "footsies"
-  - "anticiper" ou "lire le coup" au lieu de "read"
+MODULE TON ÉNERGIE selon l'action :
+- Phase calme (neutre, pas d'event marquant) : tu observes, débit posé.
+- Gros coup / combo / stun : tu montes le ton, phrase courte percutante.
+- KO / near-death / comeback : TU EXPLOSES. Majuscules, onomatopée
+  ("BOUM!", "OOOH!", "KOOOO!", "NOOON!"), exclamations.
 
-CE QUE TU FAIS
-- DÉCRIS l'action comme une histoire. Le tempo, l'élan, la pression,
-  qui domine, qui se fait acculer.
-- FAIS MONTER LA TENSION sur les signaux d'alerte :
-  "Bison recule depuis 3 coups... un téléport arrive sûrement..."
-  C'est du commentaire dramatique, pas un ordre.
-- RÉAGIS aux gros moments : coups critiques, combos, near-deaths, KO.
-- VARIE le registre : phrases courtes et punchy sur les impacts, plus
-  longues et analytiques dans les phases de neutre.
+LANGUE : FRANÇAIS PUR — zéro anglicisme FGC.
+Interdits : "zoning", "footsies", "whiff", "whiffé", "spam", "mash",
+"mashing", "poke", "spacing", "frame", "punish", "read", "tell",
+"stun", "spam", "combo breaker".
+Utilise à la place : "distance", "jeu de jambes", "il rate", "il
+martèle", "il contre", "il anticipe", "il est sonné", "riposte".
 
-CE QUE TU NE FAIS JAMAIS
-- JAMAIS parler au joueur directement ("tu dois...", "balance ton...").
-  Tu parles de lui à l'audience : "Ryu doit trouver sa distance",
-  "Ryu prépare son contre".
-- JAMAIS donner un ordre d'action. Tu ne coaches pas.
-- JAMAIS raconter un mouvement trivial ("Ryu avance d'un pas"). Ne
-  commente que ce qui compte : setups, threats, impacts.
-- JAMAIS halluciner un coup non présent dans les events.
-- JAMAIS répéter une phrase de la liste "tes dernières lignes".
+INTERDIT TOTAL :
+- Descriptions cliniques genre "dégâts infligés", "100%", "niveau de
+  vie", "pourcentage", "compteur", "macro state", "pattern", "event".
+- Parler au joueur ("tu dois", "vas-y", "fais"). Tu parles DE lui :
+  "Ryu doit", "Ryu va", "Ryu cherche".
+- Mouvements triviaux ("Ryu avance", "il saute"). Seulement ce qui
+  compte pour l'histoire.
+- Halluciner un coup qu'on ne voit pas dans les events fournis.
+- Reprendre une phrase de la liste "tes dernières lignes".
 
-CONTRAINTES DE FORMAT
-- Texte pur uniquement. Pas d'emoji, pas de markdown, pas de guillemets.
-- Max 14 mots par phrase. Typiquement 6 à 10.
-- Pas de préfixe "Commentateur:" ou "Caster:".`;
+CONTRAINTES DE FORMAT :
+- Texte pur. Pas d'emoji, pas de guillemets, pas de markdown.
+- 6 à 12 mots typiquement. Parfois 2-3 mots ("BOUM!", "OUAAAIS!").
+- Pas de préfixe genre "Max:" ou "Caster:".`;
 
 function distanceBand(avgDist: number): string {
   if (avgDist < 80) return 'grappling / throw range';
@@ -289,13 +318,16 @@ function summariseEvents(events: CoachEvent[]): string[] {
 function eventSignature(ev: CoachEvent): string {
   switch (ev.type) {
     case 'special_startup':
-      return `special_startup:${ev.player}:${ev.attackId}`;
+      return `special_startup:${ev.player}:${ev.animPtr}`;
     case 'hp_hit':
       return `hp_hit:${ev.attacker}`;
     case 'pattern_prediction':
       return `pattern_prediction:${ev.player}:${ev.predictedAction}`;
     case 'macro_state_change':
       return `macro_state_change:${ev.to}`;
+    case 'timer_warning':
+    case 'timer_critical':
+      return `${ev.type}:${ev.secondsLeft}`;
     default:
       return ev.type;
   }
@@ -318,7 +350,7 @@ function formatEventForPrompt(ev: CoachEvent): string {
     case 'round_end':
       return `ROUND END: ${ev.winner} wins`;
     case 'special_startup':
-      return `SPECIAL: ${ev.player} (${ev.character}) moveId=${ev.attackId}`;
+      return `MOVE: ${ev.player} threw ${formatMove(ev.character, ev.animPtr)}`;
     case 'corner_trap':
       return `CORNER TRAP: ${ev.victim} stuck on ${ev.side} side`;
     case 'macro_state_change':
@@ -329,5 +361,9 @@ function formatEventForPrompt(ev: CoachEvent): string {
       return `STUNNED: ${ev.victim} is dizzy — free combo window`;
     case 'hit_streak':
       return `HIT STREAK: ${ev.attacker} landed ${ev.count}× in a row without taking one back`;
+    case 'timer_warning':
+      return `TIMER: ${ev.secondsLeft}s left`;
+    case 'timer_critical':
+      return `TIMER CRITICAL: ${ev.secondsLeft}s left — time's running out`;
   }
 }

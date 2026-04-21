@@ -17,8 +17,9 @@ function char(o: Partial<CharacterState> = {}): CharacterState {
     isJumping: false,
     isCrouching: false,
     isAirborne: false,
-    currentAttackId: null,
-    attackPhase: null,
+    animPtr: 0,
+    stateByte: 0,
+    attacking: false,
     ...o,
   };
 }
@@ -35,13 +36,21 @@ function cpu(o: Partial<CPUState> = {}): CPUState {
   };
 }
 
-function state(frame: number, p1: Partial<CharacterState>, p2: Partial<CPUState>, tsMs: number): GameState {
+function state(
+  frame: number,
+  p1: Partial<CharacterState>,
+  p2: Partial<CPUState>,
+  tsMs: number,
+  timer: number = 90,
+): GameState {
   return {
     frameIdx: frame,
     timestampMs: tsMs,
     p1: char(p1),
     p2: cpu(p2),
-    timer: 99,
+    // Default to 90 so tests land past the "fight has started" gate
+    // (timer > 0 && timer < 99). Individual tests can override.
+    timer,
     roundNumber: 1,
     roundPhase: 'fight',
   };
@@ -156,10 +165,10 @@ describe('EventDetector', () => {
       h.push(s);
       all.push(...d.detect(s, h));
     };
-    push({ x: 150, currentAttackId: null, hp: 176 }, { x: 400, hp: 176 }, 0);
-    push({ x: 100, currentAttackId: 5, hp: 176 }, { x: 400, hp: 176 }, 200);
-    push({ x: 150, currentAttackId: null, hp: 176 }, { x: 400, hp: 176 }, 600);
-    push({ x: 150, currentAttackId: null, hp: 176 }, { x: 400, hp: 176 }, 800);
+    push({ x: 150, hp: 176 }, { x: 400, hp: 176 }, 0);
+    push({ x: 100, hp: 176, attacking: true, animPtr: 0x60CCE, stateByte: 0x0C }, { x: 400, hp: 176 }, 200);
+    push({ x: 150, hp: 176 }, { x: 400, hp: 176 }, 600);
+    push({ x: 150, hp: 176 }, { x: 400, hp: 176 }, 800);
 
     const pred = all.find(
       e => e.type === 'pattern_prediction' && e.predictedAction === 'sumo_headbutt',

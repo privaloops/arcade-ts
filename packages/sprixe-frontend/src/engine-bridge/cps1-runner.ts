@@ -5,6 +5,7 @@
  */
 
 import { Emulator } from "@sprixe/engine/emulator";
+import { VirtualInputChannel } from "@sprixe/engine/input/virtual-input-channel";
 import type { EmulatorRunner } from "./emulator-runner";
 import type { InputMapping } from "../input/mapping-store";
 import { applyUserMapping } from "./apply-mapping";
@@ -24,6 +25,12 @@ export async function createCps1Runner(opts: Cps1RunnerOptions): Promise<Emulato
   await emu.initAudio();
   applyUserMapping(emu.getInputManager(), opts.mapping ?? null);
 
+  // Create a persistent virtual P2 channel but DON'T attach it yet —
+  // callers opt in via armVirtualP2(true) when the AI opponent turns
+  // on. Leaving it attached by default would blank out a 2nd physical
+  // pad's menu navigation.
+  const virtualP2 = new VirtualInputChannel();
+
   return {
     start: () => emu.start(),
     stop: () => emu.stop(),
@@ -41,6 +48,13 @@ export async function createCps1Runner(opts: Cps1RunnerOptions): Promise<Emulato
     saveState: () => emu.exportStateAsBuffer(),
     loadState: (buf: ArrayBuffer) => emu.importStateFromBuffer(buf),
     getWorkRam: () => emu.getWorkRam(),
+    getIoPorts: () => emu.getIoPorts(),
+    getCpsbRegisters: () => emu.getCpsbRegisters(),
+    getVirtualP2Channel: () => virtualP2,
+    armVirtualP2: (armed: boolean) => {
+      emu.getInputManager().setVirtualP2(armed ? virtualP2 : null);
+      if (!armed) virtualP2.releaseAll();
+    },
     setVblankCallback: (cb) => emu.setVblankCallback(cb),
     destroy: () => emu.destroy(),
   };

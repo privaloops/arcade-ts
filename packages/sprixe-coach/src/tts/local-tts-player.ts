@@ -29,7 +29,7 @@ export class LocalTtsPlayer {
 
   speak(text: string): void {
     if (this.stopped || !this.synth) return;
-    const line = text.trim();
+    const line = phoneticize(text.trim(), this.opts.lang ?? 'en-US');
     if (!line) return;
 
     this.cancelCurrent();
@@ -66,6 +66,48 @@ export class LocalTtsPlayer {
     this.cancelCurrent();
   }
 }
+
+/**
+ * The system voices spell Japanese fighter / move names letter by
+ * letter ("R-Y-U"), which kills immersion. Rewrite a handful of known
+ * names phonetically for the target locale before synthesis. Only
+ * applied to the local engine — ElevenLabs handles them natively.
+ */
+function phoneticize(text: string, lang: string): string {
+  if (!text) return text;
+  const map = lang.toLowerCase().startsWith('fr') ? FR_PHONETIC_MAP : EN_PHONETIC_MAP;
+  let out = text;
+  for (const [pattern, replacement] of map) {
+    out = out.replace(pattern, replacement);
+  }
+  return out;
+}
+
+const FR_PHONETIC_MAP: Array<[RegExp, string]> = [
+  // Fighter names — re-spell so the French TTS voice doesn't spell them.
+  [/\bRyu\b/gi, 'Riou'],
+  [/\bKen\b/gi, 'Kène'],
+  [/\bGuile\b/gi, 'Gaïle'],
+  [/\bDhalsim\b/gi, 'Dalssim'],
+  [/\bSagat\b/gi, 'Sagatte'],
+  [/\bVega\b/gi, 'Véga'],
+  [/\bE\.?\s*Honda\b/gi, 'Honda'],
+  [/\bChun-?Li\b/gi, 'Tchoune-Li'],
+  // Special moves.
+  [/\bHadouken\b/gi, 'Adouken'],
+  [/\bShoryuken\b/gi, 'Shorioukène'],
+  [/\bShoryu\b/gi, 'Shoriou'],
+  [/\bTatsumaki\b/gi, 'Tatsoumaki'],
+  [/\bTatsu\b/gi, 'Tatsou'],
+  [/\bPsycho\s+Crusher\b/gi, 'Psycho Crusher'],
+  [/\bSumo\s+Headbutt\b/gi, 'Headbutt'],
+  [/\bSumo\s+Splash\b/gi, 'Splash'],
+];
+
+const EN_PHONETIC_MAP: Array<[RegExp, string]> = [
+  // English TTS also tends to spell "Ryu" — force a phonetic rewrite.
+  [/\bRyu\b/g, 'Ryoo'],
+];
 
 /**
  * Pick a reasonable voice for the requested locale. Prefer a local

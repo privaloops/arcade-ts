@@ -13,7 +13,9 @@ export type EventType =
   | 'macro_state_change'
   | 'pattern_prediction'
   | 'stunned'
-  | 'hit_streak';
+  | 'hit_streak'
+  | 'timer_warning'
+  | 'timer_critical';
 
 export interface BaseEvent {
   type: EventType;
@@ -68,7 +70,10 @@ export interface SpecialStartupEvent extends BaseEvent {
   type: 'special_startup';
   player: 'p1' | 'p2';
   character: CharacterId;
-  attackId: number;
+  /** 32-bit animation pointer at move startup — see move-names.ts. */
+  animPtr: number;
+  /** FSM state byte at startup: 0x0A = normal attack, 0x0C = special. */
+  stateByte: number;
 }
 
 export interface CornerTrapEvent extends BaseEvent {
@@ -106,6 +111,16 @@ export interface HitStreakEvent extends BaseEvent {
   count: number;
 }
 
+export interface TimerWarningEvent extends BaseEvent {
+  type: 'timer_warning';
+  secondsLeft: number;
+}
+
+export interface TimerCriticalEvent extends BaseEvent {
+  type: 'timer_critical';
+  secondsLeft: number;
+}
+
 export type CoachEvent =
   | HpHitEvent
   | ComboEvent
@@ -119,7 +134,9 @@ export type CoachEvent =
   | MacroStateChangeEvent
   | PatternPredictionEvent
   | StunnedEvent
-  | HitStreakEvent;
+  | HitStreakEvent
+  | TimerWarningEvent
+  | TimerCriticalEvent;
 
 /**
  * SF2 arcade screen bounds in world coordinates (empirical).

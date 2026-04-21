@@ -1,4 +1,4 @@
-import type { GameState, CharacterState, CPUState, CharacterId, RoundPhase, AttackPhase } from '../types';
+import type { GameState, CharacterState, CPUState, CharacterId, RoundPhase } from '../types';
 import { SF2HF_MEMORY_MAP, CHARACTER_ID_TABLE, type MemoryAddress } from './sf2hf-memory-map';
 
 const WORK_RAM_BASE = 0xFF0000;
@@ -58,7 +58,9 @@ export class StateExtractor {
     const animAddr = side === 'p1' ? map.p1_anim_state : map.p2_anim_state;
     const stunAddr = side === 'p1' ? map.p1_stun : map.p2_stun;
     const comboAddr = side === 'p1' ? map.p1_combo : map.p2_combo;
-    const attackAddr = side === 'p1' ? map.p1_attack_id : map.p2_attack_id;
+    const animPtrAddr = side === 'p1' ? map.p1_anim_ptr : map.p2_anim_ptr;
+    const stateAddr = side === 'p1' ? map.p1_state : map.p2_state;
+    const attackingAddr = side === 'p1' ? map.p1_attacking : map.p2_attacking;
 
     // The byte at player_base+0xA turns out to be an animation index, not
     // a pure jump-height counter (it reads non-zero during ground actions
@@ -66,7 +68,6 @@ export class StateExtractor {
     // locate the real vertical-position address.
     const y = 0;
     const animState = this.readU8(workRam, yAddr) || this.readU8(workRam, animAddr);
-    const attackId = this.readU8(workRam, attackAddr);
 
     const hpRaw = this.readU16(workRam, hpAddr);
     const maxHp = SF2HF_MAX_HP;
@@ -85,8 +86,9 @@ export class StateExtractor {
       isJumping: false,
       isCrouching: false,
       isAirborne: false,
-      currentAttackId: attackId === 0 ? null : attackId,
-      attackPhase: attackId === 0 ? null : this.guessAttackPhase(animState),
+      animPtr: this.readU32BE(workRam, animPtrAddr),
+      stateByte: this.readU8(workRam, stateAddr),
+      attacking: this.readU8(workRam, attackingAddr) === 0x01,
     };
   }
 
@@ -110,10 +112,6 @@ export class StateExtractor {
     }
   }
 
-  private guessAttackPhase(_animState: number): AttackPhase {
-    return 'active';
-  }
-
   private readU8(workRam: Uint8Array, addr: MemoryAddress): number {
     const off = addr.offset - WORK_RAM_BASE;
     if (off < 0 || off >= workRam.length) return 0;
@@ -129,5 +127,18 @@ export class StateExtractor {
   private readU16Signed(workRam: Uint8Array, addr: MemoryAddress): number {
     const raw = this.readU16(workRam, addr);
     return raw & 0x8000 ? raw - 0x10000 : raw;
+  }
+
+  private readU32BE(workRam: Uint8Array, addr: MemoryAddress): number {
+    const off = addr.offset - WORK_RAM_BASE;
+    if (off < 0 || off + 3 >= workRam.length) return 0;
+    // Use unsigned right-shift trick to keep the result in the 32-bit
+    // range (bitwise OR of four shifted bytes would otherwise sign-extend).
+    return (
+      ((workRam[off] ?? 0) * 0x1000000) +
+      ((workRam[off + 1] ?? 0) << 16) +
+      ((workRam[off + 2] ?? 0) << 8) +
+      (workRam[off + 3] ?? 0)
+    ) >>> 0;
   }
 }

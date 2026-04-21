@@ -10,11 +10,14 @@ import type { CoachEvent } from '../detector/events';
 import type { DerivedMetrics } from '../extractor/state-history';
 import type { GameState, AIMacroState } from '../types';
 
-const MIN_INTERVAL_MS = 4500;
-const URGENT_INTERVAL_MS = 1500;
-const MAX_SILENCE_MS = 8000;
+// Natural pacing is set by the TTS playback duration itself (see the
+// ttsSpeaking lock below). These values are just the *post-TTS* cooldown
+// window before we let another line fire.
+const MIN_INTERVAL_MS = 800;
+const URGENT_INTERVAL_MS = 400;
+const MAX_SILENCE_MS = 6000;
 const URGENT_IMPORTANCE = 0.85;
-const INTERESTING_IMPORTANCE = 0.55;
+const INTERESTING_IMPORTANCE = 0.5;
 
 export interface OrchestratorOpts {
   /** Called with each streamed token so the UI can append live. */
@@ -47,6 +50,11 @@ export class CommentOrchestrator {
   private inFlight: AbortController | null = null;
   private pendingUrgentEvent: CoachEvent | null = null;
   private briefedOpponents = new Set<string>();
+  // TRUE while the TTS engine is actually playing audio. Non-urgent
+  // events are withheld during playback so the commentator doesn't talk
+  // over himself — urgent ones bypass this (the new speak() will cancel
+  // the in-flight audio via TtsPlayer.cancelCurrent()).
+  private ttsSpeaking = false;
 
   constructor(opts: OrchestratorOpts) {
     this.language = opts.language ?? 'en';
@@ -71,9 +79,17 @@ export class CommentOrchestrator {
     // Briefing takes absolute priority: the first round_start against
     // a fighter we haven't seen yet gets an introductory line that
     // names the character and hints at a counter.
+    //
+    // GATE: require p1.charId !== p2.charId. Before the arcade-mode RAM
+    // is initialised, both char bytes read 0x00 (= ryu), which tricked
+    // the coach into announcing "Ryu vs Ryu" on boot. Arcade 1P mode
+    // never pits Ryu against a mirror, so this is a safe signal that
+    // the p2 slot hasn't been written yet.
     const roundStart = events.find(e => e.type === 'round_start');
     const charId = state.p2.charId;
-    if (roundStart && charId && charId !== 'unknown' && !this.briefedOpponents.has(charId)) {
+    if (roundStart && charId && charId !== 'unknown'
+        && charId !== state.p1.charId
+        && !this.briefedOpponents.has(charId)) {
       this.briefedOpponents.add(charId);
       this.speakBriefing(charId);
       return;
@@ -89,9 +105,9 @@ export class CommentOrchestrator {
     if (urgent && sinceLastMs > URGENT_INTERVAL_MS) {
       shouldSpeak = true;
       this.pendingUrgentEvent = urgent;
-    } else if (interesting && sinceLastMs > MIN_INTERVAL_MS) {
+    } else if (interesting && sinceLastMs > MIN_INTERVAL_MS && !this.ttsSpeaking) {
       shouldSpeak = true;
-    } else if (sinceLastMs > MAX_SILENCE_MS) {
+    } else if (sinceLastMs > MAX_SILENCE_MS && !this.ttsSpeaking) {
       shouldSpeak = true;
     }
     if (!shouldSpeak) return;
@@ -102,7 +118,13 @@ export class CommentOrchestrator {
   cancel(): void {
     this.inFlight?.abort();
     this.inFlight = null;
+    this.ttsSpeaking = false;
   }
+
+  /** Wired from TtsPlayer.onStart / onEnd — gates new lines from firing
+   *  during playback so commentary doesn't overlap itself. */
+  notifyTtsStart(): void { this.ttsSpeaking = true; }
+  notifyTtsEnd(): void { this.ttsSpeaking = false; this.lastSpokeAtMs = this.now(); }
 
   private speakBriefing(charId: string): void {
     this.lastSpokeAtMs = this.now();
@@ -160,7 +182,7 @@ export class CommentOrchestrator {
     });
 
     streamComment(
-      { systemPrompt: this.systemPrompt, userPrompt, maxTokens: 48, signal: controller.signal },
+      { systemPrompt: this.systemPrompt, userPrompt, maxTokens: 24, signal: controller.signal },
       {
         onToken: (t) => {
           buffer += t;

@@ -100,6 +100,11 @@ export interface GamepadMapping {
   coin: number;
 }
 
+import { VirtualInputChannel } from "./virtual-input-channel";
+
+export { VirtualInputChannel } from "./virtual-input-channel";
+export type { VirtualButton } from "./virtual-input-channel";
+
 export type AutofireKey = "button1" | "button2" | "button3" | "button4" | "button5" | "button6";
 const AUTOFIRE_KEYS: AutofireKey[] = ["button1", "button2", "button3", "button4", "button5", "button6"];
 const AUTOFIRE_STORAGE_P1 = "cps1-autofire-p1";
@@ -142,6 +147,10 @@ export class InputManager {
   // Track connected gamepads (gamepadconnected events) since navigator.getGamepads()
   // requires user interaction before returning non-null entries
   private knownGamepads = new Map<number, string>(); // index → short id
+
+  // When set, this channel REPLACES keyboard+gamepad for P2 reads.
+  // Used by the AI opponent to drive P2 in 2P vs Human mode.
+  private virtualP2: VirtualInputChannel | null = null;
 
   private boundKeyDown: (e: KeyboardEvent) => void;
   private boundKeyUp: (e: KeyboardEvent) => void;
@@ -503,10 +512,41 @@ export class InputManager {
   }
 
   /**
+   * Assign a virtual input channel that drives P2 programmatically.
+   * Passing null releases control back to the keyboard/gamepad.
+   *
+   * The AI opponent pipeline uses this in 2P vs Human mode so a
+   * second physical pad plugged in doesn't fight the AI for control.
+   */
+  setVirtualP2(channel: VirtualInputChannel | null): void {
+    this.virtualP2 = channel;
+  }
+
+  /** Get the current virtual P2 channel, if any. */
+  getVirtualP2(): VirtualInputChannel | null {
+    return this.virtualP2;
+  }
+
+  /**
    * Read the low byte of INx (directions + buttons 1-3).
    * Active-LOW: start with 0xFF, clear bits for pressed buttons.
    */
   private readPlayerLow(player: number): number {
+    // Virtual channel override for P2. Bypasses keyboard/gamepad/autofire
+    // entirely — the AI owns this slot.
+    if (player === 1 && this.virtualP2) {
+      let v = 0xFF;
+      const ch = this.virtualP2;
+      if (ch.isPressed('right'))   v &= ~(1 << 0);
+      if (ch.isPressed('left'))    v &= ~(1 << 1);
+      if (ch.isPressed('down'))    v &= ~(1 << 2);
+      if (ch.isPressed('up'))      v &= ~(1 << 3);
+      if (ch.isPressed('button1')) v &= ~(1 << 4);
+      if (ch.isPressed('button2')) v &= ~(1 << 5);
+      if (ch.isPressed('button3')) v &= ~(1 << 6);
+      return v;
+    }
+
     let value = 0xFF;
     const idx = player === 1 ? 1 : 0;
     const m = this.mappings[idx];
@@ -538,6 +578,15 @@ export class InputManager {
    * Active-LOW.
    */
   private readPlayerHigh(player: number): number {
+    if (player === 1 && this.virtualP2) {
+      let v = 0xFF;
+      const ch = this.virtualP2;
+      if (ch.isPressed('button4')) v &= ~(1 << 0);
+      if (ch.isPressed('button5')) v &= ~(1 << 1);
+      if (ch.isPressed('button6')) v &= ~(1 << 2);
+      return v;
+    }
+
     let value = 0xFF;
     const idx = player === 1 ? 1 : 0;
     const m = this.mappings[idx];
