@@ -148,6 +148,9 @@ export class PlayingScreen {
     // hitboxPtrs are populated, compute and print the Ken×Ryu
     // punish-range matrix (max hit distance per move pair).
     const dumpRanges = params.get("dump-ranges") === "1";
+    // ?ai-counter=1 — deterministic counter-punish AI derived from
+    // the Ken×Ryu matrix. Bypasses the tier-based policy runner.
+    const aiCounter = params.get("ai-counter") === "1";
     // Note: the CoachController auto-arms the virtual P2 channel only
     // while a fight is active, so the keyboard still drives P2 during
     // menu navigation and character select.
@@ -158,7 +161,7 @@ export class PlayingScreen {
       // Force-enable the AI opponent under calibration / feasibility tests —
       // those harnesses drive P2 via virtual inputs, so a spectator/manual
       // P2 is useless.
-      enableAiOpponent: enableAiOpponent || calibrateKen || testCmkPunish,
+      enableAiOpponent: enableAiOpponent || calibrateKen || testCmkPunish || aiCounter,
       aiEngine,
       aiLevel,
       ...(aiDebugLoopAction ? { aiDebugLoopAction } : {}),
@@ -169,6 +172,7 @@ export class PlayingScreen {
       ...(debugThreat ? { debugThreat: true } : {}),
       ...(testCmkPunish ? { testCmkPunish: true } : {}),
       ...(dumpRanges ? { dumpRanges: true } : {}),
+      ...(aiCounter ? { aiCounter: true } : {}),
     });
     if (!this.coach.start()) {
       this.coach = null;

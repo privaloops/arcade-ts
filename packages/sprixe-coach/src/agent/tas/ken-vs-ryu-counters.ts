@@ -97,26 +97,44 @@ export interface PickOptions {
   dist: number;
   /** Ryu move Ken is reacting to. */
   ryuMove: string;
-  /** Only pick moves whose startup is ≤ this many frames. Use this to
-   *  bound the decision to moves that connect within the victim's
-   *  recovery window. */
+  /** Signed horizontal velocity of Ryu along "away from Ken" axis,
+   *  in px per frame. Positive = Ryu retreating, negative = Ryu
+   *  approaching. Used to predict where Ryu will be when Ken's
+   *  first active frame lands. */
+  ryuDxAway?: number;
+  /** Frames between the decision and Ken's press reaching the game
+   *  (input sequencer + vblank alignment). Default 1. */
+  detectionLatency?: number;
+  /** Only pick moves whose startup is ≤ this many frames. */
   maxStartup?: number;
-  /** Minimum safety margin (px). A move is considered viable only if
-   *  dist ≤ maxHitDist - safetyMargin. Default 8. */
-  safetyMargin?: number;
 }
 
-/** Best single counter, or null if nothing fits. */
+/**
+ * Pick Ken's best counter under the physical constraint that, by the
+ * time his attackbox becomes active, the centre-to-centre distance
+ * must be within the move's maxHitDist.
+ *
+ *   frames_to_hit       = detectionLatency + counter.startup
+ *   predicted_dist_hit  = dist + ryuDxAway * frames_to_hit
+ *   eligible            ⇔ predicted_dist_hit ≤ counter.maxHitDist
+ *
+ * When Ryu is approaching (ryuDxAway < 0), even moves whose static
+ * reach is below the current distance become eligible — Ryu walks
+ * into them.
+ */
 export function pickCounter(
   table: CounterTable,
   opts: PickOptions,
 ): CounterOption | null {
   const options = table.byRyuMove[opts.ryuMove] ?? [];
-  const margin = opts.safetyMargin ?? 8;
+  const ryuDx = opts.ryuDxAway ?? 0;
+  const detectLat = opts.detectionLatency ?? 1;
   const maxStart = opts.maxStartup ?? Infinity;
   for (const o of options) {
     if (o.startup > maxStart) continue;
-    if (opts.dist > o.maxHitDist - margin) continue;
+    const framesToHit = detectLat + o.startup;
+    const predictedDist = opts.dist + ryuDx * framesToHit;
+    if (predictedDist > o.maxHitDist) continue;
     return o;
   }
   return null;

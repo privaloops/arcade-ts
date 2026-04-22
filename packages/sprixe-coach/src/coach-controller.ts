@@ -10,6 +10,7 @@ import { KenMoveValidator } from './agent/tas/ken-validator';
 import { KenAnimInspector } from './agent/tas/ken-anim-inspector';
 import { KenTimelineRecorder } from './agent/tas/ken-timeline-recorder';
 import { CMKPunishTest } from './agent/tas/cmk-punish-test';
+import { KenCounterAi } from './agent/tas/ken-counter-ai';
 import {
   computeKenVsRyuMatrix,
   dumpMatrix,
@@ -94,6 +95,9 @@ export interface CoachOptions {
   /** One-shot: compute and log the Ken×Ryu punish-range matrix at the
    *  first vblank where both hitboxPtrs are available. */
   dumpRanges?: boolean;
+  /** Run the deterministic Ken counter-punish AI derived from the
+   *  Ken×Ryu matrix. Bypasses the tier-based policy runner. */
+  aiCounter?: boolean;
 }
 
 const SUPPORTED_GAMES = new Set(['sf2hf', 'sf2hfj', 'sf2hfu']);
@@ -212,6 +216,7 @@ export class CoachController {
   private readonly kenRecorder: KenTimelineRecorder | null;
   private readonly debugThreat: boolean;
   private readonly cmkPunishTest: CMKPunishTest | null;
+  private readonly counterAi: KenCounterAi | null;
   private readonly dumpRanges: boolean;
   private rangesDumped = false;
   private prevThreatKey = '';
@@ -289,6 +294,11 @@ export class CoachController {
     this.dumpRanges = opts.dumpRanges === true;
     if (this.dumpRanges) {
       console.log('[sprixe-coach] punish-range matrix dump ARMED — waits for both hitboxPtrs');
+    }
+    const vp2Counter = opts.aiCounter ? host.getVirtualP2Channel?.() : undefined;
+    this.counterAi = vp2Counter ? new KenCounterAi(vp2Counter) : null;
+    if (this.counterAi) {
+      console.log('[sprixe-coach] deterministic counter-punish AI ARMED — tier policy bypassed');
     }
   }
 
@@ -579,6 +589,20 @@ export class CoachController {
         this.cmkPunishTest.onVblank(state);
       } else {
         this.cmkPunishTest.reset();
+      }
+      return;
+    }
+
+    // Deterministic counter-punish AI. Owns P2 like the feasibility
+    // probe, also bypasses the tier policy.
+    if (this.counterAi && rom) {
+      const fightActive = state.roundPhase === 'fight'
+        && state.p1.hp > 0 && state.p2.hp > 0;
+      this.host.armVirtualP2?.(fightActive);
+      if (fightActive) {
+        this.counterAi.onVblank(state, rom);
+      } else {
+        this.counterAi.reset();
       }
       return;
     }
