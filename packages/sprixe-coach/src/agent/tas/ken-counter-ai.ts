@@ -12,73 +12,52 @@ import { pickPunish } from './punish-engine';
 import type { KenSnapshot, OpponentSnapshot } from './punish-sim';
 
 /**
- * Ken counter-AI — reactive defence wired to the pure punish engine.
+ * Ken counter-AI — per-frame decision loop with two modes.
  *
- * Trigger: rising edge on the opponent entering an attack state
- * (0x0A normal / 0x0C special). On the first frame of the opponent's
- * committed move, we snapshot his animPtr + position and call
- * `pickPunish` to get the damage-optimal response. The chosen action
- * is pushed to the virtual P2 channel via the input sequencer.
+ *   PUNISH mode — opponent is committed (stateByte ∈ {0x0A, 0x0C}).
+ *     Snapshot his animPtr + position, call `pickPunish`, execute the
+ *     damage-optimal response from the hierarchy.
  *
- * If `pickPunish` returns null (no viable option in the hierarchy
- * survives the simulator), we fall back to `block_crouch` — safest
- * default that covers low + mid attacks.
+ *   NEUTRAL mode — nobody is attacking. Simple rule for v1:
+ *     - dist > NEUTRAL_ZONE_DIST  → hadouken_jab (zoning).
+ *     - dist ≤ NEUTRAL_ZONE_DIST  → idle (Ken waits).
+ *     This already covers "I'm walking forward and crossing into his
+ *     fireball range": Ken fireballs → I get hit or must block/jump.
  *
- * All logic is in the pure engine + simulator; this class only
- * orchestrates timing (cooldown, state gates) and input execution.
+ * The per-frame gate (cooldown + state=0x00 + sequencer free) is the
+ * same for both modes; only the decision function differs.
  */
 
-/** Minimum frames between two counter fires. Covers the duration of
- *  Ken's longest immediate response (shoryu_fierce = 46f total) so we
- *  don't spam inputs while the previous attack is still animating. */
+/** Minimum frames between two fires. Covers the duration of Ken's
+ *  longest immediate response so we don't spam inputs while his own
+ *  attack is still animating. */
 const COOLDOWN_FRAMES = 18;
 
 /** Opponent state bytes that mean "committed to a move we can punish". */
 const OPPONENT_ATTACK_STATES: ReadonlySet<number> = new Set([0x0A, 0x0C]);
 
+/** Centre-to-centre distance (px) at which Ken prefers zoning with a
+ *  fireball over waiting. Below this, Ken stays idle in v1 neutral;
+ *  a future pass will surface ground pokes via pickPunish-static. */
+const NEUTRAL_ZONE_DIST = 120;
+
 export class KenCounterAi {
   private readonly sequencer: InputSequencer;
   private lastCounterFrame = -Infinity;
-  private prevOpponentAttacking = false;
 
   constructor(private readonly channel: VirtualInputChannel) {
     this.sequencer = new InputSequencer(channel);
-    console.log('[ken-counter-ai] armed — pure pickPunish engine');
+    console.log('[ken-counter-ai] armed — per-frame decision loop (punish + neutral zone)');
   }
 
   onVblank(state: GameState, rom: Uint8Array): void {
     this.sequencer.tick();
 
-    // Rising-edge on opponent entering an attack state. We snapshot
-    // before the gates below so the edge isn't lost across cooldown /
-    // sequencer-busy frames.
-    const oppAttackingNow = OPPONENT_ATTACK_STATES.has(state.p1.stateByte);
-    const oppAttackingRising = oppAttackingNow && !this.prevOpponentAttacking;
-    this.prevOpponentAttacking = oppAttackingNow;
-
+    // Shared gate: Ken must be free to act this frame.
     if (this.sequencer.busy) return;
     if (state.frameIdx - this.lastCounterFrame < COOLDOWN_FRAMES) return;
     if (state.p2.stateByte !== 0x00) return;
-    if (!oppAttackingRising) return;
 
-    // Resolve the opponent's move name from its startup animPtr. At
-    // the very first frame of the attack state the animPtr may still
-    // be transient — in that case we bail and wait for the next edge
-    // (the engine is called often enough that a 1-frame miss is fine).
-    const moveName = actionForAnimPtr(state.p1.charId, state.p1.animPtr);
-    if (!moveName) {
-      return;
-    }
-
-    const opponent: OpponentSnapshot = {
-      x: state.p1.x,
-      y: state.p1.posY ?? 0,
-      facingLeft: state.p1.facingLeft ?? false,
-      animPtrAtMoveStart: state.p1.animPtr,
-      framesSinceMoveStart: 0,
-      moveName,
-      hitboxPtr: state.p1.hitboxPtr ?? 0,
-    };
     const ken: KenSnapshot = {
       x: state.p2.x,
       y: state.p2.posY ?? 0,
@@ -86,31 +65,63 @@ export class KenCounterAi {
       hp: state.p2.hp,
     };
 
-    const decision = pickPunish(opponent, ken, rom);
-    if (!decision) {
+    // ── PUNISH mode ─────────────────────────────────────────────────
+    // Opponent is committed to a move. Every frame while he's locked
+    // we re-evaluate and fire the highest-deltaHp response, letting
+    // pickPunish handle the hierarchy + death-guard + trade math.
+    if (OPPONENT_ATTACK_STATES.has(state.p1.stateByte)) {
+      const moveName = actionForAnimPtr(state.p1.charId, state.p1.animPtr);
+      if (!moveName) return;        // transient animPtr; retry next frame
+      const opponent: OpponentSnapshot = {
+        x: state.p1.x,
+        y: state.p1.posY ?? 0,
+        facingLeft: state.p1.facingLeft ?? false,
+        animPtrAtMoveStart: state.p1.animPtr,
+        framesSinceMoveStart: 0,
+        moveName,
+        hitboxPtr: state.p1.hitboxPtr ?? 0,
+      };
+      const decision = pickPunish(opponent, ken, rom);
+      if (!decision) {
+        console.log(
+          `[ken-counter-ai] f=${state.frameIdx} vs ${moveName} — empty candidate pool, block fallback`,
+        );
+        this.executeMotion('block_crouch', state);
+        this.lastCounterFrame = state.frameIdx;
+        return;
+      }
+      const action = decision.option.sequence[0]!;
       console.log(
-        `[ken-counter-ai] f=${state.frameIdx} vs ${moveName} — empty candidate pool, block fallback`,
+        `[ken-counter-ai] f=${state.frameIdx} PUNISH vs ${moveName}`
+        + ` → ${decision.option.id} (${action}, deltaHp=${decision.deltaHp > 0 ? '+' : ''}${decision.deltaHp},`
+        + ` dmg=${decision.option.damage}, taken=${decision.simResult.kenDamageTaken})`,
       );
-      this.executeMotion('block_crouch', state);
+      this.executeMotion(action, state);
       this.lastCounterFrame = state.frameIdx;
       return;
     }
 
-    const action = decision.option.sequence[0]!;
-    console.log(
-      `[ken-counter-ai] f=${state.frameIdx} vs ${moveName}`
-      + ` → ${decision.option.id} (${action}, deltaHp=${decision.deltaHp > 0 ? '+' : ''}${decision.deltaHp},`
-      + ` dmg=${decision.option.damage}, taken=${decision.simResult.kenDamageTaken})`,
-    );
-    this.executeMotion(action, state);
-    this.lastCounterFrame = state.frameIdx;
+    // ── NEUTRAL mode ────────────────────────────────────────────────
+    // Nobody is attacking. v1 rule: hadouken at distance (zone the
+    // opponent), idle within the poke zone. A future pass will call a
+    // "static" variant of pickPunish here to surface sweep/cMK/sHP
+    // when the opponent's idle hurtboxes are in range.
+    const dist = Math.abs(state.p1.x - state.p2.x);
+    if (dist > NEUTRAL_ZONE_DIST) {
+      console.log(
+        `[ken-counter-ai] f=${state.frameIdx} NEUTRAL zone dist=${dist} → hadouken_jab`,
+      );
+      this.executeMotion('hadouken_jab', state);
+      this.lastCounterFrame = state.frameIdx;
+    }
+    // dist ≤ NEUTRAL_ZONE_DIST: stay idle in v1; we let the punish
+    // branch catch any commitment the opponent makes next.
   }
 
   reset(): void {
     this.sequencer.clear();
     this.channel.releaseAll();
     this.lastCounterFrame = -Infinity;
-    this.prevOpponentAttacking = false;
   }
 
   /** True when the counter-AI pushed an action during the given frame.
