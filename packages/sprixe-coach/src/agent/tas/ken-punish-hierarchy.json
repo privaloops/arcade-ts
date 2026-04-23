@@ -56,10 +56,28 @@
       "notes": "Long reach, knockdown, 7f startup. Preferred when cHP range unsafe."
     },
     {
+      "id": "solo_jfwd_hk",
+      "sequence": ["jump_forward_hk"],
+      "damage": 18,
+      "notes": "Jump-in HK without follow-up. Key mid-range option vs zoning (clears fireballs, wins trades on mid-air)."
+    },
+    {
+      "id": "solo_jfwd_hp",
+      "sequence": ["jump_forward_hp"],
+      "damage": 18,
+      "notes": "Jump-in HP. Same niche as jHK but touches with the fist arc — useful when Ryu is slightly lower."
+    },
+    {
       "id": "solo_chp",
       "sequence": ["crouch_fierce"],
       "damage": 17,
       "notes": "Solo cHP — fast, no knockdown. Leaves Ken neutral-positive."
+    },
+    {
+      "id": "solo_jfwd_mk",
+      "sequence": ["jump_forward_mk"],
+      "damage": 14,
+      "notes": "Jump-in MK. Lighter damage but earlier active frames, useful against tall hurtboxes."
     },
     {
       "id": "evade_jback_hk",
