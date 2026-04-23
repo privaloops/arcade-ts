@@ -207,6 +207,53 @@ body {
   background: #000;
 }
 
+.hero-video-facade {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: #000;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.hero-video-facade img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  opacity: 0.85;
+  transition: opacity 0.2s;
+}
+
+.hero-video-facade:hover img { opacity: 1; }
+
+.hero-video-play {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 68px;
+  height: 48px;
+  background: var(--color-accent);
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+}
+
+.hero-video-play::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-40%, -50%);
+  border-style: solid;
+  border-width: 10px 0 10px 16px;
+  border-color: transparent transparent transparent #fff;
+}
+
 /* ── Workflow ── */
 .workflow {
   max-width: var(--max-width);

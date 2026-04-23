@@ -4,20 +4,23 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Sprixe — CPS1 arcade studio in the browser. Capture sprites and backgrounds, edit in Aseprite, export MAME-compatible ROMs." />
+    <meta name="robots" content="index, follow, max-image-preview:large" />
     <meta name="theme-color" content="#e8003c" />
     <link rel="canonical" href="https://www.sprixe.dev/" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="manifest" href="/manifest.json" />
     <meta property="og:title" content="Sprixe — CPS1 Arcade Studio" />
     <meta property="og:description" content="The first browser-based CPS1 ROM studio. Capture sprites and backgrounds, edit in Aseprite, export MAME-compatible ROMs." />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://www.sprixe.dev/" />
-    <meta property="og:image" content="https://www.sprixe.dev/og-image.png" />
+    <meta property="og:image" content="https://www.sprixe.dev/og-image.jpg" />
+    <meta property="og:image:type" content="image/jpeg" />
     <meta property="og:image:width" content="1200" />
-    <meta property="og:image:height" content="630" />
+    <meta property="og:image:height" content="675" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Sprixe — CPS1 Arcade Studio" />
     <meta name="twitter:description" content="The first browser-based CPS1 ROM studio. Capture sprites and backgrounds, edit in Aseprite, export MAME-compatible ROMs." />
-    <meta name="twitter:image" content="https://www.sprixe.dev/og-image.png" />
+    <meta name="twitter:image" content="https://www.sprixe.dev/og-image.jpg" />
     <script type="application/ld+json">
     {
       "@context": "https://schema.org",
@@ -27,6 +30,10 @@
       "url": "https://www.sprixe.dev/",
       "applicationCategory": "GameApplication",
       "operatingSystem": "Web",
+      "author": {
+        "@type": "Person",
+        "name": "Thibaut Lion"
+      },
       "offers": {
         "@type": "Offer",
         "price": "0",
@@ -60,7 +67,10 @@
       </div>
       <span class="hero-badge">MAME-compatible export</span>
       <div class="hero-media">
-        <iframe class="hero-video" src="https://www.youtube.com/embed/pHr8cxG041A" title="Sprixe — CPS1 Arcade Studio demo" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen loading="lazy"></iframe>
+        <button type="button" class="hero-video-facade" data-yt-id="pHr8cxG041A" aria-label="Play Sprixe demo video">
+          <img src="/hero-thumbnail.jpg" alt="Edit CPS1 ROMs in your browser — Sprixe arcade studio" width="1280" height="720" fetchpriority="high" />
+          <span class="hero-video-play" aria-hidden="true"></span>
+        </button>
       </div>
     </section>
 
