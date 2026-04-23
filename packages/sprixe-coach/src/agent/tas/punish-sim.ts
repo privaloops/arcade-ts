@@ -41,8 +41,28 @@ import {
 /** Input bus + vblank buffer between "decide now" and "game sees press". */
 const LATENCY = 2;
 
+/** SF2HF's pre-jump squat: once Ken presses up, he plants at the
+ *  ground for ~3 frames before actually leaving the floor. During
+ *  this window his hurtboxes are still at idle height, NOT the
+ *  airborne trajectory. Without this we'd think jump_back evades a
+ *  sweep that actually catches Ken in his squat. */
+const JUMP_PREJUMP_FRAMES = 3;
+
 /** Maximum frames looked ahead before giving up. ~1 second in SF2HF. */
 const SIM_HORIZON = 60;
+
+/**
+ * Ken's hurtbox trio while standing idle (world-relative offsets at
+ * x=0, posY=0, facing left). Used during pre-jump frames when the
+ * trajectory capture has already placed Ken airborne but the engine
+ * hasn't left the ground yet. Values mirror Ryu's idle hurtboxes —
+ * shotos share the same skeleton height.
+ */
+const KEN_IDLE_HURTBOXES: readonly BoxRel[] = [
+  { cx: -4, cy: 79, halfW: 12, halfH: 8,  kind: 'hurt_head' },
+  { cx:  6, cy: 52, halfW: 20, halfH: 21, kind: 'hurt_body' },
+  { cx:  6, cy: 14, halfW: 20, halfH: 16, kind: 'hurt_legs' },
+];
 
 /** Estimated damage for each opponent move. Used to compute
  *  kenDamageTaken when an interception starts too late. Values are
@@ -156,18 +176,22 @@ export function simulateOption(
   const fd = getFrameData(move);
   if (!fd) return fail(0, `no frame data for ${move}`);
 
-  const kenActiveStart = LATENCY + fd.startup;
+  // Jumps carry a pre-jump squat where Ken is grounded before the
+  // trajectory starts. Everything downstream shifts by this offset
+  // so frame 0 of the capture aligns with LATENCY+prejumpDelay.
+  const prejumpDelay = isJumpMove(move) ? JUMP_PREJUMP_FRAMES : 0;
+  const kenActiveStart = LATENCY + prejumpDelay + fd.startup;
   const kenActiveEnd = kenActiveStart + fd.active;
 
   // ── Ken → Opponent connection check ──
   // Walk every active frame; look up Ken's attackbox from the
   // trajectory (indexed by "frames since move animation started",
-  // which is t - LATENCY), project onto Ken's world position, and
-  // test overlap against every opponent hurtbox for the same frame.
+  // which is t - LATENCY - prejumpDelay), project onto Ken's world
+  // position, and test overlap against every opponent hurtbox.
   let connectFrame: number | null = null;
   for (let t = kenActiveStart; t < Math.min(kenActiveEnd, SIM_HORIZON); t++) {
-    const trajIdx = t - LATENCY;
-    if (trajIdx >= traj.length) break;
+    const trajIdx = t - LATENCY - prejumpDelay;
+    if (trajIdx < 0 || trajIdx >= traj.length) break;
     const sample = traj[trajIdx]!;
     if (!sample.attackbox) continue;
     const kenAtk = projectBox(sample.attackbox, ken.x + sample.dx, ken.y + sample.dy, ken.facingLeft);
@@ -187,7 +211,7 @@ export function simulateOption(
   for (let t = 0; t < Math.min(opponentHitEnd, SIM_HORIZON); t++) {
     const opponentAtk = opponentAttackboxAt(opponent, rom, t);
     if (!opponentAtk) continue;
-    const kenHurts = kenHurtboxesAt(traj, t, ken);
+    const kenHurts = kenHurtboxesAt(traj, t, ken, move);
     if (kenHurts.some((h) => boxesOverlap(opponentAtk, h))) {
       kenDamageTaken = OPPONENT_MOVE_DAMAGE[opponent.moveName] ?? 15;
       break;
@@ -306,19 +330,36 @@ function opponentAttackboxAt(
 }
 
 /**
- * Ken's world hurtboxes at `simFrame` frames after trigger. Before
- * LATENCY Ken is still idle at his trigger pose, so we use the
- * capture's frame 0 hurtboxes pinned to his trigger (x, y). After
- * LATENCY he's into the trajectory and we project sample[t - LATENCY].
+ * Ken's world hurtboxes at `simFrame` frames after trigger. Two
+ * regimes:
+ *   - Before LATENCY+prejumpDelay: Ken is still on the ground in
+ *     his trigger pose (input lag + pre-jump squat for jumps). We
+ *     use the hardcoded idle hurtbox set anchored at his trigger
+ *     (x, y) — this prevents under-counting damage on options like
+ *     jump_back_hk whose captured trajectory starts airborne.
+ *   - After: Ken is executing the move. Pull the corresponding
+ *     trajectory sample and project it onto his live position.
  */
 function kenHurtboxesAt(
   traj: TrajectorySample[],
   simFrame: number,
   ken: KenSnapshot,
+  moveName: string,
 ): HitboxRect[] {
-  const trajIdx = Math.max(0, simFrame - LATENCY);
+  const prejumpDelay = isJumpMove(moveName) ? JUMP_PREJUMP_FRAMES : 0;
+  const trajStartsAt = LATENCY + prejumpDelay;
+  if (simFrame < trajStartsAt) {
+    return KEN_IDLE_HURTBOXES.map((h) =>
+      projectBox(h, ken.x, ken.y, ken.facingLeft),
+    );
+  }
+  const trajIdx = simFrame - trajStartsAt;
   const sample = traj[Math.min(trajIdx, traj.length - 1)]!;
   return sample.hurtboxes.map((h) =>
     projectBox(h, ken.x + sample.dx, ken.y + sample.dy, ken.facingLeft),
   );
+}
+
+function isJumpMove(move: string): boolean {
+  return move.startsWith('jump_');
 }
