@@ -150,7 +150,7 @@ export function simulateOption(
   if (isBlock(move)) return { connects: false, connectFrame: null, kenDamageTaken: 0, reason: 'block — safe fallback' };
   if (isPureEvade(move)) return { connects: false, connectFrame: null, kenDamageTaken: 0, reason: 'pure evasion' };
 
-  const traj = trajectories[move];
+  const traj = resolveTrajectory(move, trajectories);
   if (!traj || traj.length === 0) return fail(0, `no trajectory captured for ${move}`);
 
   const fd = getFrameData(move);
@@ -208,6 +208,31 @@ export function simulateOption(
 function fail(kenDamageTaken: number, reason: string): SimulationResult {
   return { connects: false, connectFrame: null, kenDamageTaken, reason };
 }
+
+/**
+ * Resolve a move's trajectory, handling the jump_back_* → jump_forward_*
+ * aliasing. SF2HF back-jumps share the exact same animation as forward
+ * jumps — only the horizontal velocity is flipped. The recorder only
+ * captures the forward variant; here we mirror dx on the fly so the
+ * simulator can treat back-jumps as first-class options.
+ */
+function resolveTrajectory(move: string, trajectories: TrajectoryMap): TrajectorySample[] | undefined {
+  if (trajectories[move]) return trajectories[move];
+  const mirror = BACK_TO_FORWARD_JUMP[move];
+  if (!mirror) return undefined;
+  const base = trajectories[mirror];
+  if (!base) return undefined;
+  return base.map((s) => ({ ...s, dx: -s.dx }));
+}
+
+const BACK_TO_FORWARD_JUMP: Record<string, string> = {
+  jump_back_lp: 'jump_forward_lp',
+  jump_back_mp: 'jump_forward_mp',
+  jump_back_hp: 'jump_forward_hp',
+  jump_back_lk: 'jump_forward_lk',
+  jump_back_mk: 'jump_forward_mk',
+  jump_back_hk: 'jump_forward_hk',
+};
 
 function isBlock(move: ActionId): boolean {
   return move === 'block_crouch' || move === 'block_stand';
