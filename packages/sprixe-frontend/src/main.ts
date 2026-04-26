@@ -582,6 +582,32 @@ function startBrowser(
           return { usage: e.usage ?? 0, quota: e.quota ?? 0 };
         },
       },
+      system: {
+        reloadUI: () => {
+          // Hard reload — picks up a new dist/ if Vercel has shipped
+          // a build since the kiosk page first opened. Vite's hashed
+          // asset URLs make a cache-busting query unnecessary.
+          window.location.reload();
+        },
+        // Reboot / shutdown only show up when the bridge is reachable;
+        // the SettingsScreen disables the buttons when these are
+        // omitted, so web-only deployments don't tease an action that
+        // can't work.
+        ...(bridgeAvailable ? {
+          reboot: async () => {
+            toast.show("success", "Rebooting…");
+            try { await bridge.reboot(); } catch (e) {
+              toast.show("error", `Reboot failed: ${describeLaunchError(e)}`);
+            }
+          },
+          shutdown: async () => {
+            toast.show("success", "Shutting down…");
+            try { await bridge.poweroff(); } catch (e) {
+              toast.show("error", `Shutdown failed: ${describeLaunchError(e)}`);
+            }
+          },
+        } : {}),
+      },
       onClose: () => {
         settingsScreen = null;
         browser.root.hidden = false;

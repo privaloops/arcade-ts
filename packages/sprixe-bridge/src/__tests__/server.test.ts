@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BridgeServer } from "../server.js";
+import { BridgeServer, type SystemRunner } from "../server.js";
 import { MameProcess, type SpawnedProcessLike, type Spawner } from "../mame.js";
 
 class FakeProcess implements SpawnedProcessLike {
@@ -23,6 +23,7 @@ interface Harness {
   baseUrl: string;
   romDir: string;
   spawned: FakeProcess[];
+  systemCalls: { cmd: string; args: string[] }[];
 }
 
 async function makeHarness(): Promise<Harness> {
@@ -33,14 +34,24 @@ async function makeHarness(): Promise<Harness> {
     spawned.push(p);
     return p;
   };
+  const systemCalls: { cmd: string; args: string[] }[] = [];
+  const systemRunner: SystemRunner = async (cmd, args) => {
+    systemCalls.push({ cmd, args: [...args] });
+  };
   const mame = new MameProcess({ spawner });
   // Port 0 = let the OS pick a free one so parallel tests don't collide.
-  const server = new BridgeServer({ port: 0, romDir, mame });
+  const server = new BridgeServer({ port: 0, romDir, mame, systemRunner });
   await server.start();
   // BridgeServer typed as fixed port; resolve actual via internals.
   const actualPort = (server as unknown as { server: { address: () => { port: number } } })
     .server.address().port;
-  return { server, baseUrl: `http://127.0.0.1:${actualPort}`, romDir, spawned };
+  return {
+    server,
+    baseUrl: `http://127.0.0.1:${actualPort}`,
+    romDir,
+    spawned,
+    systemCalls,
+  };
 }
 
 async function teardown(h: Harness): Promise<void> {
@@ -152,5 +163,28 @@ describe("BridgeServer", () => {
   it("CORS preflight returns 204", async () => {
     const res = await fetch(`${h.baseUrl}/launch`, { method: "OPTIONS" });
     expect(res.status).toBe(204);
+  });
+
+  it("POST /system/reboot invokes the system runner with sudo systemctl", async () => {
+    const res = await fetch(`${h.baseUrl}/system/reboot`, { method: "POST" });
+    expect(res.status).toBe(202);
+    // Runner is async-fire-and-forget; the next microtask resolves it.
+    await new Promise((r) => setTimeout(r, 10));
+    expect(h.systemCalls).toHaveLength(1);
+    expect(h.systemCalls[0]).toEqual({
+      cmd: "sudo",
+      args: ["/usr/bin/systemctl", "reboot"],
+    });
+  });
+
+  it("POST /system/poweroff invokes the system runner with sudo systemctl", async () => {
+    const res = await fetch(`${h.baseUrl}/system/poweroff`, { method: "POST" });
+    expect(res.status).toBe(202);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(h.systemCalls).toHaveLength(1);
+    expect(h.systemCalls[0]).toEqual({
+      cmd: "sudo",
+      args: ["/usr/bin/systemctl", "poweroff"],
+    });
   });
 });

@@ -43,7 +43,7 @@ describe("SettingsScreen", () => {
     });
 
     it("bumper-right / bumper-left cycle through tabs (including the Back entry)", () => {
-      const order = ["display", "audio", "controls", "wifi", "roms", "about", "back"];
+      const order = ["display", "audio", "controls", "wifi", "roms", "system", "about", "back"];
       for (let i = 1; i < order.length; i++) {
         screen.handleNavAction("bumper-right");
         expect(screen.getActiveTab()).toBe(order[i]);
