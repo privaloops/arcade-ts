@@ -55,7 +55,7 @@ exec cage -d -- /usr/bin/chromium \
     --enable-gpu-rasterization --enable-zero-copy \
     --ignore-gpu-blocklist \
     --user-data-dir=/home/sprixe/.chromium \
-    https://www.sprixe.dev/
+    https://beta.sprixe.dev/
 KIOSK
 chown sprixe:sprixe /home/sprixe/start-kiosk.sh
 chmod 755 /home/sprixe/start-kiosk.sh
