@@ -1,0 +1,211 @@
+/**
+ * Bridge HTTP server — sits on localhost:7777, lets a Chromium kiosk
+ * page launch native MAME without leaving the browser sandbox.
+ *
+ * Endpoints:
+ *   GET  /health           — cheap probe so the frontend can detect
+ *                            whether the bridge is reachable and decide
+ *                            between native MAME and the embedded TS
+ *                            engine.
+ *   POST /launch           — body: ROM ZIP bytes (Content-Type:
+ *                            application/octet-stream). Header
+ *                            X-Game-Id selects the MAME set name.
+ *                            Writes the ROM to disk, spawns MAME,
+ *                            returns 202 immediately. Use /events for
+ *                            the actual exit notification.
+ *   POST /quit             — kill the running MAME (SIGTERM). 200
+ *                            either way, no body.
+ *   GET  /events           — Server-Sent Events stream. Pushes events
+ *                            of shape { type, ... } as MAME starts /
+ *                            exits / errors.
+ *
+ * SSE was picked over WebSocket so we don't need the `ws` dependency
+ * — the bridge stays at zero runtime deps, which keeps the Pi image
+ * surface as small as possible.
+ */
+
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { MameProcess, type ExitReason } from "./mame.js";
+
+export interface BridgeServerOptions {
+  /** Listening port. Defaults to 7777. */
+  port?: number;
+  /** Where ROMs are written before MAME picks them up. */
+  romDir?: string;
+  /** Inject a custom MameProcess for tests. */
+  mame?: MameProcess;
+}
+
+export type BridgeEvent =
+  | { type: "launched"; gameId: string }
+  | { type: "exited"; gameId: string; code: number | null; signal: NodeJS.Signals | null }
+  | { type: "error"; gameId: string; message: string };
+
+const MAX_ROM_BYTES = 64 * 1024 * 1024; // 64 MiB — biggest CPS / Neo-Geo ZIPs sit well under this.
+
+export class BridgeServer {
+  readonly port: number;
+  readonly romDir: string;
+
+  private readonly mame: MameProcess;
+  private readonly sseClients = new Set<ServerResponse>();
+  private server: Server | null = null;
+  private currentGameId: string | null = null;
+
+  constructor(options: BridgeServerOptions = {}) {
+    this.port = options.port ?? 7777;
+    this.romDir = options.romDir ?? "/tmp/sprixe-roms";
+    this.mame = options.mame ?? new MameProcess();
+    this.mame.onExit((reason) => this.handleMameExit(reason));
+  }
+
+  async start(): Promise<void> {
+    await mkdir(this.romDir, { recursive: true });
+    this.server = createServer((req, res) => this.handle(req, res));
+    await new Promise<void>((resolve) => this.server!.listen(this.port, "127.0.0.1", resolve));
+  }
+
+  async stop(): Promise<void> {
+    for (const client of this.sseClients) {
+      try { client.end(); } catch { /* already closed */ }
+    }
+    this.sseClients.clear();
+    this.mame.stop();
+    if (this.server) {
+      await new Promise<void>((resolve, reject) =>
+        this.server!.close((err) => (err ? reject(err) : resolve()))
+      );
+      this.server = null;
+    }
+  }
+
+  private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    // Browser running on the same host still sends an Origin — allow
+    // it explicitly so the localhost fetch from the kiosk page works
+    // without a CORS preflight surprise.
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Game-Id");
+    if (req.method === "OPTIONS") {
+      res.writeHead(204).end();
+      return;
+    }
+
+    const url = req.url ?? "/";
+    if (req.method === "GET" && url === "/health") {
+      this.sendJson(res, 200, { ok: true, running: this.mame.isRunning(), gameId: this.currentGameId });
+      return;
+    }
+    if (req.method === "POST" && url === "/launch") {
+      await this.handleLaunch(req, res);
+      return;
+    }
+    if (req.method === "POST" && url === "/quit") {
+      this.mame.stop();
+      this.sendJson(res, 200, { ok: true });
+      return;
+    }
+    if (req.method === "GET" && url === "/events") {
+      this.attachSseClient(res);
+      return;
+    }
+    this.sendJson(res, 404, { error: "not found" });
+  }
+
+  private async handleLaunch(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const gameId = req.headers["x-game-id"];
+    if (typeof gameId !== "string" || !/^[a-z0-9_]+$/i.test(gameId)) {
+      this.sendJson(res, 400, { error: "missing or invalid X-Game-Id header" });
+      return;
+    }
+    if (this.mame.isRunning()) {
+      this.sendJson(res, 409, { error: "MAME is already running", gameId: this.currentGameId });
+      return;
+    }
+
+    let body: Buffer;
+    try {
+      body = await readBody(req, MAX_ROM_BYTES);
+    } catch (err) {
+      this.sendJson(res, 413, { error: err instanceof Error ? err.message : "body read failed" });
+      return;
+    }
+    if (body.byteLength === 0) {
+      this.sendJson(res, 400, { error: "empty ROM body" });
+      return;
+    }
+
+    const romPath = join(this.romDir, `${gameId}.zip`);
+    await writeFile(romPath, body);
+
+    this.currentGameId = gameId;
+    try {
+      this.mame.start({ gameId, romPath: this.romDir });
+    } catch (err) {
+      this.currentGameId = null;
+      this.sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
+      return;
+    }
+
+    this.broadcast({ type: "launched", gameId });
+    this.sendJson(res, 202, { ok: true, gameId });
+  }
+
+  private attachSseClient(res: ServerResponse): void {
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    });
+    res.write(`: connected\n\n`);
+    this.sseClients.add(res);
+    res.once("close", () => { this.sseClients.delete(res); });
+  }
+
+  private broadcast(event: BridgeEvent): void {
+    const payload = `data: ${JSON.stringify(event)}\n\n`;
+    for (const client of this.sseClients) {
+      try { client.write(payload); } catch { this.sseClients.delete(client); }
+    }
+  }
+
+  private handleMameExit(reason: ExitReason): void {
+    const gameId = this.currentGameId ?? "";
+    this.currentGameId = null;
+    if (reason.kind === "spawn-error") {
+      this.broadcast({ type: "error", gameId, message: reason.error.message });
+      return;
+    }
+    this.broadcast({
+      type: "exited",
+      gameId,
+      code: reason.code,
+      signal: reason.signal,
+    });
+  }
+
+  private sendJson(res: ServerResponse, status: number, body: unknown): void {
+    res.writeHead(status, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(body));
+  }
+}
+
+function readBody(req: IncomingMessage, limit: number): Promise<Buffer> {
+  return new Promise<Buffer>((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let received = 0;
+    req.on("data", (chunk: Buffer) => {
+      received += chunk.byteLength;
+      if (received > limit) {
+        req.destroy();
+        reject(new Error(`payload too large (>${limit} bytes)`));
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on("end", () => resolve(Buffer.concat(chunks)));
+    req.on("error", reject);
+  });
+}
