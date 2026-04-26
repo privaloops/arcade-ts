@@ -34,7 +34,7 @@ import {
   type GamepadMapping,
 } from "@sprixe/engine/input/input";
 
-type TabId = "display" | "audio" | "controls" | "wifi" | "roms" | "about" | "back";
+type TabId = "display" | "audio" | "controls" | "wifi" | "roms" | "system" | "about" | "back";
 
 interface TabDef {
   id: TabId;
@@ -68,6 +68,18 @@ export interface StorageBinding {
   estimate: () => Promise<{ usage: number; quota: number }>;
 }
 
+/**
+ * System tab — host-level actions (reload UI / reboot / shutdown).
+ * reloadUI is always available (browser API); reboot and shutdown
+ * are only meaningful when the bridge is wired, so the bindings are
+ * optional and the buttons render disabled when missing.
+ */
+export interface SystemBinding {
+  reloadUI: () => void;
+  reboot?: () => Promise<void>;
+  shutdown?: () => Promise<void>;
+}
+
 export interface SettingsScreenOptions {
   settings: SettingsStore;
   /** Fired when the user presses Back or picks 'Close'. */
@@ -77,6 +89,7 @@ export interface SettingsScreenOptions {
   controls?: ControlsBinding;
   network?: NetworkBinding;
   storage?: StorageBinding;
+  system?: SystemBinding;
 }
 
 export class SettingsScreen {
@@ -88,6 +101,7 @@ export class SettingsScreen {
   private readonly controls: ControlsBinding | undefined;
   private readonly network: NetworkBinding | undefined;
   private readonly storage: StorageBinding | undefined;
+  private readonly system: SystemBinding | undefined;
   private readonly tabs: TabDef[];
   private readonly tabNav: HTMLDivElement;
   private readonly tabContent: HTMLDivElement;
@@ -101,6 +115,7 @@ export class SettingsScreen {
     this.controls = options.controls;
     this.network = options.network;
     this.storage = options.storage;
+    this.system = options.system;
 
     this.root = document.createElement("div");
     this.root.className = "af-settings-screen";
@@ -137,6 +152,7 @@ export class SettingsScreen {
       { id: "controls", label: "Controls", render: (r) => this.renderControls(r) },
       { id: "wifi",     label: "Wifi",     render: (r) => this.renderWifi(r) },
       { id: "roms",     label: "ROMs",     render: (r) => this.renderRoms(r) },
+      { id: "system",   label: "System",   render: (r) => this.renderSystem(r) },
       { id: "about",    label: "About",    render: (r) => this.renderAbout(r) },
       // Discoverable exit — gamepad users get a visible "Back" entry
       // they can land on with left/right and press confirm. Click from
@@ -306,6 +322,59 @@ export class SettingsScreen {
   private close(): void {
     this.unmount();
     this.onClose();
+  }
+
+  // ── System tab ──────────────────────────────────────────────────
+  private renderSystem(root: HTMLElement): void {
+    const wrap = document.createElement("div");
+    wrap.className = "af-settings-system-pane";
+    wrap.setAttribute("data-testid", "settings-system-pane");
+
+    const note = document.createElement("p");
+    note.className = "af-settings-system-note";
+    note.textContent = this.system?.reboot
+      ? "Host actions go through the local Sprixe Bridge."
+      : "Reboot and Shutdown require the Sprixe Bridge (Pi only).";
+    wrap.appendChild(note);
+
+    const reload = document.createElement("button");
+    reload.type = "button";
+    reload.className = "af-settings-btn";
+    reload.setAttribute("data-testid", "settings-system-reload");
+    reload.textContent = "↻ Reload UI";
+    reload.addEventListener("click", () => {
+      if (this.system) this.system.reloadUI();
+      else window.location.reload();
+    });
+    wrap.appendChild(reload);
+
+    const reboot = document.createElement("button");
+    reboot.type = "button";
+    reboot.className = "af-settings-btn";
+    reboot.setAttribute("data-testid", "settings-system-reboot");
+    reboot.textContent = "⟳ Reboot";
+    reboot.disabled = !this.system?.reboot;
+    reboot.addEventListener("click", () => {
+      if (!this.system?.reboot) return;
+      if (!confirm("Reboot the system?")) return;
+      void this.system.reboot();
+    });
+    wrap.appendChild(reboot);
+
+    const shutdown = document.createElement("button");
+    shutdown.type = "button";
+    shutdown.className = "af-settings-btn af-settings-btn--danger";
+    shutdown.setAttribute("data-testid", "settings-system-shutdown");
+    shutdown.textContent = "⏻ Shutdown";
+    shutdown.disabled = !this.system?.shutdown;
+    shutdown.addEventListener("click", () => {
+      if (!this.system?.shutdown) return;
+      if (!confirm("Shut down the system?")) return;
+      void this.system.shutdown();
+    });
+    wrap.appendChild(shutdown);
+
+    root.appendChild(wrap);
   }
 
   /**

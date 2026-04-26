@@ -1302,6 +1302,25 @@ html, body {
   color: var(--af-accent-warm);
 }
 
+.af-settings-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.af-settings-system-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 8px 0;
+}
+
+.af-settings-system-note {
+  margin: 0 0 8px;
+  color: var(--af-text-secondary);
+  font-size: 0.9rem;
+}
+
 /* --- Letter wheel --- */
 
 .af-letter-wheel {

@@ -27,7 +27,22 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { spawn } from "node:child_process";
 import { MameProcess, type ExitReason } from "./mame.js";
+
+export type SystemRunner = (cmd: string, args: readonly string[]) => Promise<void>;
+
+const defaultSystemRunner: SystemRunner = (cmd, args) =>
+  new Promise<void>((resolve, reject) => {
+    const proc = spawn(cmd, [...args], { stdio: "ignore", detached: true });
+    proc.on("error", reject);
+    proc.on("exit", (code) =>
+      code === 0 ? resolve() : reject(new Error(`${cmd} exited with code ${code}`))
+    );
+    // Detach so the bridge can return its HTTP response before the
+    // shutdown actually severs the connection.
+    proc.unref();
+  });
 
 export interface BridgeServerOptions {
   /** Listening port. Defaults to 7777. */
@@ -36,6 +51,8 @@ export interface BridgeServerOptions {
   romDir?: string;
   /** Inject a custom MameProcess for tests. */
   mame?: MameProcess;
+  /** Inject a custom system command runner for tests (reboot/poweroff). */
+  systemRunner?: SystemRunner;
 }
 
 export type BridgeEvent =
@@ -50,6 +67,7 @@ export class BridgeServer {
   readonly romDir: string;
 
   private readonly mame: MameProcess;
+  private readonly systemRunner: SystemRunner;
   private readonly sseClients = new Set<ServerResponse>();
   private server: Server | null = null;
   private currentGameId: string | null = null;
@@ -58,6 +76,7 @@ export class BridgeServer {
     this.port = options.port ?? 7777;
     this.romDir = options.romDir ?? "/tmp/sprixe-roms";
     this.mame = options.mame ?? new MameProcess();
+    this.systemRunner = options.systemRunner ?? defaultSystemRunner;
     this.mame.onExit((reason) => this.handleMameExit(reason));
   }
 
@@ -111,7 +130,33 @@ export class BridgeServer {
       this.attachSseClient(res);
       return;
     }
+    if (req.method === "POST" && url === "/system/reboot") {
+      await this.runSystem(res, ["sudo", "/usr/bin/systemctl", "reboot"]);
+      return;
+    }
+    if (req.method === "POST" && url === "/system/poweroff") {
+      await this.runSystem(res, ["sudo", "/usr/bin/systemctl", "poweroff"]);
+      return;
+    }
     this.sendJson(res, 404, { error: "not found" });
+  }
+
+  private async runSystem(res: ServerResponse, argv: readonly string[]): Promise<void> {
+    const [cmd, ...args] = argv;
+    if (!cmd) {
+      this.sendJson(res, 500, { error: "empty command" });
+      return;
+    }
+    // Reply before launching: reboot/poweroff sever the connection
+    // mid-flight, so the frontend would otherwise see a network error
+    // even though the action succeeded.
+    this.sendJson(res, 202, { ok: true });
+    try {
+      await this.systemRunner(cmd, args);
+    } catch (err) {
+      // Response already sent — log only.
+      console.error(`[sprixe-bridge] ${argv.join(" ")} failed:`, err);
+    }
   }
 
   private async handleLaunch(req: IncomingMessage, res: ServerResponse): Promise<void> {

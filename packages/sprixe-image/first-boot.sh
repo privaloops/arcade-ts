@@ -129,6 +129,14 @@ sudo -u sprixe npm -w @sprixe/bridge --prefix "$SPRIXE_DIR" run build
 # ROM staging dir owned by sprixe so the bridge can write without sudo.
 install -d -m 755 -o sprixe -g sprixe /home/sprixe/sprixe-roms
 
+# Sudoers rule so the bridge (running as sprixe) can ask systemd to
+# reboot or power off without prompting for a password. Scoped to the
+# two specific commands — no broader privilege escalation.
+cat > /etc/sudoers.d/sprixe-bridge <<'SUDO'
+sprixe ALL=(root) NOPASSWD: /usr/bin/systemctl reboot, /usr/bin/systemctl poweroff
+SUDO
+chmod 440 /etc/sudoers.d/sprixe-bridge
+
 # Systemd unit: starts the bridge after the network is up, restarts
 # on crash, runs as the sprixe user (no root surface).
 cat > /etc/systemd/system/sprixe-bridge.service <<'UNIT'

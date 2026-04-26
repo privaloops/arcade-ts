@@ -78,6 +78,20 @@ export class BridgeClient {
     }
   }
 
+  /** Ask the bridge to reboot the host (Pi). The HTTP response comes
+   * back before the system actually shuts down, so the caller can
+   * surface a "Rebooting..." toast before connectivity disappears. */
+  async reboot(): Promise<void> {
+    const res = await fetch(`${this.baseUrl}/system/reboot`, { method: "POST" });
+    if (!res.ok) throw new Error(`bridge /system/reboot failed: ${res.status}`);
+  }
+
+  /** Same as reboot() but powers the host off. */
+  async poweroff(): Promise<void> {
+    const res = await fetch(`${this.baseUrl}/system/poweroff`, { method: "POST" });
+    if (!res.ok) throw new Error(`bridge /system/poweroff failed: ${res.status}`);
+  }
+
   /**
    * Subscribe to MAME lifecycle events via SSE. Returns a handle the
    * caller closes when it stops caring (e.g. on shutdown). EventSource
