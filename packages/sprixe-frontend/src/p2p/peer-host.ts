@@ -189,7 +189,6 @@ export class PeerHost {
 
   private handleConnection(conn: DataConnection): void {
     this.connections.add(conn);
-    for (const l of this.connectionListeners) l(conn);
 
     const connAny = conn as unknown as {
       on: (event: string, cb: (...args: unknown[]) => void) => void;
@@ -204,6 +203,17 @@ export class PeerHost {
     connAny.on("data", onData);
     connAny.on("close", onClose);
     connAny.on("error", onError);
+
+    // Defer connectionListeners until the data channel is actually
+    // open. PeerJS fires 'connection' as soon as the signalling answer
+    // is exchanged, but the underlying RTCDataChannel may still be in
+    // 'connecting'. Sending before 'open' silently fails, which means
+    // StateSync.broadcastFullState() (wired through onConnection) was
+    // dropping the initial state and leaving the phone with default
+    // disabled controls.
+    connAny.on("open", () => {
+      for (const l of this.connectionListeners) l(conn);
+    });
 
     this.connCleanups.set(conn, () => {
       try {

@@ -12,7 +12,7 @@
  * once reconnection is wired.
  */
 
-export type QueueStatus = "queued" | "uploading" | "done" | "error" | "aborted";
+export type QueueStatus = "queued" | "uploading" | "processing" | "done" | "error" | "aborted";
 
 export interface QueueEntry {
   id: string;
@@ -137,7 +137,7 @@ export class UploadTab {
     const idx = this.entries.findIndex((e) => e.id === id);
     if (idx < 0) return false;
     const entry = this.entries[idx]!;
-    if (entry.status === "uploading") return false;
+    if (entry.status === "uploading" || entry.status === "processing") return false;
     this.entries.splice(idx, 1);
     this.onRemove?.(entry);
     this.notify();
@@ -187,7 +187,7 @@ export class UploadTab {
       removeBtn.dataset.entryId = entry.id;
       removeBtn.setAttribute("data-testid", "upload-entry-remove");
       removeBtn.textContent = "✕";
-      removeBtn.disabled = entry.status === "uploading";
+      removeBtn.disabled = entry.status === "uploading" || entry.status === "processing";
       removeBtn.addEventListener("click", () => this.remove(entry.id));
       li.appendChild(removeBtn);
 
@@ -203,10 +203,11 @@ export class UploadTab {
 
 function formatStatus(entry: QueueEntry): string {
   switch (entry.status) {
-    case "queued":    return "Queued";
-    case "uploading": return `${Math.round((entry.sent * 100) / Math.max(1, entry.total))}%`;
-    case "done":      return "✓ Done";
-    case "error":     return `Error: ${entry.error ?? "unknown"}`;
-    case "aborted":   return "Aborted";
+    case "queued":     return "Queued";
+    case "uploading":  return `${Math.round((entry.sent * 100) / Math.max(1, entry.total))}%`;
+    case "processing": return "Processing…";
+    case "done":       return "✓ Done";
+    case "error":      return `Error: ${entry.error ?? "unknown"}`;
+    case "aborted":    return "Aborted";
   }
 }

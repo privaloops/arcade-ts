@@ -151,22 +151,31 @@ export class WheelList {
       }
     }
 
-    // Diff against the DOM — keyed by game index so items keep identity.
-    const existingNodes = new Map<number, HTMLElement>();
+    // Diff against the DOM — keyed by gameId so insertions/reorders
+    // (e.g. after a phone upload re-sorts the catalogue) carry each
+    // node's content with it instead of recycling stale marquee/title
+    // into a different game's slot.
+    const existingNodes = new Map<string, HTMLElement>();
     for (const el of Array.from(this.stage.querySelectorAll<HTMLElement>(".af-wheel-item"))) {
-      existingNodes.set(Number(el.dataset.index), el);
+      const id = el.dataset.gameId;
+      if (id) existingNodes.set(id, el);
     }
 
-    for (const [idx, el] of existingNodes) {
-      if (!desired.has(idx)) el.remove();
+    const desiredGameIds = new Set<string>();
+    for (const idx of desired.keys()) desiredGameIds.add(this.items[idx]!.id);
+
+    for (const [gameId, el] of existingNodes) {
+      if (!desiredGameIds.has(gameId)) el.remove();
     }
 
     for (const [idx, delta] of desired) {
       const game = this.items[idx]!;
-      let el = existingNodes.get(idx);
+      let el = existingNodes.get(game.id);
       if (!el) {
         el = this.createItem(game, idx);
         this.stage.appendChild(el);
+      } else {
+        el.dataset.index = String(idx);
       }
       this.positionItem(el, delta);
     }

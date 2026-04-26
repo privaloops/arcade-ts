@@ -835,6 +835,28 @@ html, body {
   color: var(--af-accent-warm);
 }
 
+.af-upload-entry[data-status="processing"] .af-upload-entry-status {
+  color: var(--af-text-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.af-upload-entry[data-status="processing"] .af-upload-entry-status::before {
+  content: "";
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--af-text-muted);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: af-upload-spin 0.7s linear infinite;
+}
+
+@keyframes af-upload-spin {
+  to { transform: rotate(360deg); }
+}
+
 /* --- Remote tab --- */
 
 .af-remote-tab {

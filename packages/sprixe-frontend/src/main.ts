@@ -197,11 +197,41 @@ function startBrowser(
   settings.onChange(applyDisplayFilters);
 
   let contextMenu: ContextMenu | null = null;
+  // Drained catalogues fall back to the QR-code EmptyState so the user
+  // always has a path back to uploading. Lazily created the first time
+  // the list goes empty.
+  let emptyOverlay: EmptyState | null = null;
+
+  function syncHomeVisibility(): void {
+    // Only flip visibility when the home screen is actually the active
+    // surface — playing / settings / overlays manage their own hidden
+    // flags and shouldn't be perturbed by a catalogue change underneath.
+    if (playing) return;
+    const isEmpty = browser.getAllGames().length === 0;
+    if (isEmpty) {
+      if (!emptyOverlay) {
+        emptyOverlay = new EmptyState(app!);
+        void emptyOverlay.setRoomId(host.roomId);
+      }
+      browser.root.hidden = true;
+      hints.root.hidden = true;
+    } else {
+      if (emptyOverlay) {
+        emptyOverlay.unmount();
+        emptyOverlay = null;
+      }
+      if (!overlay && !settingsScreen) {
+        browser.root.hidden = false;
+        hints.root.hidden = false;
+      }
+    }
+  }
 
   function refreshCatalogueFromDb(): Promise<void> {
     return db.list().then((records) => {
       const refreshed = records.map(romRecordToGameEntry);
       browser.setGames(refreshed);
+      syncHomeVisibility();
     });
   }
 
@@ -478,6 +508,7 @@ function startBrowser(
           await db.delete(id);
           const refreshed = (await db.list()).map(romRecordToGameEntry);
           browser.setGames(refreshed);
+          syncHomeVisibility();
           toast.show("success", `Deleted ${id}`);
         },
         estimate: async () => {
@@ -491,6 +522,7 @@ function startBrowser(
       onClose: () => {
         settingsScreen = null;
         browser.root.hidden = false;
+        syncHomeVisibility();
       },
     });
   }
@@ -517,6 +549,7 @@ function startBrowser(
       const { record } = await pipeline.process(file);
       const refreshed = (await db.list()).map(romRecordToGameEntry);
       browser.setGames(refreshed);
+      syncHomeVisibility();
       toast.show("success", `Added ${record.id}`);
       try {
         (conn as unknown as { send: (m: unknown) => void }).send({
@@ -592,8 +625,12 @@ async function bootKiosk(): Promise<void> {
     };
     hostReady.catch(showServerDown);
     // When a ROM lands, swap the empty state for the real browser.
+    // The unsubscribe is captured so the empty-state handler dies the
+    // moment startBrowser takes over — otherwise it keeps firing on
+    // every subsequent upload, spawning duplicate BrowserScreens and
+    // re-running pipeline.process for nothing.
     const pipeline = new RomPipeline({ db });
-    host.onFile(async (file, conn) => {
+    const unsubscribe = host.onFile(async (file, conn) => {
       try {
         const { record } = await pipeline.process(file);
         const refreshed = (await db.list()).map(romRecordToGameEntry);
@@ -604,6 +641,7 @@ async function bootKiosk(): Promise<void> {
               type: "complete", name: file.name, game: record.id, system: record.system,
             });
           } catch { /* ignore */ }
+          unsubscribe();
           empty.unmount();
           startBrowser(refreshed, db, host, settings, toast);
         }

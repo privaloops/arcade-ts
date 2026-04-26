@@ -24,6 +24,8 @@ export interface PhonePageOptions {
    * from `sendFactory` lets the state-sync connection stay alive even
    * when an upload attempt fails. */
   uploadSendFactory?: () => ResumableSender;
+  /** Override the ACK timeout in tests (default 30s in production). */
+  ackTimeoutMs?: number;
 }
 
 export interface TransferClient {
@@ -56,6 +58,19 @@ export class PhonePage {
   private readonly processing = new Set<string>();
   private connectPromise: Promise<void> | null = null;
   private activeTab: Tab = "upload";
+  // queueAll uploads serially, so at most one ACK can be pending at any
+  // time. The pendingAck handle lets subscribeKioskMessages route the
+  // matching 'complete' / 'error' message back to the awaiting uploadOne.
+  private pendingAck: {
+    name: string;
+    resolve: () => void;
+    reject: (err: Error) => void;
+  } | null = null;
+  /** Max time to wait for the kiosk's complete/error ACK after the file
+   * has fully drained from the WebRTC buffer. Surfaces stalled kiosks
+   * (or silently dead WebRTC channels) instead of leaving the entry
+   * stuck on "Processing…" forever. */
+  private readonly ackTimeoutMs: number;
 
   constructor(container: HTMLElement, options: PhonePageOptions) {
     this.root = document.createElement("div");
@@ -116,6 +131,7 @@ export class PhonePage {
       : new PeerSend({ roomId: options.roomId });
     this.uploadSendFactory = options.uploadSendFactory
       ?? (() => new PeerSend({ roomId: options.roomId }));
+    this.ackTimeoutMs = options.ackTimeoutMs ?? 30_000;
 
     this.uploadTab = new UploadTab(this.uploadPane, {
       onAdd: (entries) => this.queueAll(entries),
@@ -207,6 +223,14 @@ export class PhonePage {
         this.remoteTab.setVolume(msg.level);
       } else if (msg.type === "save-slots") {
         this.remoteTab.setSaveSlots(msg.slots);
+      } else if (msg.type === "complete") {
+        if (this.pendingAck && this.pendingAck.name === msg.name) {
+          this.pendingAck.resolve();
+        }
+      } else if (msg.type === "error") {
+        if (this.pendingAck && this.pendingAck.name === msg.name) {
+          this.pendingAck.reject(new Error(msg.error));
+        }
       }
     });
   }
@@ -264,11 +288,19 @@ export class PhonePage {
           this.uploadTab.updateEntry(entry.id, { sent, total });
         },
       });
+      // Bytes have left the device, but the kiosk still has to identify
+      // the ROM and persist it. Surface that work as "processing" and
+      // wait for the kiosk's protocol-level ACK before claiming "done"
+      // — otherwise a silently-dead WebRTC channel would leave the user
+      // believing a file landed when in fact nothing reached IndexedDB.
       this.uploadTab.updateEntry(entry.id, {
-        status: "done",
+        status: "processing",
         sent: entry.file.size,
         total: entry.file.size,
       });
+      this.setStatus(`${entry.name} sent — waiting for kiosk`);
+      await this.waitForAck(entry.name);
+      this.uploadTab.updateEntry(entry.id, { status: "done" });
       this.setStatus(`${entry.name} uploaded`);
     } catch (e) {
       this.uploadTab.updateEntry(entry.id, {
@@ -282,6 +314,31 @@ export class PhonePage {
 
   private setStatus(text: string): void {
     this.statusEl.textContent = text;
+  }
+
+  private waitForAck(name: string): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      const timer = window.setTimeout(() => {
+        if (this.pendingAck && this.pendingAck.name === name) {
+          this.pendingAck = null;
+          reject(new Error(`Kiosk did not acknowledge ${name} within ${Math.round(this.ackTimeoutMs / 1000)}s`));
+        }
+      }, this.ackTimeoutMs);
+
+      this.pendingAck = {
+        name,
+        resolve: () => {
+          clearTimeout(timer);
+          this.pendingAck = null;
+          resolve();
+        },
+        reject: (err: Error) => {
+          clearTimeout(timer);
+          this.pendingAck = null;
+          reject(err);
+        },
+      };
+    });
   }
 }
 
