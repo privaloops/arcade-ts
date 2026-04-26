@@ -38,6 +38,7 @@ import { SaveStateDB } from "./state/save-state-db";
 import { SaveStateController } from "./state/save-state-controller";
 import { crtFilterCss } from "./render/scaling";
 import { bootstrapDevRoms } from "./data/dev-roms";
+import { BridgeClient, type BridgeSubscription } from "./bridge/bridge-client";
 
 declare const __APP_VERSION__: string;
 
@@ -202,6 +203,29 @@ function startBrowser(
   // the list goes empty.
   let emptyOverlay: EmptyState | null = null;
 
+  // Bridge probe: if a local @sprixe/bridge daemon is reachable we
+  // route launches through it (native MAME on Pi). Otherwise we keep
+  // the embedded TS engine path — same UI, no separate build.
+  const bridge = new BridgeClient();
+  let bridgeAvailable = false;
+  let bridgeRunning = false;
+  let bridgeSubscription: BridgeSubscription | null = null;
+  void bridge.probe().then((ok) => {
+    bridgeAvailable = ok;
+    if (ok) {
+      console.log("[arcade] native bridge detected — launches will spawn MAME");
+      bridgeSubscription = bridge.subscribe((event) => {
+        if (event.type === "exited" || event.type === "error") {
+          if (event.type === "error") {
+            toast.show("error", `MAME: ${event.message}`);
+          }
+          bridgeRunning = false;
+          exitToMenu();
+        }
+      });
+    }
+  });
+
   function syncHomeVisibility(): void {
     // Only flip visibility when the home screen is actually the active
     // surface — playing / settings / overlays manage their own hidden
@@ -304,14 +328,47 @@ function startBrowser(
     stateSync.setState({ screen: "playing", paused: false });
   }
 
+  async function launchViaBridge(game: GameEntry, rec: RomRecord): Promise<void> {
+    bridgeRunning = true;
+    browser.root.hidden = true;
+    browser.getPreview().pauseVideo();
+    hints.root.hidden = true;
+    router.setMode("emu");
+    stateSync.setState({
+      screen: "playing",
+      game: game.id,
+      title: game.title,
+      paused: false,
+      volume: settings.get().audio.masterVolume,
+    });
+    db.markPlayed(game.id).catch((err) => {
+      console.warn(`[arcade] markPlayed(${game.id}) failed:`, err);
+    });
+    try {
+      await bridge.launch(game.id, rec.zipData);
+    } catch (e) {
+      bridgeRunning = false;
+      browser.root.hidden = false;
+      hints.root.hidden = false;
+      router.setMode("menu");
+      throw e;
+    }
+    // Resolved on /launch ack — actual exit comes via the SSE
+    // subscription which calls exitToMenu() when MAME quits.
+  }
+
   browser.getWheel().onSelect((game) => {
-    if (launching || playing || missingBios) return;
+    if (launching || playing || missingBios || bridgeRunning) return;
     launching = true;
     void (async () => {
       try {
         const rec = await db.get(game.id);
         if (!rec) {
           toast.show("error", `ROM "${game.id}" is missing from storage`);
+          return;
+        }
+        if (bridgeAvailable) {
+          await launchViaBridge(game, rec);
           return;
         }
         const screen = await PlayingScreen.create(app!, {
