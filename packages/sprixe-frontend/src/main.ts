@@ -592,8 +592,12 @@ async function bootKiosk(): Promise<void> {
     };
     hostReady.catch(showServerDown);
     // When a ROM lands, swap the empty state for the real browser.
+    // The unsubscribe is captured so the empty-state handler dies the
+    // moment startBrowser takes over — otherwise it keeps firing on
+    // every subsequent upload, spawning duplicate BrowserScreens and
+    // re-running pipeline.process for nothing.
     const pipeline = new RomPipeline({ db });
-    host.onFile(async (file, conn) => {
+    const unsubscribe = host.onFile(async (file, conn) => {
       try {
         const { record } = await pipeline.process(file);
         const refreshed = (await db.list()).map(romRecordToGameEntry);
@@ -604,6 +608,7 @@ async function bootKiosk(): Promise<void> {
               type: "complete", name: file.name, game: record.id, system: record.system,
             });
           } catch { /* ignore */ }
+          unsubscribe();
           empty.unmount();
           startBrowser(refreshed, db, host, settings, toast);
         }
