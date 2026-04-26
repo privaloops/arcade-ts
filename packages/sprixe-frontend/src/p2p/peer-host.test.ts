@@ -128,7 +128,7 @@ describe("PeerHost", () => {
   });
 
   describe("incoming connections", () => {
-    it("invokes onConnection on every new data channel", async () => {
+    it("invokes onConnection on every new data channel once it opens", async () => {
       const { factory, instances } = makePeerFactory();
       const host = new PeerHost({ roomId: "abc", peerFactory: factory });
       const p = host.start();
@@ -143,8 +143,15 @@ describe("PeerHost", () => {
       instances[0]!.emit("connection", conn1 as unknown as DataConnection);
       instances[0]!.emit("connection", conn2 as unknown as DataConnection);
 
-      expect(cb).toHaveBeenCalledTimes(2);
+      // Listeners only fire once the data channel is actually open —
+      // sending before that would silently drop the broadcast.
+      expect(cb).toHaveBeenCalledTimes(0);
       expect(host.getConnectionCount()).toBe(2);
+
+      conn1.emit("open");
+      conn2.emit("open");
+
+      expect(cb).toHaveBeenCalledTimes(2);
     });
 
     it("getConnectionCount drops back to 0 when peers close", async () => {
