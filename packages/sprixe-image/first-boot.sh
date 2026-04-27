@@ -139,6 +139,23 @@ sudo -u sprixe npm -w @sprixe/bridge --prefix "$SPRIXE_DIR" run build
 # ROM staging dir owned by sprixe so the bridge can write without sudo.
 install -d -m 755 -o sprixe -g sprixe /home/sprixe/sprixe-roms
 
+# Chromium enterprise policy: pre-grant the Local Network Access
+# permission so the kiosk page can fetch http://127.0.0.1:7777 (the
+# bridge) without the "wants to access other apps and services on
+# this device" prompt that ships with Chrome 130+. The kiosk has no
+# pointer to dismiss it; without the policy the bridge is silently
+# unreachable and launches fall back to the embedded TS engine.
+# Both keys cover the legacy and new policy names so the file works
+# across the rolling Chromium versions Debian ships.
+install -d -m 755 /etc/chromium/policies/managed
+cat > /etc/chromium/policies/managed/sprixe-bridge.json <<'POLICY'
+{
+  "LocalNetworkAccessAllowedForUrls": ["https://frontend.sprixe.dev/*"],
+  "InsecurePrivateNetworkRequestsAllowedForUrls": ["https://frontend.sprixe.dev/*"]
+}
+POLICY
+chmod 644 /etc/chromium/policies/managed/sprixe-bridge.json
+
 # Sudoers rule so the bridge (running as sprixe) can ask systemd to
 # reboot or power off without prompting for a password. Scoped to the
 # two specific commands — no broader privilege escalation.
