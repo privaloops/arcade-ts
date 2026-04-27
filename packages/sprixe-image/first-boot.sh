@@ -197,8 +197,17 @@ usermod -aG input sprixe
 cat > /etc/udev/rules.d/60-sprixe-uinput.rules <<'UDEV'
 KERNEL=="uinput", GROUP="input", MODE="0660", OPTIONS+="static_node=uinput"
 UDEV
+# /dev/uinput only exists once the kernel module is loaded. Load it
+# now and persist via modules-load.d so it comes back after reboot.
+modprobe uinput
+echo uinput > /etc/modules-load.d/uinput.conf
 udevadm control --reload-rules
-udevadm trigger --name-match=uinput
+# `udevadm trigger --name-match=uinput` fails with "Invalid argument"
+# on Debian if the trigger runs before the static node settles —
+# falling back to `--subsystem-match=misc` which is the bus uinput
+# lives on. Tolerate failures so a transient udev hiccup doesn't
+# abort the whole provisioner.
+udevadm trigger --subsystem-match=misc 2>/dev/null || true
 
 cat > /etc/systemd/system/ydotoold.service <<'UNIT'
 [Unit]
