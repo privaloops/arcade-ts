@@ -26,7 +26,8 @@
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { homedir } from "node:os";
 import { spawn } from "node:child_process";
 import { MameProcess, type ExitReason } from "./mame.js";
 import { InputInjector, type RemoteAction } from "./input.js";
@@ -50,6 +51,9 @@ export interface BridgeServerOptions {
   port?: number;
   /** Where ROMs are written before MAME picks them up. */
   romDir?: string;
+  /** Where to write MAME's default.cfg when /config is POSTed.
+   * Defaults to ~/.mame/cfg/default.cfg of the bridge user. */
+  mameCfgPath?: string;
   /** Inject a custom MameProcess for tests. */
   mame?: MameProcess;
   /** Inject a custom system command runner for tests (reboot/poweroff). */
@@ -68,6 +72,7 @@ const MAX_ROM_BYTES = 64 * 1024 * 1024; // 64 MiB — biggest CPS / Neo-Geo ZIPs
 export class BridgeServer {
   readonly port: number;
   readonly romDir: string;
+  readonly mameCfgPath: string;
 
   private readonly mame: MameProcess;
   private readonly systemRunner: SystemRunner;
@@ -79,6 +84,7 @@ export class BridgeServer {
   constructor(options: BridgeServerOptions = {}) {
     this.port = options.port ?? 7777;
     this.romDir = options.romDir ?? "/tmp/sprixe-roms";
+    this.mameCfgPath = options.mameCfgPath ?? join(homedir(), ".mame", "cfg", "default.cfg");
     this.mame = options.mame ?? new MameProcess();
     this.systemRunner = options.systemRunner ?? defaultSystemRunner;
     this.input = options.input ?? new InputInjector();
@@ -147,7 +153,32 @@ export class BridgeServer {
       await this.handleInput(req, res);
       return;
     }
+    if (req.method === "POST" && url === "/config") {
+      await this.handleConfig(req, res);
+      return;
+    }
     this.sendJson(res, 404, { error: "not found" });
+  }
+
+  private async handleConfig(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    let body: Buffer;
+    try {
+      body = await readBody(req, 256 * 1024); // 256 KiB is way more than any sane MAME cfg
+    } catch (err) {
+      this.sendJson(res, 413, { error: err instanceof Error ? err.message : "body read failed" });
+      return;
+    }
+    if (body.byteLength === 0) {
+      this.sendJson(res, 400, { error: "empty config body" });
+      return;
+    }
+    try {
+      await mkdir(dirname(this.mameCfgPath), { recursive: true });
+      await writeFile(this.mameCfgPath, body);
+      this.sendJson(res, 200, { ok: true, path: this.mameCfgPath });
+    } catch (err) {
+      this.sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
+    }
   }
 
   private async handleInput(req: IncomingMessage, res: ServerResponse): Promise<void> {

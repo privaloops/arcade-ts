@@ -68,6 +68,22 @@ export class BridgeClient {
     }
   }
 
+  /**
+   * Push a default.cfg blob to MAME's config dir on the bridge. Used
+   * to project the user's Sprixe controls mapping onto MAME inputs
+   * before each launch — the page calls config() with the serialized
+   * XML, then launch() right after, so MAME starts with the right
+   * bindings.
+   */
+  async config(mameCfgXml: string): Promise<void> {
+    const res = await fetch(`${this.baseUrl}/config`, {
+      method: "POST",
+      headers: { "Content-Type": "application/xml" },
+      body: mameCfgXml,
+    });
+    if (!res.ok) throw new Error(`bridge /config failed: ${res.status}`);
+  }
+
   /** Ask the bridge to SIGTERM the running MAME (no-op if nothing runs). */
   async quit(): Promise<void> {
     try {

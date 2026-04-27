@@ -23,6 +23,7 @@ interface Harness {
   server: BridgeServer;
   baseUrl: string;
   romDir: string;
+  mameCfgPath: string;
   spawned: FakeProcess[];
   systemCalls: { cmd: string; args: string[] }[];
   inputCalls: { cmd: string; args: string[] }[];
@@ -46,9 +47,11 @@ async function makeHarness(): Promise<Harness> {
   };
   const mame = new MameProcess({ spawner });
   // Port 0 = let the OS pick a free one so parallel tests don't collide.
+  const mameCfgPath = join(romDir, "mame", "cfg", "default.cfg");
   const server = new BridgeServer({
     port: 0,
     romDir,
+    mameCfgPath,
     mame,
     systemRunner,
     input: new InputInjector({ runner: inputRunner }),
@@ -61,6 +64,7 @@ async function makeHarness(): Promise<Harness> {
     server,
     baseUrl: `http://127.0.0.1:${actualPort}`,
     romDir,
+    mameCfgPath,
     spawned,
     systemCalls,
     inputCalls,
@@ -227,6 +231,25 @@ describe("BridgeServer", () => {
       headers: { "Content-Type": "application/json" },
       body: "not json",
     });
+    expect(res.status).toBe(400);
+  });
+
+  it("POST /config writes the body to the configured cfg path", async () => {
+    const xml = '<?xml version="1.0"?><mameconfig version="10"></mameconfig>\n';
+    const res = await fetch(`${h.baseUrl}/config`, {
+      method: "POST",
+      headers: { "Content-Type": "application/xml" },
+      body: xml,
+    });
+    expect(res.status).toBe(200);
+    const written = await import("node:fs/promises").then((m) =>
+      m.readFile(h.mameCfgPath, "utf8")
+    );
+    expect(written).toBe(xml);
+  });
+
+  it("POST /config rejects an empty body with 400", async () => {
+    const res = await fetch(`${h.baseUrl}/config`, { method: "POST" });
     expect(res.status).toBe(400);
   });
 });

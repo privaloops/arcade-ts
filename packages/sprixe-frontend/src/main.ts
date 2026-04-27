@@ -39,6 +39,7 @@ import { SaveStateController } from "./state/save-state-controller";
 import { crtFilterCss } from "./render/scaling";
 import { bootstrapDevRoms } from "./data/dev-roms";
 import { BridgeClient, type BridgeSubscription } from "./bridge/bridge-client";
+import { serializeMappingToMameCfg } from "./bridge/mame-cfg";
 
 declare const __APP_VERSION__: string;
 
@@ -344,6 +345,16 @@ function startBrowser(
     db.markPlayed(game.id).catch((err) => {
       console.warn(`[arcade] markPlayed(${game.id}) failed:`, err);
     });
+    // Push the user's Sprixe controls mapping into MAME's default.cfg
+    // before spawning. Failures here are non-fatal — MAME will fall
+    // back to its compiled-in defaults rather than blocking the
+    // launch.
+    try {
+      const cfg = serializeMappingToMameCfg(loadMapping());
+      await bridge.config(cfg);
+    } catch (err) {
+      console.warn("[arcade] bridge.config failed, MAME will use defaults:", err);
+    }
     try {
       await bridge.launch(game.id, rec.zipData);
     } catch (e) {
