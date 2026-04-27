@@ -6,6 +6,7 @@
 
 import { BridgeServer } from "./server.js";
 import { MameProcess } from "./mame.js";
+import { InputInjector } from "./input.js";
 
 const port = Number(process.env.SPRIXE_BRIDGE_PORT ?? "7777");
 const romDir = process.env.SPRIXE_BRIDGE_ROM_DIR ?? "/tmp/sprixe-roms";
@@ -14,8 +15,17 @@ const romDir = process.env.SPRIXE_BRIDGE_ROM_DIR ?? "/tmp/sprixe-roms";
 // systemd even though the binary is installed. Default to the
 // canonical Debian path; override via env var on other distros.
 const mameBin = process.env.SPRIXE_BRIDGE_MAME_BIN ?? "/usr/games/mame";
+// ydotool is compiled from source on the Pi (no Debian package), and
+// cmake installs it to /usr/local/bin. Hardcoding the absolute path
+// avoids depending on systemd's PATH which can vary across distros.
+const ydotoolBin = process.env.SPRIXE_BRIDGE_YDOTOOL_BIN ?? "/usr/local/bin/ydotool";
 
-const server = new BridgeServer({ port, romDir, mame: new MameProcess({ bin: mameBin }) });
+const server = new BridgeServer({
+  port,
+  romDir,
+  mame: new MameProcess({ bin: mameBin }),
+  input: new InputInjector({ bin: ydotoolBin }),
+});
 
 await server.start();
 console.log(`[sprixe-bridge] listening on http://127.0.0.1:${port} (romDir: ${romDir})`);

@@ -44,7 +44,9 @@ apt-get install -y --no-install-recommends \
     npm \
     git \
     wayvnc \
-    ydotool
+    build-essential \
+    cmake \
+    scdoc
 
 # ── /home/sprixe/start-kiosk.sh — the cage wrapper ──────────────────
 # `-d` makes cage exit when the inner command exits, so the
@@ -170,6 +172,20 @@ cat > /etc/chromium/policies/managed/sprixe-bridge.json <<'POLICY'
 POLICY
 chmod 644 /etc/chromium/policies/managed/sprixe-bridge.json
 
+# ydotool isn't packaged on Debian Trixie / current RPi OS. Compile
+# from source — small C++ project, ~30 s on a Pi 5. Skipped if the
+# binaries already exist (idempotent re-runs).
+if ! command -v ydotool >/dev/null 2>&1; then
+    YDOTOOL_SRC=/tmp/ydotool-build
+    rm -rf "$YDOTOOL_SRC"
+    git clone --depth 1 https://github.com/ReimuNotMoe/ydotool.git "$YDOTOOL_SRC"
+    mkdir -p "$YDOTOOL_SRC/build"
+    cmake -S "$YDOTOOL_SRC" -B "$YDOTOOL_SRC/build" -DCMAKE_BUILD_TYPE=Release
+    cmake --build "$YDOTOOL_SRC/build" --parallel
+    cmake --install "$YDOTOOL_SRC/build"
+    ldconfig
+fi
+
 # ydotoold + uinput access for synthesized keystrokes from the phone
 # remote. The bridge calls `ydotool key ...` which requires a running
 # ydotoold daemon owning a writable handle on /dev/uinput. We run the
@@ -193,7 +209,7 @@ After=systemd-user-sessions.service
 Type=simple
 User=sprixe
 Group=input
-ExecStart=/usr/bin/ydotoold --socket-path=/run/sprixe/ydotoold.socket --socket-perm=0660
+ExecStart=/usr/local/bin/ydotoold --socket-path=/run/sprixe/ydotoold.socket --socket-perm=0660
 RuntimeDirectory=sprixe
 RuntimeDirectoryMode=0750
 Restart=on-failure
@@ -238,6 +254,7 @@ Environment=WAYLAND_DISPLAY=wayland-0
 # ydotool reads this to find the ydotoold socket; matches the path
 # the ydotoold.service unit creates above.
 Environment=YDOTOOL_SOCKET=/run/sprixe/ydotoold.socket
+Environment=SPRIXE_BRIDGE_YDOTOOL_BIN=/usr/local/bin/ydotool
 Restart=on-failure
 RestartSec=5
 
