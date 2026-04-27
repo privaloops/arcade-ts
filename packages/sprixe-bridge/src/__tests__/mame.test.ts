@@ -6,9 +6,13 @@ class FakeProcess implements SpawnedProcessLike {
   killed = false;
   killSignal: NodeJS.Signals | undefined;
   private exitHandler: ((code: number | null, signal: NodeJS.Signals | null) => void) | null = null;
+  private errorHandler: ((err: Error) => void) | null = null;
 
-  on(event: "exit", cb: (code: number | null, signal: NodeJS.Signals | null) => void): void {
-    if (event === "exit") this.exitHandler = cb;
+  on(event: "exit", cb: (code: number | null, signal: NodeJS.Signals | null) => void): void;
+  on(event: "error", cb: (err: Error) => void): void;
+  on(event: string, cb: (...args: unknown[]) => void): void {
+    if (event === "exit") this.exitHandler = cb as (c: number | null, s: NodeJS.Signals | null) => void;
+    if (event === "error") this.errorHandler = cb as (e: Error) => void;
   }
 
   kill(signal?: NodeJS.Signals): boolean {
@@ -19,6 +23,10 @@ class FakeProcess implements SpawnedProcessLike {
 
   fireExit(code: number | null, signal: NodeJS.Signals | null = null): void {
     this.exitHandler?.(code, signal);
+  }
+
+  fireError(err: Error): void {
+    this.errorHandler?.(err);
   }
 }
 
@@ -91,6 +99,32 @@ describe("MameProcess", () => {
       error: expect.objectContaining({ message: "ENOENT" }),
     });
     expect(mame.isRunning()).toBe(false);
+  });
+
+  it("translates async ENOENT 'error' events into spawn-error (not unhandled)", () => {
+    const { spawner, instances } = makeSpawner();
+    const mame = new MameProcess({ spawner });
+    const cb = vi.fn();
+    mame.onExit(cb);
+    mame.start({ gameId: "sf2", romPath: "/tmp/roms" });
+    // Node fires 'error' asynchronously when the binary is missing.
+    instances[0]!.fireError(new Error("spawn mame ENOENT"));
+    expect(cb).toHaveBeenCalledWith({
+      kind: "spawn-error",
+      error: expect.objectContaining({ message: "spawn mame ENOENT" }),
+    });
+    expect(mame.isRunning()).toBe(false);
+  });
+
+  it("ignores 'exit' that fires after an 'error' (Node sometimes emits both)", () => {
+    const { spawner, instances } = makeSpawner();
+    const mame = new MameProcess({ spawner });
+    const cb = vi.fn();
+    mame.onExit(cb);
+    mame.start({ gameId: "sf2", romPath: "/tmp/roms" });
+    instances[0]!.fireError(new Error("ENOENT"));
+    instances[0]!.fireExit(null);
+    expect(cb).toHaveBeenCalledTimes(1);
   });
 
   it("can relaunch after the previous instance exits", () => {

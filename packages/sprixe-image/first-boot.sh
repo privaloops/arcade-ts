@@ -193,6 +193,7 @@ WorkingDirectory=/opt/sprixe/packages/sprixe-bridge
 ExecStart=/usr/bin/node /opt/sprixe/packages/sprixe-bridge/dist/index.js
 Environment=SPRIXE_BRIDGE_PORT=7777
 Environment=SPRIXE_BRIDGE_ROM_DIR=/home/sprixe/sprixe-roms
+Environment=SPRIXE_BRIDGE_MAME_BIN=/usr/games/mame
 Restart=on-failure
 RestartSec=5
 
