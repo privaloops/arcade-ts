@@ -461,6 +461,30 @@ function startBrowser(
   // connected phone's RemoteTab into the same local controllers that
   // the gamepad + overlay already drive.
   host.onCommand((cmd) => {
+    // Native bridge mode: MAME owns the screen and the inputs, so
+    // local PauseOverlay / saveController don't exist. Forward the
+    // remote action as a synthesized keystroke; the bridge takes care
+    // of injecting it via uinput so MAME sees a real key event.
+    if (bridgeRunning) {
+      switch (cmd.action) {
+        case "pause":   void bridge.sendInput("pause").catch(() => {}); return;
+        case "resume":  void bridge.sendInput("pause").catch(() => {}); return; // P toggles
+        case "save":    void bridge.sendInput("save").catch(() => {}); return;
+        case "load":    void bridge.sendInput("load").catch(() => {}); return;
+        case "quit":    void bridge.sendInput("quit").catch(() => {}); return;
+        case "volume": {
+          const level = (cmd.payload as { level?: number } | undefined)?.level;
+          if (typeof level !== "number") return;
+          // No way to set an absolute volume via MAME hotkeys — pulse
+          // the - / = keys just enough times to nudge perception.
+          // Replace later with mixer-level control if exact volume is
+          // required from the phone slider.
+          settings.update({ audio: { masterVolume: level } });
+          return;
+        }
+      }
+      return;
+    }
     switch (cmd.action) {
       case "pause":
         openPauseOverlay();

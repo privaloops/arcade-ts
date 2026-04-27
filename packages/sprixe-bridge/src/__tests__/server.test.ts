@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BridgeServer, type SystemRunner } from "../server.js";
 import { MameProcess, type SpawnedProcessLike, type Spawner } from "../mame.js";
+import { InputInjector, type Runner as InputRunner } from "../input.js";
 
 class FakeProcess implements SpawnedProcessLike {
   pid = 4242;
@@ -24,6 +25,7 @@ interface Harness {
   romDir: string;
   spawned: FakeProcess[];
   systemCalls: { cmd: string; args: string[] }[];
+  inputCalls: { cmd: string; args: string[] }[];
 }
 
 async function makeHarness(): Promise<Harness> {
@@ -38,9 +40,19 @@ async function makeHarness(): Promise<Harness> {
   const systemRunner: SystemRunner = async (cmd, args) => {
     systemCalls.push({ cmd, args: [...args] });
   };
+  const inputCalls: { cmd: string; args: string[] }[] = [];
+  const inputRunner: InputRunner = async (cmd, args) => {
+    inputCalls.push({ cmd, args: [...args] });
+  };
   const mame = new MameProcess({ spawner });
   // Port 0 = let the OS pick a free one so parallel tests don't collide.
-  const server = new BridgeServer({ port: 0, romDir, mame, systemRunner });
+  const server = new BridgeServer({
+    port: 0,
+    romDir,
+    mame,
+    systemRunner,
+    input: new InputInjector({ runner: inputRunner }),
+  });
   await server.start();
   // BridgeServer typed as fixed port; resolve actual via internals.
   const actualPort = (server as unknown as { server: { address: () => { port: number } } })
@@ -51,6 +63,7 @@ async function makeHarness(): Promise<Harness> {
     romDir,
     spawned,
     systemCalls,
+    inputCalls,
   };
 }
 
@@ -186,5 +199,34 @@ describe("BridgeServer", () => {
       cmd: "sudo",
       args: ["/usr/bin/systemctl", "poweroff"],
     });
+  });
+
+  it("POST /input quit forwards an ESC press to ydotool", async () => {
+    const res = await fetch(`${h.baseUrl}/input`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "quit" }),
+    });
+    expect(res.status).toBe(200);
+    expect(h.inputCalls[0]!.args).toEqual(["key", "1:1", "1:0"]);
+  });
+
+  it("POST /input rejects unknown actions with 400", async () => {
+    const res = await fetch(`${h.baseUrl}/input`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "self-destruct" }),
+    });
+    expect(res.status).toBe(400);
+    expect(h.inputCalls).toHaveLength(0);
+  });
+
+  it("POST /input rejects malformed JSON with 400", async () => {
+    const res = await fetch(`${h.baseUrl}/input`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "not json",
+    });
+    expect(res.status).toBe(400);
   });
 });

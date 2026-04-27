@@ -43,7 +43,8 @@ apt-get install -y --no-install-recommends \
     nodejs \
     npm \
     git \
-    wayvnc
+    wayvnc \
+    ydotool
 
 # ── /home/sprixe/start-kiosk.sh — the cage wrapper ──────────────────
 # `-d` makes cage exit when the inner command exits, so the
@@ -169,6 +170,39 @@ cat > /etc/chromium/policies/managed/sprixe-bridge.json <<'POLICY'
 POLICY
 chmod 644 /etc/chromium/policies/managed/sprixe-bridge.json
 
+# ydotoold + uinput access for synthesized keystrokes from the phone
+# remote. The bridge calls `ydotool key ...` which requires a running
+# ydotoold daemon owning a writable handle on /dev/uinput. We run the
+# daemon as the sprixe user so the bridge can talk to its socket
+# without root, and add sprixe to the input group + drop a udev rule
+# granting that group rw access on /dev/uinput.
+groupadd -f input
+usermod -aG input sprixe
+cat > /etc/udev/rules.d/60-sprixe-uinput.rules <<'UDEV'
+KERNEL=="uinput", GROUP="input", MODE="0660", OPTIONS+="static_node=uinput"
+UDEV
+udevadm control --reload-rules
+udevadm trigger --name-match=uinput
+
+cat > /etc/systemd/system/ydotoold.service <<'UNIT'
+[Unit]
+Description=ydotool daemon (synthesized input for sprixe-bridge)
+After=systemd-user-sessions.service
+
+[Service]
+Type=simple
+User=sprixe
+Group=input
+ExecStart=/usr/bin/ydotoold --socket-path=/run/sprixe/ydotoold.socket --socket-perm=0660
+RuntimeDirectory=sprixe
+RuntimeDirectoryMode=0750
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
 # Sudoers rule so the bridge (running as sprixe) can ask systemd to
 # reboot or power off without prompting for a password. Scoped to the
 # two specific commands — no broader privilege escalation.
@@ -201,6 +235,9 @@ Environment=SPRIXE_BRIDGE_MAME_BIN=/usr/games/mame
 # default cage exposes.
 Environment=XDG_RUNTIME_DIR=/run/user/1000
 Environment=WAYLAND_DISPLAY=wayland-0
+# ydotool reads this to find the ydotoold socket; matches the path
+# the ydotoold.service unit creates above.
+Environment=YDOTOOL_SOCKET=/run/sprixe/ydotoold.socket
 Restart=on-failure
 RestartSec=5
 
@@ -215,6 +252,7 @@ UNIT
 systemctl daemon-reload
 systemctl enable --now seatd.service
 systemctl enable --now avahi-daemon.service
+systemctl enable --now ydotoold.service
 systemctl enable --now sprixe-bridge.service
 
 touch "$MARKER"

@@ -93,6 +93,20 @@ export class BridgeClient {
   }
 
   /**
+   * Synthesize a keystroke that MAME picks up via uinput. Used to
+   * proxy phone-remote commands (pause/save/load/quit/volume) into
+   * the running emulator while Chromium sits in the background.
+   */
+  async sendInput(action: BridgeRemoteAction): Promise<void> {
+    const res = await fetch(`${this.baseUrl}/input`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action }),
+    });
+    if (!res.ok) throw new Error(`bridge /input failed: ${res.status}`);
+  }
+
+  /**
    * Subscribe to MAME lifecycle events via SSE. Returns a handle the
    * caller closes when it stops caring (e.g. on shutdown). EventSource
    * auto-reconnects on transient drops, which is what we want when
@@ -112,3 +126,11 @@ export class BridgeClient {
     return { close: () => es.close() };
   }
 }
+
+export type BridgeRemoteAction =
+  | "quit"
+  | "pause"
+  | "save"
+  | "load"
+  | "volume-up"
+  | "volume-down";

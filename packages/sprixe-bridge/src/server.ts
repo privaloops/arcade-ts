@@ -29,6 +29,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { MameProcess, type ExitReason } from "./mame.js";
+import { InputInjector, type RemoteAction } from "./input.js";
 
 export type SystemRunner = (cmd: string, args: readonly string[]) => Promise<void>;
 
@@ -53,6 +54,8 @@ export interface BridgeServerOptions {
   mame?: MameProcess;
   /** Inject a custom system command runner for tests (reboot/poweroff). */
   systemRunner?: SystemRunner;
+  /** Inject a custom InputInjector so tests don't actually call ydotool. */
+  input?: InputInjector;
 }
 
 export type BridgeEvent =
@@ -68,6 +71,7 @@ export class BridgeServer {
 
   private readonly mame: MameProcess;
   private readonly systemRunner: SystemRunner;
+  private readonly input: InputInjector;
   private readonly sseClients = new Set<ServerResponse>();
   private server: Server | null = null;
   private currentGameId: string | null = null;
@@ -77,6 +81,7 @@ export class BridgeServer {
     this.romDir = options.romDir ?? "/tmp/sprixe-roms";
     this.mame = options.mame ?? new MameProcess();
     this.systemRunner = options.systemRunner ?? defaultSystemRunner;
+    this.input = options.input ?? new InputInjector();
     this.mame.onExit((reason) => this.handleMameExit(reason));
   }
 
@@ -138,7 +143,42 @@ export class BridgeServer {
       await this.runSystem(res, ["sudo", "/usr/bin/systemctl", "poweroff"]);
       return;
     }
+    if (req.method === "POST" && url === "/input") {
+      await this.handleInput(req, res);
+      return;
+    }
     this.sendJson(res, 404, { error: "not found" });
+  }
+
+  private async handleInput(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    let body: Buffer;
+    try {
+      body = await readBody(req, 1024);
+    } catch (err) {
+      this.sendJson(res, 400, { error: err instanceof Error ? err.message : "body read failed" });
+      return;
+    }
+    let parsed: { action?: unknown };
+    try {
+      parsed = JSON.parse(body.toString("utf8")) as { action?: unknown };
+    } catch {
+      this.sendJson(res, 400, { error: "invalid JSON" });
+      return;
+    }
+    const action = parsed.action;
+    const valid: readonly RemoteAction[] = ["quit", "pause", "save", "load", "volume-up", "volume-down"];
+    if (typeof action !== "string" || !valid.includes(action as RemoteAction)) {
+      this.sendJson(res, 400, { error: `unknown action: ${String(action)}` });
+      return;
+    }
+    try {
+      await this.input.send(action as RemoteAction);
+      this.sendJson(res, 200, { ok: true });
+    } catch (err) {
+      this.sendJson(res, 500, {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   private async runSystem(res: ServerResponse, argv: readonly string[]): Promise<void> {
