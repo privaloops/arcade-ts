@@ -42,7 +42,8 @@ apt-get install -y --no-install-recommends \
     mame \
     nodejs \
     npm \
-    git
+    git \
+    wayvnc
 
 # ── /home/sprixe/start-kiosk.sh — the cage wrapper ──────────────────
 # `-d` makes cage exit when the inner command exits, so the
@@ -50,23 +51,37 @@ apt-get install -y --no-install-recommends \
 # auto-restart we'd otherwise need a watchdog for.
 cat > /home/sprixe/start-kiosk.sh <<'KIOSK'
 #!/bin/sh
-exec cage -d -- /usr/bin/chromium \
-    --ozone-platform=wayland \
-    --kiosk \
-    --no-first-run --disable-infobars \
-    --noerrdialogs --disable-translate \
-    --disable-session-crashed-bubble \
-    --disable-component-update \
-    --autoplay-policy=no-user-gesture-required \
-    --enable-features=SharedArrayBuffer \
-    --enable-gpu-rasterization --enable-zero-copy \
-    --ignore-gpu-blocklist \
-    --user-data-dir=/home/sprixe/.chromium \
-    --password-store=basic \
-    https://frontend.sprixe.dev/
+# Inner shell launches wayvnc inside cage's Wayland session (so it has
+# access to the screen capture protocol the package's stock vnc-user
+# service can't reach), then execs Chromium. wayvnc is killed when the
+# shell exits — which happens when Chromium quits and cage tears down
+# the session, so no zombie listener after a kiosk restart.
+exec cage -d -- /bin/sh -c '
+    wayvnc 0.0.0.0 5900 &
+    exec /usr/bin/chromium \
+        --ozone-platform=wayland \
+        --kiosk \
+        --no-first-run --disable-infobars \
+        --noerrdialogs --disable-translate \
+        --disable-session-crashed-bubble \
+        --disable-component-update \
+        --autoplay-policy=no-user-gesture-required \
+        --enable-features=SharedArrayBuffer \
+        --enable-gpu-rasterization --enable-zero-copy \
+        --ignore-gpu-blocklist \
+        --user-data-dir=/home/sprixe/.chromium \
+        --password-store=basic \
+        https://frontend.sprixe.dev/
+'
 KIOSK
 chown sprixe:sprixe /home/sprixe/start-kiosk.sh
 chmod 755 /home/sprixe/start-kiosk.sh
+
+# wayvnc's Debian packaging ships a systemd unit that runs as a
+# dedicated 'vnc' user — but that user has no access to the cage
+# Wayland socket, so the unit fails on boot and squats port 5900.
+# Disable it; we run wayvnc inside cage from start-kiosk.sh instead.
+systemctl disable wayvnc.service wayvnc-control.service 2>/dev/null || true
 
 # ── /home/sprixe/.bash_profile — auto-launch on tty1 ────────────────
 # Triggered by the autologin drop-in below. exec replaces the shell
