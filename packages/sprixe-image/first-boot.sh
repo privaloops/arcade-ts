@@ -194,6 +194,13 @@ ExecStart=/usr/bin/node /opt/sprixe/packages/sprixe-bridge/dist/index.js
 Environment=SPRIXE_BRIDGE_PORT=7777
 Environment=SPRIXE_BRIDGE_ROM_DIR=/home/sprixe/sprixe-roms
 Environment=SPRIXE_BRIDGE_MAME_BIN=/usr/games/mame
+# MAME spawned by the bridge needs the cage Wayland session to render
+# anything; without these two it errors out with
+# "XDG_RUNTIME_DIR is invalid or not set". The sprixe user's UID is
+# 1000 (set by Pi Imager + autologin), the wayland-0 socket is the
+# default cage exposes.
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=WAYLAND_DISPLAY=wayland-0
 Restart=on-failure
 RestartSec=5
 
