@@ -12,6 +12,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 export interface SpawnedProcessLike {
   pid?: number | undefined;
   on(event: "exit", cb: (code: number | null, signal: NodeJS.Signals | null) => void): void;
+  on(event: "error", cb: (err: Error) => void): void;
   kill(signal?: NodeJS.Signals): boolean;
 }
 
@@ -81,7 +82,20 @@ export class MameProcess {
       return;
     }
     this.current = proc;
+    // ENOENT (binary missing) is delivered as an 'error' event, not a
+    // synchronous throw — without a listener, Node escalates it to an
+    // unhandled exception and the whole bridge dies. Treat it the same
+    // way as a synchronous spawn failure: clear state, fire spawn-error.
+    let settled = false;
+    proc.on("error", (err) => {
+      if (settled) return;
+      settled = true;
+      this.current = null;
+      this.notifyExit({ kind: "spawn-error", error: err });
+    });
     proc.on("exit", (code, signal) => {
+      if (settled) return;
+      settled = true;
       this.current = null;
       this.notifyExit({ kind: "exit", code, signal });
     });

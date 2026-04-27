@@ -5,11 +5,17 @@
  */
 
 import { BridgeServer } from "./server.js";
+import { MameProcess } from "./mame.js";
 
 const port = Number(process.env.SPRIXE_BRIDGE_PORT ?? "7777");
 const romDir = process.env.SPRIXE_BRIDGE_ROM_DIR ?? "/tmp/sprixe-roms";
+// Debian ships MAME at /usr/games/mame which isn't in systemd's
+// default PATH, so a bare "mame" spawn fails with ENOENT under
+// systemd even though the binary is installed. Default to the
+// canonical Debian path; override via env var on other distros.
+const mameBin = process.env.SPRIXE_BRIDGE_MAME_BIN ?? "/usr/games/mame";
 
-const server = new BridgeServer({ port, romDir });
+const server = new BridgeServer({ port, romDir, mame: new MameProcess({ bin: mameBin }) });
 
 await server.start();
 console.log(`[sprixe-bridge] listening on http://127.0.0.1:${port} (romDir: ${romDir})`);
