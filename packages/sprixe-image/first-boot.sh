@@ -59,12 +59,10 @@ exec cage -d -- /usr/bin/chromium \
     --disable-component-update \
     --autoplay-policy=no-user-gesture-required \
     --enable-features=SharedArrayBuffer \
-    --disable-features=BlockInsecurePrivateNetworkRequests \
     --enable-gpu-rasterization --enable-zero-copy \
     --ignore-gpu-blocklist \
     --user-data-dir=/home/sprixe/.chromium \
     --password-store=basic \
-    --unsafely-treat-insecure-origin-as-secure=http://127.0.0.1:7777 \
     https://frontend.sprixe.dev/
 KIOSK
 chown sprixe:sprixe /home/sprixe/start-kiosk.sh
